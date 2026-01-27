@@ -87,25 +87,28 @@ def infer_project_key(max_events: int = 60) -> Optional[str]:
 
     paths: List[str] = []
 
+    def _norm_path(p: str) -> str:
+        return (p or "").replace("\\", "/")
+
     for e in reversed(events):
         data = e.data or {}
         cwd = data.get("cwd")
-        if isinstance(cwd, str) and "/" in cwd:
-            paths.append(cwd)
+        if isinstance(cwd, str) and ("/" in cwd or "\\" in cwd):
+            paths.append(_norm_path(cwd))
 
         payload = data.get("payload") or {}
         # Some adapters can put extra meta here
         meta = payload.get("meta") or {}
         for k in ("cwd", "workdir", "workspace"):
             v = meta.get(k)
-            if isinstance(v, str) and "/" in v:
-                paths.append(v)
+            if isinstance(v, str) and ("/" in v or "\\" in v):
+                paths.append(_norm_path(v))
 
         tool_input = e.tool_input or {}
         for k in ("path", "file_path", "filePath", "workdir", "cwd"):
             v = tool_input.get(k)
-            if isinstance(v, str) and "/" in v:
-                paths.append(v)
+            if isinstance(v, str) and ("/" in v or "\\" in v):
+                paths.append(_norm_path(v))
 
     if not paths:
         return None

@@ -206,6 +206,18 @@ def get_contextual_insights(query: str, limit: int = 6) -> List[Dict[str, Any]]:
     return deduped[:limit]
 
 
+def get_relevant_skills(query: str, limit: int = 3) -> List[Dict[str, Any]]:
+    """Retrieve relevant skills from the skills registry (lightweight)."""
+    if not query:
+        return []
+    try:
+        from lib.skills_router import recommend_skills
+        return recommend_skills(query, limit=limit)
+    except Exception as e:
+        log_debug("bridge", "get_relevant_skills failed", e)
+        return []
+
+
 def _recognition_snippet(query: str, contextual: List[Dict[str, Any]], lessons: List[Dict[str, Any]]) -> str:
     """Generate a tiny, optional personalization line.
 
@@ -241,6 +253,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
         query = infer_current_focus()
 
     contextual = get_contextual_insights(query, limit=6) if query else []
+    skills = get_relevant_skills(query, limit=3) if query else []
     insights = get_high_value_insights()
     lessons = get_recent_lessons()
     opinions = get_strong_opinions()
@@ -270,6 +283,24 @@ def generate_active_context(query: Optional[str] = None) -> str:
                 lines.append(f"- [{cat}] {txt}")
             else:
                 lines.append(f"- [mind:{cat}] {txt}")
+        lines.append("")
+
+    if skills:
+        lines.append("## Relevant Skills")
+        for s in skills:
+            sid = s.get("skill_id") or s.get("name") or "unknown-skill"
+            desc = (s.get("description") or "").strip()
+            if len(desc) > 120:
+                desc = desc[:117] + "..."
+            owns = s.get("owns") or []
+            delegates = s.get("delegates") or []
+            parts = []
+            if owns:
+                parts.append(f"owns: {', '.join(owns[:2])}")
+            if delegates:
+                parts.append(f"delegates: {', '.join(delegates[:2])}")
+            suffix = f" ({'; '.join(parts)})" if parts else ""
+            lines.append(f"- [{sid}] {desc}{suffix}".rstrip())
         lines.append("")
 
     # Micro-personalization (optional)
