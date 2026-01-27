@@ -36,9 +36,6 @@ class CognitiveCategory(Enum):
     META_LEARNING = "meta_learning"
     COMMUNICATION = "communication"
     CREATIVITY = "creativity"
-    # Agent coordination categories
-    COORDINATION = "coordination"      # How agents work together
-    GOAL_PROGRESS = "goal_progress"    # How goals are achieved
 
 
 @dataclass
