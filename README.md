@@ -63,6 +63,12 @@ Mind provides persistent semantic memory. Without it, Spark still works but lear
 python -m spark.cli status
 ```
 
+Local dev alternative (from repo root):
+
+```bash
+python cli.py status
+```
+
 ---
 
 ## Configuration
