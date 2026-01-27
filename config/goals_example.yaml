@@ -1,0 +1,194 @@
+# Spark Goal Hierarchy Example
+#
+# Goals cascade from company -> team -> agent -> task
+# This file shows example structures - modify for your business
+#
+# API Usage:
+#   POST /goal {"title": "...", "level": "company", "description": "..."}
+#   POST /goal {"title": "...", "level": "team", "parent_goal_id": "..."}
+
+# ============= COMPANY LEVEL =============
+# Big-picture objectives that the business is working toward
+# These rarely change (quarterly/yearly)
+
+company_goals:
+  - title: "Launch MVP by Q2"
+    description: "Ship minimum viable product to first 100 users"
+    success_criteria:
+      - "Core features working"
+      - "100 active users"
+      - "< 5 critical bugs"
+
+  - title: "Achieve Product-Market Fit"
+    description: "Validate that users love the product and will pay"
+    success_criteria:
+      - "40% say 'very disappointed' without product"
+      - "NPS > 40"
+      - "Organic growth > 20%"
+
+# ============= TEAM LEVEL =============
+# What cross-functional teams are working on
+# These change monthly/sprint-based
+
+team_goals:
+  - title: "Build Authentication System"
+    description: "Complete auth flow with OAuth, MFA support"
+    parent: "Launch MVP by Q2"
+    assigned_agents:
+      - auth-architect
+      - frontend-dev
+      - security-reviewer
+    success_criteria:
+      - "OAuth2 working with Google/GitHub"
+      - "MFA optional but functional"
+      - "Security audit passed"
+
+  - title: "Create Dashboard UI"
+    description: "User dashboard with real-time updates"
+    parent: "Launch MVP by Q2"
+    assigned_agents:
+      - ui-designer
+      - frontend-dev
+      - ux-reviewer
+    success_criteria:
+      - "Dashboard loads < 2s"
+      - "Real-time updates working"
+      - "Mobile responsive"
+
+# ============= AGENT LEVEL =============
+# What individual agents are responsible for
+# These change daily/hourly
+
+agent_goals:
+  - title: "Implement OAuth Provider Integration"
+    description: "Add Google and GitHub as OAuth providers"
+    parent: "Build Authentication System"
+    assigned_agent: auth-architect
+    handoffs_to:
+      - frontend-dev  # After backend ready
+      - security-reviewer  # For review
+
+  - title: "Create Login Component"
+    description: "React component for login/signup flow"
+    parent: "Build Authentication System"
+    assigned_agent: frontend-dev
+    depends_on:
+      - "Implement OAuth Provider Integration"
+
+# ============= TASK LEVEL =============
+# Atomic units of work
+# These are what agents actually execute
+
+task_goals:
+  - title: "Configure Google OAuth credentials"
+    parent: "Implement OAuth Provider Integration"
+    estimated_duration: "30min"
+
+  - title: "Write OAuth callback handler"
+    parent: "Implement OAuth Provider Integration"
+    estimated_duration: "2h"
+
+  - title: "Add session persistence"
+    parent: "Implement OAuth Provider Integration"
+    estimated_duration: "1h"
+
+# ============= COORDINATION PATTERNS =============
+# Learned patterns that Spark discovered work well
+# These are auto-generated but you can seed them
+
+coordination_patterns:
+  - name: "auth-to-frontend-to-security"
+    sequence:
+      - auth-architect
+      - frontend-dev
+      - security-reviewer
+    when: "Authentication features"
+    success_rate: 0.92
+    notes: "Always have security review auth changes"
+
+  - name: "design-to-frontend-to-ux"
+    sequence:
+      - ui-designer
+      - frontend-dev
+      - ux-reviewer
+    when: "UI features"
+    success_rate: 0.85
+    notes: "UX review catches usability issues early"
+
+# ============= AGENT REGISTRY =============
+# Agents that can participate in coordination
+# Register via: POST /agent {...}
+
+agents:
+  - agent_id: auth-architect
+    name: "Authentication Architect"
+    capabilities:
+      - oauth
+      - jwt
+      - security
+      - backend
+    specialization: authentication
+
+  - agent_id: frontend-dev
+    name: "Frontend Developer"
+    capabilities:
+      - react
+      - typescript
+      - css
+      - ui
+    specialization: frontend
+
+  - agent_id: security-reviewer
+    name: "Security Reviewer"
+    capabilities:
+      - security-audit
+      - penetration-testing
+      - compliance
+    specialization: security
+
+  - agent_id: ui-designer
+    name: "UI Designer"
+    capabilities:
+      - figma
+      - design-systems
+      - accessibility
+    specialization: design
+
+  - agent_id: ux-reviewer
+    name: "UX Reviewer"
+    capabilities:
+      - usability-testing
+      - user-research
+      - heuristics
+    specialization: ux
+
+# ============= HOW TO USE =============
+#
+# 1. Register agents:
+#    curl -X POST http://127.0.0.1:8787/agent \
+#      -H "Content-Type: application/json" \
+#      -d '{"name": "Auth Architect", "capabilities": ["oauth", "jwt"], "specialization": "auth"}'
+#
+# 2. Create company goal:
+#    curl -X POST http://127.0.0.1:8787/goal \
+#      -d '{"title": "Launch MVP", "level": "company", "description": "..."}'
+#
+# 3. Create team goal under company:
+#    curl -X POST http://127.0.0.1:8787/goal \
+#      -d '{"title": "Build Auth", "level": "team", "parent_goal_id": "<company_goal_id>"}'
+#
+# 4. Record handoffs:
+#    curl -X POST http://127.0.0.1:8787/handoff \
+#      -d '{"from_agent": "auth-architect", "to_agent": "frontend-dev", "context": {...}}'
+#
+# 5. Complete handoffs (Spark learns from outcomes):
+#    curl -X POST http://127.0.0.1:8787/handoff/complete \
+#      -d '{"handoff_id": "...", "success": true, "notes": "Clean handoff"}'
+#
+# 6. Get recommendations:
+#    curl -X POST http://127.0.0.1:8787/orchestration/recommend \
+#      -d '{"current_agent": "auth-architect", "task_type": "frontend"}'
+#
+# 7. Check team effectiveness:
+#    curl -X POST http://127.0.0.1:8787/orchestration/team-effectiveness \
+#      -d '{"agent_ids": ["auth-architect", "frontend-dev", "security-reviewer"]}'
