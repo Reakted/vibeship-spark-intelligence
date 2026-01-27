@@ -1,0 +1,502 @@
+"""
+Spark Cognitive Learner: Learning to THINK, not just to DO.
+
+This module captures higher-level insights that make any LLM more intelligent:
+- How to think, not just what to do
+- Why things work, not just that they work
+- When to apply knowledge, not just what knowledge exists
+
+Learning Categories:
+1. SELF-AWARENESS - When am I overconfident? What are my blind spots?
+2. USER_UNDERSTANDING - Communication preferences, expertise, working style
+3. REASONING - Why did an approach work, not just that it worked
+4. CONTEXT - When does a pattern apply vs not apply?
+5. WISDOM - General principles that transcend specific tools
+6. META_LEARNING - How do I learn best? When should I ask vs act?
+7. COMMUNICATION - What explanations work well?
+8. CREATIVITY - Novel problem-solving approaches
+"""
+
+import json
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from datetime import datetime
+from enum import Enum
+
+
+class CognitiveCategory(Enum):
+    """Categories of cognitive learning."""
+    SELF_AWARENESS = "self_awareness"
+    USER_UNDERSTANDING = "user_understanding"
+    REASONING = "reasoning"
+    CONTEXT = "context"
+    WISDOM = "wisdom"
+    META_LEARNING = "meta_learning"
+    COMMUNICATION = "communication"
+    CREATIVITY = "creativity"
+
+
+@dataclass
+class CognitiveInsight:
+    """A higher-level insight, not just an operational pattern."""
+    category: CognitiveCategory
+    insight: str
+    evidence: List[str]
+    confidence: float
+    context: str
+    counter_examples: List[str] = field(default_factory=list)
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    times_validated: int = 0
+    times_contradicted: int = 0
+    promoted: bool = False
+    promoted_to: Optional[str] = None
+
+    @property
+    def reliability(self) -> float:
+        """How reliable is this insight based on validation history?"""
+        total = self.times_validated + self.times_contradicted
+        if total == 0:
+            return self.confidence
+        return self.times_validated / total
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "category": self.category.value,
+            "insight": self.insight,
+            "evidence": self.evidence,
+            "confidence": self.confidence,
+            "context": self.context,
+            "counter_examples": self.counter_examples,
+            "created_at": self.created_at,
+            "times_validated": self.times_validated,
+            "times_contradicted": self.times_contradicted,
+            "promoted": self.promoted,
+            "promoted_to": self.promoted_to,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CognitiveInsight":
+        """Create from dictionary."""
+        return cls(
+            category=CognitiveCategory(data["category"]),
+            insight=data["insight"],
+            evidence=data["evidence"],
+            confidence=data["confidence"],
+            context=data["context"],
+            counter_examples=data.get("counter_examples", []),
+            created_at=data.get("created_at", datetime.now().isoformat()),
+            times_validated=data.get("times_validated", 0),
+            times_contradicted=data.get("times_contradicted", 0),
+            promoted=data.get("promoted", False),
+            promoted_to=data.get("promoted_to"),
+        )
+
+
+class CognitiveLearner:
+    """
+    Learns higher-level cognitive patterns, not just operational ones.
+    
+    The goal: Make the LLM more intelligent over time by learning:
+    - How to think, not just what to do
+    - Why things work, not just that they work
+    - When to apply knowledge, not just what knowledge exists
+    """
+
+    INSIGHTS_FILE = Path.home() / ".spark" / "cognitive_insights.json"
+
+    def __init__(self):
+        self.insights: Dict[str, CognitiveInsight] = {}
+        self._load_insights()
+
+    def _load_insights(self):
+        """Load existing cognitive insights."""
+        if self.INSIGHTS_FILE.exists():
+            try:
+                data = json.loads(self.INSIGHTS_FILE.read_text())
+                for key, info in data.items():
+                    self.insights[key] = CognitiveInsight.from_dict(info)
+            except Exception as e:
+                print(f"[SPARK] Error loading insights: {e}")
+
+    def _save_insights(self):
+        """Save cognitive insights to disk."""
+        self.INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = {key: insight.to_dict() for key, insight in self.insights.items()}
+        self.INSIGHTS_FILE.write_text(json.dumps(data, indent=2))
+
+    def _generate_key(self, category: CognitiveCategory, identifier: str) -> str:
+        """Generate a unique key for an insight."""
+        return f"{category.value}:{identifier[:50]}"
+
+    # =========================================================================
+    # SELF-AWARENESS LEARNING
+    # =========================================================================
+
+    def learn_overconfidence(self, task_type: str, predicted_success: bool,
+                             actual_success: bool, context: str):
+        """Learn when I'm overconfident."""
+        if predicted_success and not actual_success:
+            key = self._generate_key(CognitiveCategory.SELF_AWARENESS, f"overconfident:{task_type}")
+            if key in self.insights:
+                self.insights[key].times_contradicted += 1
+                self.insights[key].evidence.append(context[:200])
+                # Keep only last 10 evidence items
+                self.insights[key].evidence = self.insights[key].evidence[-10:]
+            else:
+                self.insights[key] = CognitiveInsight(
+                    category=CognitiveCategory.SELF_AWARENESS,
+                    insight=f"I tend to be overconfident about {task_type} tasks",
+                    evidence=[context[:200]],
+                    confidence=0.6,
+                    context=f"When attempting {task_type}"
+                )
+            self._save_insights()
+            return self.insights[key]
+
+    def learn_struggle_area(self, task_type: str, failure_reason: str):
+        """Learn what types of tasks I struggle with."""
+        key = self._generate_key(CognitiveCategory.SELF_AWARENESS, f"struggle:{task_type}")
+        if key in self.insights:
+            self.insights[key].times_validated += 1
+            if failure_reason not in self.insights[key].evidence:
+                self.insights[key].evidence.append(failure_reason[:200])
+                self.insights[key].evidence = self.insights[key].evidence[-10:]
+        else:
+            self.insights[key] = CognitiveInsight(
+                category=CognitiveCategory.SELF_AWARENESS,
+                insight=f"I struggle with {task_type} tasks",
+                evidence=[failure_reason[:200]],
+                confidence=0.5,
+                context=f"Tasks involving {task_type}"
+            )
+        self._save_insights()
+        return self.insights[key]
+
+    def learn_blind_spot(self, what_i_missed: str, how_i_discovered: str):
+        """Learn about my blind spots - things I consistently miss."""
+        key = self._generate_key(CognitiveCategory.SELF_AWARENESS, f"blindspot:{what_i_missed}")
+        self.insights[key] = CognitiveInsight(
+            category=CognitiveCategory.SELF_AWARENESS,
+            insight=f"Blind spot: I tend to miss {what_i_missed}",
+            evidence=[how_i_discovered],
+            confidence=0.7,
+            context="During analysis and planning"
+        )
+        self._save_insights()
+        return self.insights[key]
+
+    # =========================================================================
+    # USER UNDERSTANDING
+    # =========================================================================
+
+    def learn_user_preference(self, preference_type: str, preference_value: str,
+                              evidence: str):
+        """Learn about user preferences."""
+        key = self._generate_key(CognitiveCategory.USER_UNDERSTANDING, f"pref:{preference_type}")
+        if key in self.insights:
+            self.insights[key].times_validated += 1
+            self.insights[key].evidence.append(evidence[:200])
+            self.insights[key].evidence = self.insights[key].evidence[-10:]
+        else:
+            self.insights[key] = CognitiveInsight(
+                category=CognitiveCategory.USER_UNDERSTANDING,
+                insight=f"User prefers {preference_value} for {preference_type}",
+                evidence=[evidence[:200]],
+                confidence=0.7,
+                context=f"When {preference_type} is relevant"
+            )
+        self._save_insights()
+        return self.insights[key]
+
+    def learn_user_expertise(self, domain: str, level: str, evidence: str):
+        """Learn about user's expertise level in a domain."""
+        key = self._generate_key(CognitiveCategory.USER_UNDERSTANDING, f"expertise:{domain}")
+        self.insights[key] = CognitiveInsight(
+            category=CognitiveCategory.USER_UNDERSTANDING,
+            insight=f"User has {level} expertise in {domain}",
+            evidence=[evidence[:200]],
+            confidence=0.6,
+            context=f"When discussing {domain}"
+        )
+        self._save_insights()
+        return self.insights[key]
+
+    def learn_communication_style(self, style_aspect: str, preference: str):
+        """Learn how user prefers to communicate."""
+        key = self._generate_key(CognitiveCategory.USER_UNDERSTANDING, f"comm:{style_aspect}")
+        self.insights[key] = CognitiveInsight(
+            category=CognitiveCategory.USER_UNDERSTANDING,
+            insight=f"User communication style: {style_aspect} = {preference}",
+            evidence=[],
+            confidence=0.7,
+            context="All interactions"
+        )
+        self._save_insights()
+        return self.insights[key]
+
+    # =========================================================================
+    # REASONING PATTERNS
+    # =========================================================================
+
+    def learn_why(self, what_worked: str, why_it_worked: str, context: str):
+        """Learn WHY something worked, not just that it worked."""
+        key = self._generate_key(CognitiveCategory.REASONING, f"why:{what_worked}")
+        self.insights[key] = CognitiveInsight(
+            category=CognitiveCategory.REASONING,
+            insight=f"{what_worked} works because {why_it_worked}",
+            evidence=[context[:200]],
+            confidence=0.7,
+            context=context
+        )
+        self._save_insights()
+        return self.insights[key]
+
+    def learn_principle(self, principle: str, examples: List[str]):
+        """Learn a general principle that applies across contexts."""
+        key = self._generate_key(CognitiveCategory.WISDOM, f"principle:{principle}")
+        self.insights[key] = CognitiveInsight(
+            category=CognitiveCategory.WISDOM,
+            insight=principle,
+            evidence=examples[:5],
+            confidence=0.8,
+            context="General principle"
+        )
+        self._save_insights()
+        return self.insights[key]
+
+    def learn_assumption_failure(self, assumption: str, reality: str, context: str):
+        """Learn when an assumption proved wrong."""
+        key = self._generate_key(CognitiveCategory.REASONING, f"bad_assumption:{assumption}")
+        self.insights[key] = CognitiveInsight(
+            category=CognitiveCategory.REASONING,
+            insight=f"Assumption '{assumption}' often wrong. Reality: {reality}",
+            evidence=[context[:200]],
+            confidence=0.8,
+            context=f"When making assumptions about {assumption[:30]}"
+        )
+        self._save_insights()
+        return self.insights[key]
+
+    # =========================================================================
+    # CONTEXT INTELLIGENCE
+    # =========================================================================
+
+    def learn_context_boundary(self, pattern: str, applies_when: str,
+                               does_not_apply_when: str):
+        """Learn when a pattern applies vs doesn't apply."""
+        key = self._generate_key(CognitiveCategory.CONTEXT, f"boundary:{pattern}")
+        self.insights[key] = CognitiveInsight(
+            category=CognitiveCategory.CONTEXT,
+            insight=f"'{pattern}' applies when {applies_when}",
+            evidence=[applies_when],
+            confidence=0.7,
+            context=applies_when,
+            counter_examples=[does_not_apply_when]
+        )
+        self._save_insights()
+        return self.insights[key]
+
+    def learn_signal(self, signal: str, what_it_indicates: str):
+        """Learn what signals indicate about a situation."""
+        key = self._generate_key(CognitiveCategory.CONTEXT, f"signal:{signal}")
+        self.insights[key] = CognitiveInsight(
+            category=CognitiveCategory.CONTEXT,
+            insight=f"When I see '{signal}', it usually means {what_it_indicates}",
+            evidence=[],
+            confidence=0.6,
+            context=f"Recognizing {signal}"
+        )
+        self._save_insights()
+        return self.insights[key]
+
+    # =========================================================================
+    # META-LEARNING
+    # =========================================================================
+
+    def learn_learning_preference(self, what_helps_me_learn: str, evidence: str):
+        """Learn about how I learn best."""
+        key = self._generate_key(CognitiveCategory.META_LEARNING, f"learning:{what_helps_me_learn}")
+        self.insights[key] = CognitiveInsight(
+            category=CognitiveCategory.META_LEARNING,
+            insight=f"I learn better when {what_helps_me_learn}",
+            evidence=[evidence],
+            confidence=0.7,
+            context="Learning and improvement"
+        )
+        self._save_insights()
+        return self.insights[key]
+
+    def learn_ask_vs_act(self, situation: str, should_ask: bool, reasoning: str):
+        """Learn when to ask the user vs just act."""
+        action = "ask first" if should_ask else "act directly"
+        key = self._generate_key(CognitiveCategory.META_LEARNING, f"ask_act:{situation}")
+        self.insights[key] = CognitiveInsight(
+            category=CognitiveCategory.META_LEARNING,
+            insight=f"In '{situation}' situations, I should {action}",
+            evidence=[reasoning],
+            confidence=0.7,
+            context=situation
+        )
+        self._save_insights()
+        return self.insights[key]
+
+    # =========================================================================
+    # COMMUNICATION
+    # =========================================================================
+
+    def learn_explanation_success(self, topic: str, explanation_style: str,
+                                  was_effective: bool):
+        """Learn what explanation styles work for what topics."""
+        if was_effective:
+            key = self._generate_key(CognitiveCategory.COMMUNICATION, f"explain:{topic}")
+            self.insights[key] = CognitiveInsight(
+                category=CognitiveCategory.COMMUNICATION,
+                insight=f"For {topic}, explain using {explanation_style}",
+                evidence=[],
+                confidence=0.7,
+                context=f"When explaining {topic}"
+            )
+            self._save_insights()
+            return self.insights[key]
+
+    # =========================================================================
+    # RETRIEVAL AND QUERY
+    # =========================================================================
+
+    def get_insights_for_context(self, context: str, limit: int = 10) -> List[CognitiveInsight]:
+        """Get relevant cognitive insights for a given context.
+
+        Lightweight ranking:
+        - Prefer direct string matches (query in insight.context/insight text)
+        - Then reliability/validations
+        """
+        relevant: List[tuple[float, CognitiveInsight]] = []
+        context_lower = (context or "").lower()
+
+        for insight in self.insights.values():
+            ic = (insight.context or "").lower()
+            ii = (insight.insight or "").lower()
+
+            hit = (
+                (ic and ic in context_lower) or
+                (context_lower and context_lower in ic) or
+                any(word in context_lower for word in ii.split()[:8])
+            )
+            if not hit:
+                continue
+
+            match_score = 0.0
+            if context_lower and context_lower in ic:
+                match_score += 1.0
+            if context_lower and context_lower in ii:
+                match_score += 0.7
+
+            relevant.append((match_score, insight))
+
+        relevant.sort(key=lambda t: (t[0], t[1].reliability, t[1].times_validated), reverse=True)
+        return [i for _, i in relevant[:limit]]
+
+    def add_insight(self, category: CognitiveCategory, insight: str, 
+                    context: str = "", confidence: float = 0.7) -> CognitiveInsight:
+        """Add a generic insight directly."""
+        # Generate key from first few words of insight
+        key_part = insight[:40].replace(" ", "_").lower()
+        key = self._generate_key(category, key_part)
+        
+        if key in self.insights:
+            # Update existing
+            self.insights[key].times_validated += 1
+            if context and context not in self.insights[key].evidence:
+                self.insights[key].evidence.append(context[:200])
+                self.insights[key].evidence = self.insights[key].evidence[-10:]
+        else:
+            self.insights[key] = CognitiveInsight(
+                category=category,
+                insight=insight,
+                evidence=[context[:200]] if context else [],
+                confidence=confidence,
+                context=context[:100] if context else ""
+            )
+        
+        self._save_insights()
+        return self.insights[key]
+
+    def get_self_awareness_insights(self) -> List[CognitiveInsight]:
+        """Get all self-awareness insights."""
+        return [i for i in self.insights.values()
+                if i.category == CognitiveCategory.SELF_AWARENESS]
+
+    def get_user_insights(self) -> List[CognitiveInsight]:
+        """Get all user understanding insights."""
+        return [i for i in self.insights.values()
+                if i.category == CognitiveCategory.USER_UNDERSTANDING]
+
+    def get_wisdom(self) -> List[CognitiveInsight]:
+        """Get general principles and wisdom."""
+        return [i for i in self.insights.values()
+                if i.category == CognitiveCategory.WISDOM]
+
+    def get_unpromoted(self) -> List[CognitiveInsight]:
+        """Get insights that haven't been promoted yet."""
+        return [i for i in self.insights.values() if not i.promoted]
+
+    def get_promotable(self, min_reliability: float = 0.7, min_validations: int = 3) -> List[CognitiveInsight]:
+        """Get insights ready for promotion."""
+        return [
+            i for i in self.insights.values()
+            if not i.promoted
+            and i.reliability >= min_reliability
+            and i.times_validated >= min_validations
+        ]
+
+    def mark_promoted(self, insight_key: str, promoted_to: str):
+        """Mark an insight as promoted."""
+        if insight_key in self.insights:
+            self.insights[insight_key].promoted = True
+            self.insights[insight_key].promoted_to = promoted_to
+            self._save_insights()
+
+    def format_for_injection(self, insights: List[CognitiveInsight]) -> str:
+        """Format insights for context injection."""
+        if not insights:
+            return ""
+
+        lines = ["## Cognitive Insights"]
+        for insight in insights[:10]:
+            reliability_str = f"({insight.reliability:.0%} reliable)" if insight.times_validated > 0 else ""
+            lines.append(f"- {insight.insight} {reliability_str}")
+
+        return "\n".join(lines)
+
+    def get_stats(self) -> Dict:
+        """Get statistics about cognitive learnings."""
+        by_category = {}
+        for insight in self.insights.values():
+            cat = insight.category.value
+            by_category[cat] = by_category.get(cat, 0) + 1
+
+        total = len(self.insights)
+        avg_reliability = sum(i.reliability for i in self.insights.values()) / max(total, 1)
+        promoted_count = sum(1 for i in self.insights.values() if i.promoted)
+
+        return {
+            "total_insights": total,
+            "by_category": by_category,
+            "avg_reliability": avg_reliability,
+            "promoted_count": promoted_count,
+            "unpromoted_count": total - promoted_count,
+        }
+
+
+# ============= Singleton =============
+_cognitive_learner: Optional[CognitiveLearner] = None
+
+def get_cognitive_learner() -> CognitiveLearner:
+    """Get the global cognitive learner instance."""
+    global _cognitive_learner
+    if _cognitive_learner is None:
+        _cognitive_learner = CognitiveLearner()
+    return _cognitive_learner
