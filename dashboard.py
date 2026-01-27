@@ -10,7 +10,7 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import threading
 import webbrowser
 from typing import Dict
@@ -209,6 +209,8 @@ def get_ops_data() -> Dict:
     effectiveness = _load_json(SKILLS_EFFECTIVENESS_FILE)
     needs_attention = []
     top_performers = []
+    usage_stats = []
+    no_signal = []
     for s in skills:
         sid = s.get("skill_id") or s.get("name")
         if not sid:
@@ -218,6 +220,7 @@ def get_ops_data() -> Dict:
         fail = int(stats.get("fail", 0))
         total = success + fail
         if total == 0:
+            no_signal.append(sid)
             continue
         rate = success / max(total, 1)
         entry = {
@@ -227,6 +230,7 @@ def get_ops_data() -> Dict:
             "success": success,
             "fail": fail,
         }
+        usage_stats.append(entry)
         if fail >= 1 and rate < 0.55:
             needs_attention.append(entry)
         if total >= 2 and rate >= 0.7:
@@ -234,6 +238,8 @@ def get_ops_data() -> Dict:
 
     needs_attention.sort(key=lambda x: (x["rate"], -x["fail"]))
     top_performers.sort(key=lambda x: (-x["rate"], -x["total"]))
+    usage_stats.sort(key=lambda x: (-x["total"], -x["rate"]))
+    no_signal_sorted = sorted(no_signal)
 
     agents_raw = _load_json(ORCH_AGENTS_FILE)
     if isinstance(agents_raw, dict):
@@ -284,6 +290,9 @@ def get_ops_data() -> Dict:
         "categories": categories,
         "needs_attention": needs_attention[:8],
         "top_performers": top_performers[:8],
+        "most_used": usage_stats[:8],
+        "no_signal_skills": no_signal_sorted[:10],
+        "no_signal_count": len(no_signal_sorted),
         "index_generated_at": index_data.get("generated_at") or "",
         "agents": agents,
         "recent_handoffs": recent_handoffs,
@@ -1461,37 +1470,40 @@ def generate_html():
         return res.json();
       }}
 
+      function applyStatus(data) {{
+        if ($('updated-at')) $('updated-at').textContent = data.timestamp || '';
+        if ($('surprises-total')) $('surprises-total').textContent = `${{data.surprises?.total ?? 0}} total`;
+
+        const recent = data.surprises?.recent || [];
+        const list = $('surprises-list');
+        const empty = $('surprises-empty');
+
+        if (recent.length === 0) {{
+          if (list) list.remove();
+          if (empty) empty.style.display = '';
+        }} else {{
+          if (empty) empty.style.display = 'none';
+          if (!list) {{
+            // create list container if it doesn't exist yet
+            const wrap = document.createElement('div');
+            wrap.id = 'surprises-list';
+            wrap.className = 'surprise-list';
+            const body = $('surprises-body') || document.querySelector('.card-body');
+            body.appendChild(wrap);
+          }}
+          const l = $('surprises-list');
+          if (l) {{
+            l.innerHTML = renderSurprises(recent);
+          }}
+        }}
+      }}
+
       async function tick() {{
         try {{
           const res = await fetch('/api/status', {{ cache: 'no-store' }});
           if (!res.ok) return;
           const data = await res.json();
-
-          if ($('updated-at')) $('updated-at').textContent = data.timestamp || '';
-          if ($('surprises-total')) $('surprises-total').textContent = `${{data.surprises?.total ?? 0}} total`;
-
-          const recent = data.surprises?.recent || [];
-          const list = $('surprises-list');
-          const empty = $('surprises-empty');
-
-          if (recent.length === 0) {{
-            if (list) list.remove();
-            if (empty) empty.style.display = '';
-          }} else {{
-            if (empty) empty.style.display = 'none';
-            if (!list) {{
-              // create list container if it doesn't exist yet
-              const wrap = document.createElement('div');
-              wrap.id = 'surprises-list';
-              wrap.className = 'surprise-list';
-              const body = $('surprises-body') || document.querySelector('.card-body');
-              body.appendChild(wrap);
-            }}
-            const l = $('surprises-list');
-            if (l) {{
-              l.innerHTML = renderSurprises(recent);
-            }}
-          }}
+          applyStatus(data);
         }} catch (e) {{
           // best-effort; keep UI stable
         }}
@@ -1535,9 +1547,29 @@ def generate_html():
         }});
       }}
 
-      tick();
+      function startStream() {{
+        if (!window.EventSource) {{
+          tick();
+          setInterval(tick, 2000);
+          return;
+        }}
+        const es = new EventSource('/api/status/stream');
+        es.onmessage = (event) => {{
+          try {{
+            const data = JSON.parse(event.data || '{{}}');
+            applyStatus(data);
+          }} catch (e) {{
+            // ignore bad payloads
+          }}
+        }};
+        es.onerror = () => {{
+          es.close();
+          setTimeout(startStream, 3000);
+        }};
+      }}
+
+      startStream();
       wireTaste();
-      setInterval(tick, 2000);
     </script>
 </body>
 </html>'''
@@ -1555,6 +1587,9 @@ def generate_ops_html():
     recent_handoffs = data.get("recent_handoffs", [])
     best_pairs = data.get("best_pairs", [])
     risky_pairs = data.get("risky_pairs", [])
+    most_used = data.get("most_used", [])
+    no_signal_skills = data.get("no_signal_skills", [])
+    no_signal_count = data.get("no_signal_count", 0)
 
     idx_raw = (data.get("index_generated_at") or "").strip()
     idx_label = "unknown"
@@ -1598,11 +1633,30 @@ def generate_ops_html():
     if not top_html:
         top_html = '<div class="empty">No strong performers yet.</div>'
 
+    most_html = ""
+    for item in most_used:
+        total = item.get("total", 0)
+        rate = int(item.get("rate", 0) * 100)
+        most_html += f'''
+        <div class="ops-row">
+            <span class="ops-name">{item.get("skill", "unknown")}</span>
+            <span class="ops-meta">{total} uses</span>
+            <span class="pill">{rate}%</span>
+        </div>'''
+    if not most_html:
+        most_html = '<div class="empty">No usage data yet.</div>'
+
     cat_html = ""
     for cat, count in sorted(categories.items(), key=lambda x: (-x[1], x[0])):
         cat_html += f'<span class="pill">{cat} <span class="pill-count">{count}</span></span>'
     if not cat_html:
         cat_html = '<span class="muted">No skill index found.</span>'
+
+    no_signal_html = ""
+    for name in no_signal_skills:
+        no_signal_html += f'<span class="pill">{name}</span>'
+    if not no_signal_html:
+        no_signal_html = '<span class="muted">All skills have signals.</span>'
 
     agents_sorted = sorted(
         agents,
@@ -1910,6 +1964,200 @@ def generate_ops_html():
         }
     """
 
+    ops_js = """
+      const $ = (id) => document.getElementById(id);
+
+      function esc(s) {
+        return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      }
+
+      function setHTML(id, html) {
+        const el = $(id);
+        if (el) el.innerHTML = html;
+      }
+
+      function fmtTime(ts) {
+        try {
+          const d = new Date((Number(ts) || 0) * 1000);
+          return d.toLocaleTimeString('en-US', { hour12: false });
+        } catch (e) {
+          return '--:--:--';
+        }
+      }
+
+      function renderNeeds(list) {
+        if (!Array.isArray(list) || list.length === 0) return '<div class="empty">No skills need attention yet.</div>';
+        return list.map((item) => {
+          const rate = Math.round((item.rate || 0) * 100);
+          const success = item.success || 0;
+          const total = item.total || 0;
+          return `
+            <div class="ops-row">
+              <span class="ops-name">${esc(item.skill || 'unknown')}</span>
+              <span class="ops-meta">${rate}% (${success}/${total})</span>
+              <span class="pill bad">Needs attention</span>
+            </div>`;
+        }).join('');
+      }
+
+      function renderStrong(list) {
+        if (!Array.isArray(list) || list.length === 0) return '<div class="empty">No strong performers yet.</div>';
+        return list.map((item) => {
+          const rate = Math.round((item.rate || 0) * 100);
+          const success = item.success || 0;
+          const total = item.total || 0;
+          return `
+            <div class="ops-row">
+              <span class="ops-name">${esc(item.skill || 'unknown')}</span>
+              <span class="ops-meta">${rate}% (${success}/${total})</span>
+              <span class="pill good">Strong</span>
+            </div>`;
+        }).join('');
+      }
+
+      function renderMost(list) {
+        if (!Array.isArray(list) || list.length === 0) return '<div class="empty">No usage data yet.</div>';
+        return list.map((item) => {
+          const rate = Math.round((item.rate || 0) * 100);
+          const total = item.total || 0;
+          return `
+            <div class="ops-row">
+              <span class="ops-name">${esc(item.skill || 'unknown')}</span>
+              <span class="ops-meta">${total} uses</span>
+              <span class="pill">${rate}%</span>
+            </div>`;
+        }).join('');
+      }
+
+      function renderCategories(obj) {
+        if (!obj || Object.keys(obj).length === 0) return '<span class="muted">No skill index found.</span>';
+        return Object.entries(obj)
+          .sort((a, b) => b[1] - a[1])
+          .map(([cat, count]) => `<span class="pill">${esc(cat)} <span class="pill-count">${count}</span></span>`)
+          .join('');
+      }
+
+      function renderNoSignal(list) {
+        if (!Array.isArray(list) || list.length === 0) return '<span class="muted">All skills have signals.</span>';
+        return list.map((name) => `<span class="pill">${esc(name)}</span>`).join('');
+      }
+
+      function renderPairs(list, tone) {
+        if (!Array.isArray(list) || list.length === 0) {
+          return `<div class="empty">No ${tone === 'good' ? 'stable' : 'risky'} pairings yet.</div>`;
+        }
+        return list.map((item) => {
+          const rate = Math.round((item.rate || 0) * 100);
+          const known = item.known || 0;
+          const klass = tone === 'good' ? 'good' : 'bad';
+          const label = tone === 'good' ? 'Stable' : 'Risky';
+          return `
+            <div class="ops-row">
+              <span class="ops-name">${esc(item.pair || 'unknown')}</span>
+              <span class="ops-meta">${rate}% (${known} known)</span>
+              <span class="pill ${klass}">${label}</span>
+            </div>`;
+        }).join('');
+      }
+
+      function renderAgents(list) {
+        if (!Array.isArray(list) || list.length === 0) return '<div class="empty">No agents registered yet.</div>';
+        return list.map((item) => {
+          const name = item.name || item.agent_id || 'agent';
+          const spec = item.specialization || 'general';
+          const rate = Math.round((item.success_rate || 0) * 100);
+          const total = item.total_tasks || 0;
+          return `
+            <div class="ops-row">
+              <span class="ops-name">${esc(name)}</span>
+              <span class="ops-meta">${esc(spec)}</span>
+              <span class="pill">${rate}% / ${total}</span>
+            </div>`;
+        }).join('');
+      }
+
+      function renderRecent(list) {
+        if (!Array.isArray(list) || list.length === 0) return '<div class="empty">No handoffs captured yet.</div>';
+        return list.map((item) => {
+          const status = item.success;
+          const statusLabel = status === true ? 'ok' : status === false ? 'fail' : 'unknown';
+          const statusClass = status === true ? 'good' : status === false ? 'bad' : '';
+          return `
+            <div class="ops-row">
+              <span class="ops-name">${esc(item.from_agent || 'unknown')} -> ${esc(item.to_agent || 'unknown')}</span>
+              <span class="ops-meta">${fmtTime(item.timestamp)}</span>
+              <span class="pill ${statusClass}">${statusLabel}</span>
+            </div>`;
+        }).join('');
+      }
+
+      function formatIndexLabel(raw) {
+        if (!raw) return 'unknown';
+        try {
+          const d = new Date(raw);
+          if (Number.isNaN(d.getTime())) return raw;
+          return d.toLocaleString('en-US', { hour12: false });
+        } catch (e) {
+          return raw;
+        }
+      }
+
+      function applyOps(data) {
+        if ($('ops-skills-total')) $('ops-skills-total').textContent = data.skills_total ?? 0;
+        if ($('ops-needs-count')) $('ops-needs-count').textContent = (data.needs_attention || []).length;
+        if ($('ops-agents-count')) $('ops-agents-count').textContent = (data.agents || []).length;
+        if ($('ops-handoffs-count')) $('ops-handoffs-count').textContent = (data.recent_handoffs || []).length;
+        if ($('ops-index-label')) $('ops-index-label').textContent = `Index ${formatIndexLabel(data.index_generated_at || '')}`;
+        if ($('ops-categories-count')) $('ops-categories-count').textContent = `${Object.keys(data.categories || {}).length} categories`;
+        if ($('ops-no-signal-label')) $('ops-no-signal-label').textContent = `No-signal skills (${data.no_signal_count ?? 0})`;
+        if ($('ops-recent-count')) $('ops-recent-count').textContent = `${(data.recent_handoffs || []).length} shown`;
+
+        setHTML('ops-needs', renderNeeds(data.needs_attention));
+        setHTML('ops-strong', renderStrong(data.top_performers));
+        setHTML('ops-most', renderMost(data.most_used));
+        setHTML('ops-categories', renderCategories(data.categories));
+        setHTML('ops-no-signal', renderNoSignal(data.no_signal_skills));
+        setHTML('ops-best', renderPairs(data.best_pairs, 'good'));
+        setHTML('ops-risky', renderPairs(data.risky_pairs, 'bad'));
+        setHTML('ops-agents', renderAgents(data.agents));
+        setHTML('ops-recent', renderRecent(data.recent_handoffs));
+      }
+
+      async function tickOps() {
+        try {
+          const res = await fetch('/api/ops', { cache: 'no-store' });
+          if (!res.ok) return;
+          const data = await res.json();
+          applyOps(data);
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      function startOpsStream() {
+        if (!window.EventSource) {
+          tickOps();
+          setInterval(tickOps, 2000);
+          return;
+        }
+        const es = new EventSource('/api/ops/stream');
+        es.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data || '{}');
+            applyOps(data);
+          } catch (e) {
+            // ignore bad payloads
+          }
+        };
+        es.onerror = () => {
+          es.close();
+          setTimeout(startOpsStream, 3000);
+        };
+      }
+
+      startOpsStream();
+    """
+
     html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1941,19 +2189,19 @@ def generate_ops_html():
 
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="stat-value">{skills_total}</div>
+                <div class="stat-value" id="ops-skills-total">{skills_total}</div>
                 <div class="stat-label">Skills Indexed</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{len(needs_attention)}</div>
+                <div class="stat-value" id="ops-needs-count">{len(needs_attention)}</div>
                 <div class="stat-label">Needs Attention</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{len(agents)}</div>
+                <div class="stat-value" id="ops-agents-count">{len(agents)}</div>
                 <div class="stat-label">Agents</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{len(recent_handoffs)}</div>
+                <div class="stat-value" id="ops-handoffs-count">{len(recent_handoffs)}</div>
                 <div class="stat-label">Recent Handoffs</div>
             </div>
         </div>
@@ -1962,25 +2210,39 @@ def generate_ops_html():
             <div class="card">
                 <div class="card-header">
                     <span class="card-title">Skill Health</span>
-                    <span class="muted">Index {idx_label}</span>
+                    <span class="muted" id="ops-index-label">Index {idx_label}</span>
                 </div>
                 <div class="card-body">
                     <div class="muted" style="margin-bottom:0.6rem;">Needs attention</div>
-                    {needs_html}
+                    <div id="ops-needs">
+                        {needs_html}
+                    </div>
                     <div style="height: 1px; background: var(--border); margin: 0.75rem 0;"></div>
                     <div class="muted" style="margin-bottom:0.6rem;">Strong performers</div>
-                    {top_html}
+                    <div id="ops-strong">
+                        {top_html}
+                    </div>
+                    <div style="height: 1px; background: var(--border); margin: 0.75rem 0;"></div>
+                    <div class="muted" style="margin-bottom:0.6rem;">Most used</div>
+                    <div id="ops-most">
+                        {most_html}
+                    </div>
                 </div>
             </div>
 
             <div class="card">
                 <div class="card-header">
                     <span class="card-title">Skill Coverage</span>
-                    <span class="muted">{len(categories)} categories</span>
+                    <span class="muted" id="ops-categories-count">{len(categories)} categories</span>
                 </div>
                 <div class="card-body">
-                    <div class="pill-row">
+                    <div class="pill-row" id="ops-categories">
                         {cat_html}
+                    </div>
+                    <div style="height: 1px; background: var(--border); margin: 0.75rem 0;"></div>
+                    <div class="muted" style="margin-bottom:0.6rem;" id="ops-no-signal-label">No-signal skills ({no_signal_count})</div>
+                    <div class="pill-row" id="ops-no-signal">
+                        {no_signal_html}
                     </div>
                 </div>
             </div>
@@ -1994,10 +2256,14 @@ def generate_ops_html():
                 </div>
                 <div class="card-body">
                     <div class="muted" style="margin-bottom:0.6rem;">Stable pairs</div>
-                    {best_html}
+                    <div id="ops-best">
+                        {best_html}
+                    </div>
                     <div style="height: 1px; background: var(--border); margin: 0.75rem 0;"></div>
                     <div class="muted" style="margin-bottom:0.6rem;">Risky pairs</div>
-                    {risky_html}
+                    <div id="ops-risky">
+                        {risky_html}
+                    </div>
                 </div>
             </div>
 
@@ -2006,7 +2272,7 @@ def generate_ops_html():
                     <span class="card-title">Agent Reliability</span>
                     <span class="muted">Top agents</span>
                 </div>
-                <div class="card-body">
+                <div class="card-body" id="ops-agents">
                     {agents_html}
                 </div>
             </div>
@@ -2015,9 +2281,9 @@ def generate_ops_html():
         <div class="card" style="margin-bottom: 1.5rem;">
             <div class="card-header">
                 <span class="card-title">Recent Handoffs</span>
-                <span class="muted">{len(recent_handoffs)} shown</span>
+                <span class="muted" id="ops-recent-count">{len(recent_handoffs)} shown</span>
             </div>
-            <div class="card-body">
+            <div class="card-body" id="ops-recent">
                 {recent_html}
             </div>
         </div>
@@ -2026,12 +2292,38 @@ def generate_ops_html():
     <div class="footer">
         <p>Updated {datetime.now().strftime("%H:%M:%S")} · Spark Ops</p>
     </div>
+    <script>{ops_js}</script>
 </body>
 </html>'''
     return html
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
+    def _serve_sse(self, data_fn, interval: float = 2.0) -> None:
+        self.send_response(200)
+        self.send_header('Content-type', 'text/event-stream')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Connection', 'keep-alive')
+        self.end_headers()
+        try:
+            self.wfile.write(b"retry: 2000\n\n")
+            self.wfile.flush()
+        except Exception:
+            return
+
+        try:
+            while True:
+                payload = data_fn()
+                data = json.dumps(payload)
+                msg = f"data: {data}\n\n".encode("utf-8")
+                self.wfile.write(msg)
+                self.wfile.flush()
+                time.sleep(interval)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception:
+            return
+
     def do_GET(self):
         if self.path == '/' or self.path == '/index.html':
             self.send_response(200)
@@ -2048,6 +2340,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps(get_dashboard_data(), indent=2).encode())
+        elif self.path == '/api/ops':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(get_ops_data(), indent=2).encode())
+        elif self.path == '/api/status/stream':
+            self._serve_sse(get_dashboard_data)
+        elif self.path == '/api/ops/stream':
+            self._serve_sse(get_ops_data)
         else:
             self.send_response(404)
             self.end_headers()
@@ -2085,7 +2386,7 @@ def main():
     print("  Press Ctrl+C to stop")
     print()
     
-    server = HTTPServer(('localhost', PORT), DashboardHandler)
+    server = ThreadingHTTPServer(('localhost', PORT), DashboardHandler)
     
     def open_browser():
         time.sleep(1)
