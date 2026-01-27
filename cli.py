@@ -35,6 +35,16 @@ from lib.memory_capture import (
 from lib.capture_cli import format_pending
 
 
+def _configure_output():
+    """Ensure UTF-8 output on Windows terminals to avoid UnicodeEncodeError."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def cmd_status(args):
     """Show overall system status."""
     voice = get_spark_voice()
@@ -498,6 +508,7 @@ def cmd_learn(args):
 
 
 def main():
+    _configure_output()
     parser = argparse.ArgumentParser(
         description="Spark CLI - Self-evolving intelligence layer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
