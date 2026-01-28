@@ -61,9 +61,9 @@ HARD_TRIGGERS = {
 
 SOFT_TRIGGERS = {
     "i prefer": 0.55,
-    "i hate": 0.6,
-    "i don\u2019t like": 0.55,
-    "i dont like": 0.55,
+    "i hate": 0.75,
+    "i don\u2019t like": 0.65,
+    "i dont like": 0.65,
     "i need": 0.5,
     "i want": 0.5,
     "we should": 0.45,
@@ -209,10 +209,13 @@ SUGGEST_THRESHOLD = 0.62
 
 _REMEMBER_PREFIX_RE = re.compile(r"^\s*(remember this|note this|save this)\s*:\s*", re.IGNORECASE)
 _MESSAGE_ID_LINE_RE = re.compile(r"\n?\[message_id:.*?\]\s*$", re.IGNORECASE | re.DOTALL)
+# Clawdbot transcript prefix, e.g. "[Telegram Meta ...] "
+_CHANNEL_PREFIX_RE = re.compile(r"^\s*\[[^\]]+\]\s*", re.IGNORECASE)
 
 
 def normalize_memory_text(text: str) -> str:
     t = (text or "").strip()
+    t = _CHANNEL_PREFIX_RE.sub("", t)
     t = _REMEMBER_PREFIX_RE.sub("", t)
     t = _MESSAGE_ID_LINE_RE.sub("", t).strip()
     if len(t) > MAX_CAPTURE_CHARS:
