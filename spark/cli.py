@@ -188,8 +188,13 @@ def cmd_sync_context(args):
         min_reliability=args.min_reliability,
         min_validations=args.min_validations,
         limit=args.limit,
+        include_promoted=(not args.no_promoted),
     )
-    print(json.dumps({"selected": stats.selected, "targets": stats.targets}, indent=2))
+    print(json.dumps({
+        "selected": stats.selected,
+        "promoted_selected": stats.promoted_selected,
+        "targets": stats.targets,
+    }, indent=2))
 
 
 def cmd_health(args):
@@ -575,6 +580,7 @@ Examples:
     sync_ctx.add_argument("--min-reliability", type=float, default=0.7, help="Minimum reliability")
     sync_ctx.add_argument("--min-validations", type=int, default=3, help="Minimum validations")
     sync_ctx.add_argument("--limit", type=int, default=12, help="Max items")
+    sync_ctx.add_argument("--no-promoted", action="store_true", help="Skip promoted learnings from docs")
     
     # health
     subparsers.add_parser("health", help="Health check")

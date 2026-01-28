@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+import re
 
 from .cognitive_learner import CognitiveLearner, CognitiveInsight
 from .output_adapters import (
@@ -20,12 +22,46 @@ from .output_adapters import (
 DEFAULT_MIN_RELIABILITY = 0.7
 DEFAULT_MIN_VALIDATIONS = 3
 DEFAULT_MAX_ITEMS = 12
+DEFAULT_MAX_PROMOTED = 6
 
 
 @dataclass
 class SyncStats:
     targets: Dict[str, str]
     selected: int
+    promoted_selected: int
+
+
+def _normalize_text(text: str) -> str:
+    t = (text or "").strip().lower()
+    t = re.sub(r"\s*\(\d+\s*calls?\)", "", t)
+    t = re.sub(r"\s*\(\d+\)", "", t)
+    t = re.sub(r"\s+\d+$", "", t)
+    t = re.sub(r"\s+", " ", t)
+    return t.strip()
+
+
+def _is_low_value(insight_text: str) -> bool:
+    t = (insight_text or "").lower()
+    if "indicates task type" in t:
+        return True
+    if "heavy " in t and " usage" in t:
+        return True
+    return False
+
+
+def _category_weight(category) -> int:
+    order = {
+        "wisdom": 7,
+        "reasoning": 6,
+        "meta_learning": 5,
+        "communication": 4,
+        "user_understanding": 4,
+        "self_awareness": 3,
+        "context": 2,
+        "creativity": 1,
+    }
+    return int(order.get(getattr(category, "value", str(category)), 1))
 
 
 def _select_insights(
@@ -41,16 +77,65 @@ def _select_insights(
             continue
         if insight.times_validated < min_validations:
             continue
+        if _is_low_value(insight.insight):
+            continue
         picked.append(insight)
 
     picked.sort(
-        key=lambda i: (i.reliability, i.times_validated, i.confidence),
+        key=lambda i: (_category_weight(i.category), i.reliability, i.times_validated, i.confidence),
         reverse=True,
     )
-    return picked[: max(0, int(limit or 0))]
+    # De-dupe by normalized insight text
+    seen = set()
+    deduped: List[CognitiveInsight] = []
+    for ins in picked:
+        key = _normalize_text(ins.insight)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(ins)
+        if len(deduped) >= max(0, int(limit or 0)):
+            break
+    return deduped
 
 
-def _format_context(insights: List[CognitiveInsight]) -> str:
+def _load_promoted_lines(project_dir: Path) -> List[str]:
+    lines: List[str] = []
+    for name in ("CLAUDE.md", "AGENTS.md", "TOOLS.md", "SOUL.md"):
+        path = project_dir / name
+        if not path.exists():
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        idx = content.find("## Spark Learnings")
+        if idx == -1:
+            continue
+        tail = content[idx + len("## Spark Learnings") :]
+        # Stop at next section header
+        next_idx = tail.find("\n## ")
+        block = tail if next_idx == -1 else tail[:next_idx]
+        for raw in block.splitlines():
+            s = raw.strip()
+            if s.startswith("- "):
+                lines.append(s[2:].strip())
+    # De-dupe
+    seen = set()
+    out: List[str] = []
+    for s in lines:
+        key = _normalize_text(s)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(s)
+    return out
+
+
+def _format_context(
+    insights: List[CognitiveInsight],
+    promoted: List[str],
+) -> str:
     lines = [
         "## Spark Bootstrap",
         "Auto-loaded high-confidence learnings from ~/.spark/cognitive_insights.json",
@@ -58,7 +143,7 @@ def _format_context(insights: List[CognitiveInsight]) -> str:
         "",
     ]
 
-    if not insights:
+    if not insights and not promoted:
         lines.append("No validated insights yet.")
         return "\n".join(lines).strip()
 
@@ -67,6 +152,12 @@ def _format_context(insights: List[CognitiveInsight]) -> str:
         lines.append(
             f"- [{ins.category.value}] {ins.insight} ({rel} reliable, {ins.times_validated} validations)"
         )
+
+    if promoted:
+        lines.append("")
+        lines.append("## Promoted Learnings (Docs)")
+        for s in promoted[:DEFAULT_MAX_PROMOTED]:
+            lines.append(f"- {s}")
 
     return "\n".join(lines).strip()
 
@@ -77,15 +168,20 @@ def sync_context(
     min_reliability: float = DEFAULT_MIN_RELIABILITY,
     min_validations: int = DEFAULT_MIN_VALIDATIONS,
     limit: int = DEFAULT_MAX_ITEMS,
+    include_promoted: bool = True,
 ) -> SyncStats:
     insights = _select_insights(
         min_reliability=min_reliability,
         min_validations=min_validations,
         limit=limit,
     )
-    context = _format_context(insights)
-
     root = project_dir or Path.cwd()
+    promoted = _load_promoted_lines(root) if include_promoted else []
+    # De-dupe promoted vs selected insights
+    seen = {_normalize_text(i.insight) for i in insights}
+    promoted = [p for p in promoted if _normalize_text(p) not in seen]
+
+    context = _format_context(insights, promoted)
     targets: Dict[str, str] = {}
 
     try:
@@ -118,7 +214,11 @@ def sync_context(
     except Exception:
         targets["exports"] = "error"
 
-    return SyncStats(targets=targets, selected=len(insights))
+    return SyncStats(
+        targets=targets,
+        selected=len(insights),
+        promoted_selected=len(promoted),
+    )
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -130,6 +230,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--min-reliability", type=float, default=DEFAULT_MIN_RELIABILITY)
     ap.add_argument("--min-validations", type=int, default=DEFAULT_MIN_VALIDATIONS)
     ap.add_argument("--limit", type=int, default=DEFAULT_MAX_ITEMS)
+    ap.add_argument("--no-promoted", action="store_true", help="Skip promoted learnings from docs")
     args = ap.parse_args(argv)
 
     project_dir = Path(args.project).expanduser() if args.project else None
@@ -138,8 +239,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         min_reliability=args.min_reliability,
         min_validations=args.min_validations,
         limit=args.limit,
+        include_promoted=(not args.no_promoted),
     )
-    print(json.dumps({"selected": stats.selected, "targets": stats.targets}, indent=2))
+    print(json.dumps({
+        "selected": stats.selected,
+        "promoted_selected": stats.promoted_selected,
+        "targets": stats.targets,
+    }, indent=2))
     return 0
 
 
