@@ -196,12 +196,15 @@ def parse_like_message(text: str) -> Optional[Dict[str, Any]]:
     Supported patterns (MVP):
     - "I like this post: <url or text>"
     - "I like this UI: <url>"
-    - "I like this art: <url>"
+    - "I like this art/graphic: <url>"
+
+    Also strips channel prefixes like "[Telegram ...]".
 
     Returns dict(domain, source, notes, label) or None.
     """
 
     raw = (text or "").strip()
+    raw = re.sub(r"^\s*\[[^\]]+\]\s*", "", raw)
     t = raw.lower()
 
     if not ("i like" in t or "i love" in t):
