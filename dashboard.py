@@ -78,7 +78,7 @@ def get_dashboard_data():
     # Aha tracker data - fresh from disk
     aha = AhaTracker()
     aha_stats = aha.get_stats()
-    surprises = aha.get_recent_surprises(5)
+    surprises = aha.get_recent_surprises(25)
     surprises_list = []
     for s in surprises:
         surprises_list.append({
@@ -1048,23 +1048,37 @@ def generate_html():
         }}
 
         .surprise-list {{
-            flex: 1;
-            overflow-y: auto;
             padding-right: 6px;
         }}
 
-        .surprise-list::-webkit-scrollbar {{
-            width: 6px;
+        /* Pagination controls */
+        .pagination {{
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.7rem;
         }}
-        .surprise-list::-webkit-scrollbar-track {{
-            background: transparent;
+        .pagination button {{
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 0.2rem 0.5rem;
+            cursor: pointer;
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
         }}
-        .surprise-list::-webkit-scrollbar-thumb {{
-            background: rgba(255,255,255,0.14);
-            border-radius: 0px;
+        .pagination button:hover:not(:disabled) {{
+            background: var(--bg-secondary);
+            color: var(--text-primary);
         }}
-        .surprise-list::-webkit-scrollbar-thumb:hover {{
-            background: rgba(255,255,255,0.22);
+        .pagination button:disabled {{
+            opacity: 0.4;
+            cursor: not-allowed;
+        }}
+        .pagination .page-info {{
+            color: var(--text-tertiary);
+            min-width: 3rem;
+            text-align: center;
         }}
 
         .surprise-row {{
@@ -1424,11 +1438,15 @@ def generate_html():
             <div class="card">
                 <div class="card-header">
                     <span class="card-title">Surprises</span>
-                    <span class="muted" style="font-size: 0.7rem;" id="surprises-total">{data["surprises"]["total"]} total</span>
+                    <div class="pagination" id="surprises-pagination">
+                        <button id="surprises-prev" onclick="surprisePage(-1)">&lt;</button>
+                        <span class="page-info" id="surprises-page-info">1/1</span>
+                        <button id="surprises-next" onclick="surprisePage(1)">&gt;</button>
+                    </div>
                 </div>
                 <div class="card-body" id="surprises-body">
-                    {('' if surprises_html else '<div class="empty" id="surprises-empty">No surprises yet. They happen when predictions do not match outcomes.</div>')}
-                    {('' if not surprises_html else f'<div class="surprise-list" id="surprises-list">{surprises_html}</div>')}
+                    <div class="empty" id="surprises-empty" style="display:none;">No surprises yet. They happen when predictions do not match outcomes.</div>
+                    <div class="surprise-list" id="surprises-list"></div>
                 </div>
             </div>
             
@@ -1493,18 +1511,64 @@ def generate_html():
 
       function esc(s) {{
         // NOTE: braces are doubled because this HTML is generated from a Python f-string.
-        return String(s ?? '').replace(/[&<>"']/g, (c) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}}[c]));
+        return String(s ?? '').replace(/[&<>"']/g, (c) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}}[c]));
       }}
 
-      function renderSurprises(recent) {{
-        if (!Array.isArray(recent) || recent.length === 0) return '';
-        return recent.map((s) => {{
+      // Surprises pagination state
+      const SURPRISES_PER_PAGE = 6;
+      let surprisesData = [];
+      let surprisesPage = 0;
+
+      function renderSurprisesPage() {{
+        const total = surprisesData.length;
+        const totalPages = Math.max(1, Math.ceil(total / SURPRISES_PER_PAGE));
+        surprisesPage = Math.max(0, Math.min(surprisesPage, totalPages - 1));
+
+        const start = surprisesPage * SURPRISES_PER_PAGE;
+        const pageItems = surprisesData.slice(start, start + SURPRISES_PER_PAGE);
+        console.log('Rendering page', surprisesPage + 1, 'of', totalPages, 'items:', pageItems.length);
+
+        // Update pagination UI
+        const pageInfo = $('surprises-page-info');
+        const prevBtn = $('surprises-prev');
+        const nextBtn = $('surprises-next');
+        if (pageInfo) pageInfo.textContent = `${{surprisesPage + 1}}/${{totalPages}}`;
+        if (prevBtn) prevBtn.disabled = surprisesPage === 0;
+        if (nextBtn) nextBtn.disabled = surprisesPage >= totalPages - 1;
+
+        // Render items
+        const list = $('surprises-list');
+        const empty = $('surprises-empty');
+        console.log('List element:', list, 'Empty element:', empty);
+        if (total === 0) {{
+          if (list) list.innerHTML = '';
+          if (empty) empty.style.display = '';
+        }} else {{
+          if (empty) empty.style.display = 'none';
+          const html = renderSurpriseItems(pageItems);
+          console.log('Generated HTML length:', html.length);
+          if (list) {{
+            list.innerHTML = html;
+          }} else {{
+            console.error('surprises-list element not found!');
+          }}
+        }}
+      }}
+
+      function surprisePage(delta) {{
+        surprisesPage += delta;
+        renderSurprisesPage();
+      }}
+
+      function renderSurpriseItems(items) {{
+        if (!Array.isArray(items) || items.length === 0) return '';
+        return items.map((s) => {{
           const type = esc(s.type);
           const gap = Math.round((s.gap || 0) * 100);
           const predicted = esc(s.predicted || '');
           const actual = esc(s.actual || '');
-          const lesson = s.lesson ? `<div class="surprise-lesson">→ ${{esc(s.lesson)}}</div>` : '';
-          const icon = type.includes('Success') ? '△' : type.includes('Failure') ? '▽' : '◇';
+          const lesson = s.lesson ? `<div class="surprise-lesson">-> ${{esc(s.lesson)}}</div>` : '';
+          const icon = type.includes('Success') ? '+' : type.includes('Failure') ? '-' : '*';
           const iconClass = type.includes('Success') ? 'success' : type.includes('Failure') ? 'failure' : '';
           return `
             <div class="surprise-row">
@@ -1513,8 +1577,8 @@ def generate_html():
                 <span class="surprise-type">${{type}}</span>
                 <span class="surprise-gap">${{gap}}% gap</span>
               </div>
-              <div class="surprise-detail"><span class="surprise-label">Expected</span><span class="surprise-text">${{predicted}}…</span></div>
-              <div class="surprise-detail"><span class="surprise-label">Got</span><span class="surprise-text">${{actual}}…</span></div>
+              <div class="surprise-detail"><span class="surprise-label">Expected</span><span class="surprise-text">${{predicted}}...</span></div>
+              <div class="surprise-detail"><span class="surprise-label">Got</span><span class="surprise-text">${{actual}}...</span></div>
               ${{lesson}}
             </div>`;
         }}).join('');
@@ -1531,30 +1595,10 @@ def generate_html():
 
       function applyStatus(data) {{
         if ($('updated-at')) $('updated-at').textContent = data.timestamp || '';
-        if ($('surprises-total')) $('surprises-total').textContent = `${{data.surprises?.total ?? 0}} total`;
 
-        const recent = data.surprises?.recent || [];
-        const list = $('surprises-list');
-        const empty = $('surprises-empty');
-
-        if (recent.length === 0) {{
-          if (list) list.remove();
-          if (empty) empty.style.display = '';
-        }} else {{
-          if (empty) empty.style.display = 'none';
-          if (!list) {{
-            // create list container if it doesn't exist yet
-            const wrap = document.createElement('div');
-            wrap.id = 'surprises-list';
-            wrap.className = 'surprise-list';
-            const body = $('surprises-body') || document.querySelector('.card-body');
-            body.appendChild(wrap);
-          }}
-          const l = $('surprises-list');
-          if (l) {{
-            l.innerHTML = renderSurprises(recent);
-          }}
-        }}
+        // Update surprises with pagination
+        surprisesData = data.surprises?.recent || [];
+        renderSurprisesPage();
       }}
 
       async function tick() {{
@@ -1627,6 +1671,24 @@ def generate_html():
         }};
       }}
 
+      // Initialize pagination on page load
+      async function initPage() {{
+        try {{
+          const res = await fetch('/api/status', {{ cache: 'no-store' }});
+          if (res.ok) {{
+            const data = await res.json();
+            surprisesData = data.surprises?.recent || [];
+            console.log('Surprises loaded:', surprisesData.length);
+            renderSurprisesPage();
+          }} else {{
+            console.error('API fetch failed:', res.status);
+          }}
+        }} catch (e) {{
+          console.error('initPage error:', e);
+        }}
+      }}
+
+      initPage();
       startStream();
       wireTaste();
     </script>
