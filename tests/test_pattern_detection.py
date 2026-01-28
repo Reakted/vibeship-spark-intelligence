@@ -12,6 +12,7 @@ from lib.pattern_detection import (
     RepetitionDetector,
     SequenceDetector,
     PatternAggregator,
+    process_pattern_events,
 )
 
 
@@ -218,6 +219,18 @@ class TestPatternAggregator:
         assert "total_patterns_detected" in stats
         assert "detectors" in stats
         assert len(stats["detectors"]) == 4  # 4 detectors
+
+
+def test_process_pattern_events_no_queue(tmp_path, monkeypatch):
+    """Ensure worker handles empty queue gracefully."""
+    from lib import queue as q
+    # Point queue dir to temp
+    monkeypatch.setattr(q, "QUEUE_DIR", tmp_path)
+    monkeypatch.setattr(q, "EVENTS_FILE", tmp_path / "events.jsonl")
+    monkeypatch.setattr(q, "LOCK_FILE", tmp_path / ".queue.lock")
+
+    processed = process_pattern_events(limit=10)
+    assert processed == 0
 
 
 if __name__ == "__main__":

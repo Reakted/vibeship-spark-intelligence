@@ -16,6 +16,7 @@ from .sentiment import SentimentDetector
 from .repetition import RepetitionDetector
 from .sequence import SequenceDetector
 from .aggregator import PatternAggregator, get_aggregator
+from .worker import process_pattern_events
 
 __all__ = [
     "PatternDetector",
@@ -27,4 +28,5 @@ __all__ = [
     "SequenceDetector",
     "PatternAggregator",
     "get_aggregator",
+    "process_pattern_events",
 ]

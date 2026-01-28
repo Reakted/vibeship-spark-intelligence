@@ -145,6 +145,12 @@ class SentimentDetector(PatternDetector):
         session_id = event.get("session_id", "unknown")
         hook_event = event.get("hook_event", "")
 
+        # Buffer tool events so we can reference recent tools.
+        if hook_event in ("PostToolUse", "PostToolUseFailure"):
+            if event.get("tool_name"):
+                self._buffer_event(session_id, event)
+            return patterns
+
         # Only analyze user messages
         if hook_event != "UserPromptSubmit":
             return patterns

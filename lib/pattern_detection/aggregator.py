@@ -9,9 +9,11 @@ Responsibilities:
 """
 
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import re
 
 from .base import DetectedPattern, PatternType
 from .correction import CorrectionDetector
@@ -25,6 +27,15 @@ CONFIDENCE_THRESHOLD = 0.7
 
 # Patterns log file
 PATTERNS_LOG = Path.home() / ".spark" / "detected_patterns.jsonl"
+DEDUPE_TTL_SECONDS = 600
+
+
+def _normalize_text(text: str) -> str:
+    t = (text or "").strip().lower()
+    t = re.sub(r"\s+", " ", t)
+    t = re.sub(r"\s*\(\d+\s*calls?\)", "", t)
+    t = re.sub(r"\s*\(\d+\)", "", t)
+    return t.strip()
 
 
 def _log_pattern(pattern: DetectedPattern):
@@ -57,6 +68,7 @@ class PatternAggregator:
         ]
         self._patterns_count = 0
         self._session_patterns: Dict[str, List[DetectedPattern]] = {}
+        self._recent_pattern_keys: Dict[str, Dict[str, float]] = {}
 
     def process_event(self, event: Dict) -> List[DetectedPattern]:
         """
@@ -82,6 +94,9 @@ class PatternAggregator:
         if session_id not in self._session_patterns:
             self._session_patterns[session_id] = []
 
+        # De-dupe patterns within a TTL window to avoid spammy insights.
+        all_patterns = self._dedupe_patterns(session_id, all_patterns)
+
         for pattern in all_patterns:
             self._patterns_count += 1
             self._session_patterns[session_id].append(pattern)
@@ -92,6 +107,30 @@ class PatternAggregator:
             self._session_patterns[session_id] = self._session_patterns[session_id][-100:]
 
         return all_patterns
+
+    def _pattern_key(self, pattern: DetectedPattern) -> str:
+        base = pattern.suggested_insight or " ".join(pattern.evidence[:1]) or ""
+        return f"{pattern.pattern_type.value}:{_normalize_text(base)}"
+
+    def _dedupe_patterns(self, session_id: str, patterns: List[DetectedPattern]) -> List[DetectedPattern]:
+        now = time.time()
+        if session_id not in self._recent_pattern_keys:
+            self._recent_pattern_keys[session_id] = {}
+
+        recent = self._recent_pattern_keys[session_id]
+        # Prune expired keys
+        for k, ts in list(recent.items()):
+            if now - ts > DEDUPE_TTL_SECONDS:
+                del recent[k]
+
+        out: List[DetectedPattern] = []
+        for p in patterns:
+            key = self._pattern_key(p)
+            if not key or key in recent:
+                continue
+            recent[key] = now
+            out.append(p)
+        return out
 
     def _boost_corroborated(self, patterns: List[DetectedPattern]) -> List[DetectedPattern]:
         """

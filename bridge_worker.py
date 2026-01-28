@@ -24,6 +24,7 @@ from lib.bridge import update_spark_context
 from lib.memory_capture import process_recent_memory_events
 from lib.tastebank import parse_like_message, add_item
 from lib.queue import read_recent_events, EventType
+from lib.pattern_detection import process_pattern_events
 
 
 def main():
@@ -60,6 +61,12 @@ def main():
                 if parsed:
                     add_item(**parsed)
                     break
+        except Exception:
+            pass
+
+        try:
+            # 4) Pattern detection (Phase 2) from queued events
+            process_pattern_events(limit=200)
         except Exception:
             pass
 

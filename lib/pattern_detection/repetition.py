@@ -157,14 +157,16 @@ class RepetitionDetector(PatternDetector):
                 continue  # Need 3+ repetitions
 
             # Create group signature to avoid repeat alerts
-            group_sig = frozenset(group)
+            group_texts = [self._requests[session_id][i][0] for i in group]
+            norm_keys = [hash(_normalize_text(t)) for t in group_texts]
+            group_sig = frozenset(norm_keys)
             if group_sig in self._alerted[session_id]:
                 continue
 
             self._alerted[session_id].add(group_sig)
 
             # Get the requests in this group
-            requests_in_group = [self._requests[session_id][i][0] for i in group]
+            requests_in_group = group_texts
 
             # Find common keywords
             all_keywords = [self._requests[session_id][i][1] for i in group]
