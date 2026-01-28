@@ -1894,3 +1894,215 @@ A truly complete system would:
 7. **Explain itself**: Why it thinks what it thinks, how confident it is
 
 That's the complete picture.
+
+---
+
+## Even Deeper Gaps: The Truly Hard Problems
+
+### 21. No Privacy Controls
+
+**The Problem:**
+Everything is captured. Users can't say "don't learn from this" or "forget that."
+
+**What's Lost:**
+- User trust
+- GDPR compliance
+- Ability to work on sensitive projects
+
+**Solution:** PrivacyController class with:
+- Path exclusions (`never_learn_from`)
+- Sensitive pattern redaction (api_key, password, token)
+- Temporary pause capability
+- GDPR export/delete methods
+
+---
+
+### 22. No Active Learning
+
+**The Problem:**
+System is passive. Only observes, never asks questions to learn faster.
+
+**What's Lost:**
+- 10x learning velocity (asking removes guessing)
+- Accuracy (direct answers vs inference)
+- User engagement
+
+**Solution:** ActiveLearner class with:
+- Question budget per session
+- Uncertainty × importance threshold
+- Direct learning from answers (95% confidence)
+
+---
+
+### 23. No Goal Inference
+
+**The Problem:**
+We learn WHAT user prefers but not WHY. Understanding goals unlocks everything.
+
+```
+Surface: "User is impatient"
+Reality: "User is under deadline pressure"
+→ Completely different recommendations
+```
+
+**Solution:** GoalInferrer with hierarchy:
+- Immediate: fix_bug, ship_feature, understand_code
+- Session: complete_task, explore_options
+- Project: build_mvp, build_production
+- Meta: learn_to_code, increase_productivity
+
+---
+
+### 24. No Grounding / Evidence
+
+**The Problem:**
+Learnings are assertions without evidence. Can't explain WHY we think something.
+
+**Solution:** EvidenceStore class:
+- Store evidence for every learning
+- Types: observation, statement, correction
+- `explain_learning()` generates human-readable proof
+
+---
+
+### 25. No Effectiveness Measurement
+
+**The Problem:**
+No idea if learnings actually help. No metrics, no improvement tracking.
+
+**Solution:** EffectivenessTracker:
+- Record: time_to_complete, iterations_needed, corrections_needed
+- Calculate improvement over time windows
+- Identify useless learnings (old + never applied)
+
+---
+
+### 26. No Knowledge Graph
+
+**The Problem:**
+Learnings are flat. No relationships, no hierarchy.
+
+```
+Flat: [TypeScript, functional, no classes, immutability]
+Connected: "Functional programming mindset" → implies more
+```
+
+**Solution:** KnowledgeGraph class:
+- Nodes = learnings
+- Edges = relationships (related_concept, implies, contradicts)
+- Cluster detection → emergent patterns
+- Inference from graph structure
+
+---
+
+### 27. No Mode Detection
+
+**The Problem:**
+User behavior changes by mode: exploring, building, debugging, shipping.
+
+**Solution:** ModeDetector with modes:
+- Exploring: show possibilities, high verbosity
+- Building: working code, medium verbosity
+- Debugging: diagnose first, high safety
+- Shipping: minimal changes, very high safety
+- Learning: educate first, very high verbosity
+
+---
+
+### 28. No Compositionality
+
+**The Problem:**
+Can't combine learnings to make new inferences.
+
+```
+TypeScript + functional + minimal deps
+→ Should infer: "Would like fp-ts, dislike class-heavy frameworks"
+```
+
+**Solution:** CompositionalInferrer with rules:
+- IF [prefers_typescript, prefers_functional] THEN would_like_fp-ts
+- Combined confidence from sources
+
+---
+
+### 29. No Calibration
+
+**The Problem:**
+80% confident ≠ 80% accurate. Confidence is meaningless without calibration.
+
+**Solution:** ConfidenceCalibrator:
+- Record (stated_confidence, was_correct) pairs
+- Build calibration curve
+- Adjust future confidence toward historical accuracy
+- Reliability score = 1 - avg_calibration_error
+
+---
+
+### 30. No Team/Shared Learning
+
+**The Problem:**
+Each user is isolated. Everyone relearns the same patterns.
+
+**Solution:** SharedLearningHub:
+- Export high-confidence, validated learnings (anonymized)
+- Import with confidence discount (0.6x)
+- Team patterns = intersection of team learnings
+
+---
+
+## The Final Gap Map
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        COMPLETE SPARK GAP ANALYSIS                              │
+│                                                                                 │
+│  CRITICAL (1-7)              HIGH (8-20)                  DEEP (21-30)         │
+│  ─────────────               ────────────                 ─────────────         │
+│  Session Amnesia             Reasoning Capture            Privacy Controls      │
+│  Semantic Understanding      Failure Analysis             Active Learning       │
+│  Project Blindness           User Mental Model            Goal Inference        │
+│  Platform Lock               Skill Level Adaptation       Evidence/Grounding    │
+│  Agent Isolation             Intention Inference          Effectiveness Metrics │
+│  No Decay                    Self-Awareness               Knowledge Graph       │
+│  Conflict Resolution         Style Matching               Mode Detection        │
+│                              Temporal Patterns            Compositionality      │
+│                              Unlearning                   Calibration           │
+│                              Learning Transfer            Team/Shared Learning  │
+│                                                                                 │
+│  Total: 30 gaps identified                                                      │
+│  All solutions: Pure Python, cross-platform, offline-capable                    │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Updated Priority Matrix
+
+| Priority | Gap | Why |
+|----------|-----|-----|
+| P0 | Session Bootstrap | Nothing works without this |
+| P0 | Privacy Controls | Trust and compliance |
+| P1 | Goal Inference | Unlocks deep understanding |
+| P1 | Active Learning | 10x learning velocity |
+| P1 | Evidence/Grounding | Explainability and trust |
+| P1 | Effectiveness Metrics | Know if it's working |
+| P2 | Mode Detection | Better context-aware responses |
+| P2 | Knowledge Graph | Emergent insights |
+| P2 | Calibration | Meaningful confidence |
+| P2 | Compositionality | Inference power |
+| P3 | Team Learning | Knowledge sharing |
+
+## What Makes This Truly Complete
+
+With all 30 gaps addressed, Spark would:
+
+1. **Respect privacy** while learning effectively
+2. **Ask questions** to learn faster
+3. **Understand goals** not just preferences
+4. **Explain itself** with evidence
+5. **Measure effectiveness** and improve
+6. **Connect knowledge** into understanding
+7. **Detect context** and adapt
+8. **Compose learnings** into new insights
+9. **Calibrate confidence** to reality
+10. **Share knowledge** across users
+
+This is the complete system.
