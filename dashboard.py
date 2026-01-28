@@ -10,6 +10,7 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import threading
 import webbrowser
@@ -177,7 +178,7 @@ def _load_json(path: Path) -> Dict:
         return {}
 
 
-def _read_jsonl(path: Path, limit: int | None = None) -> list:
+def _read_jsonl(path: Path, limit: 'Optional[int]' = None) -> list:
     if not path.exists():
         return []
     items = []
