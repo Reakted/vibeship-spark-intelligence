@@ -170,6 +170,14 @@ After running, Spark creates:
 ~/.spark/                      # Config and data
 ├── cognitive_insights.json    # Raw learnings
 ├── mind_sync_state.json       # Sync tracking
+├── exposures.jsonl            # Surfaced insights (prediction inputs)
+├── predictions.jsonl          # Prediction registry
+├── outcomes.jsonl             # Outcomes log (skills/orchestration/project)
+├── skills_index.json          # Cached skills index
+├── skills_effectiveness.json  # Skill success/fail counters
+├── orchestration/
+│   ├── agents.json            # Registered agents
+│   └── handoffs.jsonl         # Handoff history
 └── queue/
     └── events.jsonl           # Event queue
 
