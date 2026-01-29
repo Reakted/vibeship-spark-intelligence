@@ -119,12 +119,15 @@ def _match_insight(prompt_tokens: List[str], insight_text: str) -> Tuple[bool, O
     token_set = set(prompt_tokens)
     for kw in keywords:
         if kw not in token_set:
-            return False, None
+            continue
         # record the first occurrence position for polarity window checks
         try:
             positions.append(prompt_tokens.index(kw))
         except Exception:
             continue
+
+    if not positions:
+        return False, None
 
     polarity = _prompt_polarity(prompt_tokens, positions)
     return True, polarity
