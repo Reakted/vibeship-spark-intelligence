@@ -40,6 +40,7 @@ from lib.memory_capture import (
     reject_suggestion as capture_reject,
 )
 from lib.capture_cli import format_pending
+from lib.memory_migrate import migrate as migrate_memory
 
 
 def _configure_output():
@@ -551,6 +552,12 @@ def cmd_memory(args):
     print("Use --list, --show, --status, or --set <mode>.")
 
 
+def cmd_memory_migrate(args):
+    """Backfill JSONL memory banks into the SQLite memory store."""
+    stats = migrate_memory()
+    print(json.dumps(stats, indent=2))
+
+
 
 def cmd_timeline(args):
     """Show growth timeline."""
@@ -783,6 +790,9 @@ Examples:
     mem_parser.add_argument("--remote-base-url", help="OpenAI-compatible baseUrl (remote mode)")
     mem_parser.add_argument("--remote-api-key", help="API key for remote baseUrl (remote mode)")
     mem_parser.add_argument("--no-restart", action="store_true", help="Don't restart Clawdbot gateway")
+
+    # memory-migrate
+    subparsers.add_parser("memory-migrate", help="Backfill JSONL memories into SQLite store")
     
     args = parser.parse_args()
     
@@ -811,6 +821,7 @@ Examples:
         "timeline": cmd_timeline,
         "bridge": cmd_bridge,
         "memory": cmd_memory,
+        "memory-migrate": cmd_memory_migrate,
     }
     
     if args.command in commands:
