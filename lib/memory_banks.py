@@ -206,6 +206,21 @@ def store_memory(text: str, category: str, session_id: Optional[str] = None, sou
         meta={},
     )
     append_entry(entry)
+    try:
+        from lib.memory_store import upsert_entry
+
+        upsert_entry(
+            memory_id=entry.entry_id,
+            content=entry.text,
+            scope=entry.scope,
+            project_key=entry.project_key,
+            category=entry.category,
+            created_at=entry.created_at,
+            source=entry.source or "spark",
+            meta=entry.meta or {},
+        )
+    except Exception:
+        pass
     return entry
 
 
@@ -234,6 +249,19 @@ def retrieve(query: str, project_key: Optional[str] = None, limit: int = 6) -> L
     q = (query or "").lower().strip()
     if not q:
         return []
+
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    try:
+        from lib.memory_store import retrieve as store_retrieve
+
+        out = store_retrieve(query, project_key=project_key, limit=limit)
+        for it in out:
+            key = it.get("entry_id") or it.get("text")
+            if key:
+                seen.add(key)
+    except Exception:
+        out = []
 
     candidates: List[Dict[str, Any]] = []
 
@@ -271,4 +299,11 @@ def retrieve(query: str, project_key: Optional[str] = None, limit: int = 6) -> L
             scored.append((score, it))
 
     scored.sort(key=lambda t: t[0], reverse=True)
-    return [it for _, it in scored[:limit]]
+    for _, it in scored:
+        key = it.get("entry_id") or it.get("text")
+        if key and key in seen:
+            continue
+        out.append(it)
+        if len(out) >= max(0, int(limit or 0)):
+            break
+    return out

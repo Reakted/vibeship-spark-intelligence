@@ -45,6 +45,9 @@ dev = [
 mind = [
     "vibeship-mind>=0.1.0",
 ]
+embeddings = [
+    "fastembed>=0.3.0",
+]
 
 [project.urls]
 Homepage = "https://vibeship.co"

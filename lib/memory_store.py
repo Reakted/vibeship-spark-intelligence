@@ -1,0 +1,326 @@
+"""Local hybrid memory store (SQLite + optional embeddings).
+
+Goal: cross-project sink with lightweight hybrid retrieval:
+- SQLite FTS5 (BM25-ish lexical ranking)
+- Optional embeddings for semantic matching
+
+No server required. Falls back gracefully if embeddings or FTS5 are unavailable.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from array import array
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
+
+DB_PATH = Path.home() / ".spark" / "memory_store.sqlite"
+_FTS_AVAILABLE: Optional[bool] = None
+_EMBEDDER = None
+_EMBEDDER_ERROR = None
+
+
+def _connect() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    _ensure_schema(conn)
+    return conn
+
+
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memories (
+          memory_id TEXT PRIMARY KEY,
+          content TEXT NOT NULL,
+          scope TEXT,
+          project_key TEXT,
+          category TEXT,
+          created_at REAL,
+          source TEXT,
+          meta TEXT
+        );
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_key);")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope);")
+    _ensure_fts(conn)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memories_vec (
+          memory_id TEXT PRIMARY KEY,
+          dim INTEGER,
+          vector BLOB
+        );
+        """
+    )
+    conn.commit()
+
+
+def _ensure_fts(conn: sqlite3.Connection) -> bool:
+    global _FTS_AVAILABLE
+    if _FTS_AVAILABLE is True:
+        return True
+    if _FTS_AVAILABLE is False:
+        return False
+    try:
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+            USING fts5(
+              content,
+              memory_id UNINDEXED,
+              scope UNINDEXED,
+              project_key UNINDEXED,
+              category UNINDEXED
+            );
+            """
+        )
+        _FTS_AVAILABLE = True
+    except sqlite3.OperationalError:
+        _FTS_AVAILABLE = False
+    return bool(_FTS_AVAILABLE)
+
+
+def _sanitize_token(token: str) -> str:
+    return "".join(ch for ch in token if ch.isalnum())
+
+
+def _build_fts_query(text: str) -> str:
+    tokens = [_sanitize_token(t) for t in (text or "").lower().split()]
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return ""
+    return " OR ".join(tokens)
+
+
+def _get_embedder():
+    global _EMBEDDER, _EMBEDDER_ERROR
+    if os.environ.get("SPARK_EMBEDDINGS", "1").lower() in ("0", "false", "no"):
+        return None
+    if _EMBEDDER is not None:
+        return _EMBEDDER
+    if _EMBEDDER_ERROR is not None:
+        return None
+    try:
+        from fastembed import TextEmbedding
+    except Exception as e:
+        _EMBEDDER_ERROR = e
+        return None
+    model = os.environ.get("SPARK_EMBED_MODEL", "BAAI/bge-small-en-v1.5")
+    try:
+        _EMBEDDER = TextEmbedding(model_name=model)
+    except Exception as e:
+        _EMBEDDER_ERROR = e
+        return None
+    return _EMBEDDER
+
+
+def _embed_texts(texts: List[str]) -> Optional[List[List[float]]]:
+    embedder = _get_embedder()
+    if embedder is None:
+        return None
+    try:
+        vectors = list(embedder.embed(texts))
+        return [list(v) for v in vectors]
+    except Exception:
+        return None
+
+
+def _vector_to_blob(vec: List[float]) -> bytes:
+    buf = array("f", vec)
+    return buf.tobytes()
+
+
+def _blob_to_vector(blob: bytes) -> List[float]:
+    buf = array("f")
+    buf.frombytes(blob or b"")
+    return list(buf)
+
+
+def _cosine(a: List[float], b: List[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    if na <= 0.0 or nb <= 0.0:
+        return 0.0
+    return max(0.0, min(1.0, dot / ((na ** 0.5) * (nb ** 0.5))))
+
+
+def upsert_entry(
+    *,
+    memory_id: str,
+    content: str,
+    scope: str,
+    project_key: Optional[str],
+    category: str,
+    created_at: float,
+    source: str,
+    meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO memories
+            (memory_id, content, scope, project_key, category, created_at, source, meta)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                memory_id,
+                content,
+                scope,
+                project_key,
+                category,
+                created_at,
+                source,
+                json.dumps(meta or {}),
+            ),
+        )
+
+        if _ensure_fts(conn):
+            conn.execute("DELETE FROM memories_fts WHERE memory_id = ?", (memory_id,))
+            conn.execute(
+                "INSERT INTO memories_fts (content, memory_id, scope, project_key, category) VALUES (?, ?, ?, ?, ?)",
+                (content, memory_id, scope, project_key or "", category),
+            )
+
+        vectors = _embed_texts([content])
+        if vectors:
+            vec = vectors[0]
+            conn.execute(
+                "INSERT OR REPLACE INTO memories_vec (memory_id, dim, vector) VALUES (?, ?, ?)",
+                (memory_id, len(vec), _vector_to_blob(vec)),
+            )
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _fetch_vectors(conn: sqlite3.Connection, ids: Iterable[str]) -> Dict[str, List[float]]:
+    id_list = [i for i in ids if i]
+    if not id_list:
+        return {}
+    placeholders = ",".join("?" for _ in id_list)
+    rows = conn.execute(
+        f"SELECT memory_id, vector FROM memories_vec WHERE memory_id IN ({placeholders})",
+        id_list,
+    ).fetchall()
+    out: Dict[str, List[float]] = {}
+    for r in rows:
+        out[r["memory_id"]] = _blob_to_vector(r["vector"])
+    return out
+
+
+def retrieve(
+    query: str,
+    *,
+    project_key: Optional[str] = None,
+    limit: int = 6,
+    candidate_limit: int = 50,
+) -> List[Dict[str, Any]]:
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    conn = _connect()
+    try:
+        items: List[Dict[str, Any]] = []
+
+        if _ensure_fts(conn):
+            fts_query = _build_fts_query(q)
+            if not fts_query:
+                return []
+            params: List[Any] = [fts_query]
+            where = "memories_fts MATCH ?"
+            if project_key:
+                where += " AND (scope = 'global' OR project_key = ?)"
+                params.append(project_key)
+            params.append(max(10, int(candidate_limit)))
+            rows = conn.execute(
+                f"""
+                SELECT memory_id, content, scope, project_key, category, bm25(memories_fts) AS bm25
+                FROM memories_fts
+                WHERE {where}
+                ORDER BY bm25
+                LIMIT ?;
+                """,
+                params,
+            ).fetchall()
+
+            for r in rows:
+                bm25 = float(r["bm25"]) if r["bm25"] is not None else 0.0
+                bm25 = max(0.0, bm25)
+                lex = 1.0 / (1.0 + bm25)
+                items.append({
+                    "entry_id": r["memory_id"],
+                    "text": r["content"],
+                    "scope": r["scope"],
+                    "project_key": r["project_key"],
+                    "category": r["category"],
+                    "bm25": bm25,
+                    "score": lex,
+                })
+        else:
+            # FTS not available; fallback to simple scan
+            rows = conn.execute(
+                """
+                SELECT memory_id, content, scope, project_key, category
+                FROM memories
+                ORDER BY created_at DESC
+                LIMIT ?;
+                """,
+                (max(200, int(candidate_limit)),),
+            ).fetchall()
+            q_lower = q.lower()
+            q_words = [w for w in q_lower.split() if len(w) > 2]
+            for r in rows:
+                text = (r["content"] or "").lower()
+                score = 0.0
+                if q_lower in text:
+                    score += 2.0
+                for w in q_words[:8]:
+                    if w in text:
+                        score += 0.25
+                if project_key and r["project_key"] == project_key:
+                    score += 0.4
+                if score <= 0.25:
+                    continue
+                items.append({
+                    "entry_id": r["memory_id"],
+                    "text": r["content"],
+                    "scope": r["scope"],
+                    "project_key": r["project_key"],
+                    "category": r["category"],
+                    "bm25": None,
+                    "score": score,
+                })
+
+        if not items:
+            return []
+
+        vectors = _embed_texts([q])
+        if vectors:
+            qvec = vectors[0]
+            vecs = _fetch_vectors(conn, [i["entry_id"] for i in items])
+            for it in items:
+                vec = vecs.get(it["entry_id"])
+                if vec:
+                    cos = _cosine(qvec, vec)
+                    it["score"] = (0.6 * it["score"]) + (0.4 * cos)
+
+        items.sort(key=lambda i: i.get("score", 0.0), reverse=True)
+        return items[: max(0, int(limit or 0))]
+    finally:
+        conn.close()
