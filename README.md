@@ -329,6 +329,8 @@ python -m spark.cli queue
 # Run validation scan
 python -m spark.cli validate
 
+# Tip: v1 validates user preferences + communication; monitor before expanding scope
+
 # View recent learnings
 python -m spark.cli learnings
 

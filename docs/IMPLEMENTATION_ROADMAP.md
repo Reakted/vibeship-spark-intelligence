@@ -270,6 +270,11 @@ All in `lib/cognitive_learner.py`:
 - `lib/validation_loop.py` - validates user preference/communication insights from prompts
 - `lib/bridge_cycle.py` - runs validation each cycle
 - `spark validate` - manual scan command
+- `tests/test_validation_loop.py` - matcher unit tests
+
+### Next (recommended)
+- Monitor v1 for a day or two to confirm low false positives
+- Then extend to tool-outcome validation (tie into observe predictions)
 
 ---
 

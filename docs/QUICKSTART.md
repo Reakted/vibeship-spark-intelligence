@@ -232,6 +232,12 @@ set SPARK_DEBUG=1
 
 Tip: leave it off for normal usage to avoid log noise.
 
+### Validation Loop (v1)
+
+The current validation loop focuses on user preferences + communication insights.
+Recommended: let it run for a day or two to confirm low false positives, then
+expand scope if needed.
+
 ## Next Steps
 
 1. **Integrate with your workflow** — Set up the hooks
