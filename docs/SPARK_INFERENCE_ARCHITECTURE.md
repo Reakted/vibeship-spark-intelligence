@@ -87,6 +87,11 @@ What's missing:
 - **Satisfaction signals** - Did user accept the result?
 - **Time between messages** - Hesitation = confusion?
 
+Current implementation notes:
+- Outcomes and predictions are now persisted in `~/.spark/outcomes.jsonl` and `~/.spark/predictions.jsonl`.
+- Non-tool outcomes (skills/orchestration/project decisions) are logged via `lib/outcome_log.py`.
+- Exposures used for predictions are tracked in `~/.spark/exposures.jsonl`.
+
 ### Enhancement: Richer Event Schema
 
 ```python

@@ -6,7 +6,7 @@ Related docs:
 - docs/INTEGRATION-PLAN.md
 - docs/VIBE_CODING_INTELLIGENCE_ROADMAP.md
 
-## Implementation Status (Updated 2026-01-29)
+## Implementation Status (Updated 2026-01-30)
 
 | # | Gap | Priority | Status | Implementation |
 |---|-----|----------|--------|----------------|
@@ -23,9 +23,9 @@ Related docs:
 | 21-30 | Philosophical Gaps | P5 | 🔴 NOT STARTED | Future work |
 | NEW | Worker Health Monitoring | P1 | ✅ DONE | `scripts/watchdog.py`, `lib/bridge_cycle.py` |
 
-### Key Discoveries (2026-01-29)
+### Key Discoveries (2026-01-30)
 - **Worker Health**: Already implemented! `scripts/watchdog.py` + `lib/bridge_cycle.py` provide full health monitoring. Events accumulated because services were started manually instead of via `start_spark.bat`.
-- **Validation Loop Gap (partial)**: v1 validates user preference/communication insights, but automatic prediction→outcome→learning is still missing.
+- **Validation Loop Gap (partial)**: v1 validates preference/communication insights; prediction registry + outcome matching exists, but explicit outcome check-ins and non-cognitive boost/decay are still missing.
 
 ---
 
