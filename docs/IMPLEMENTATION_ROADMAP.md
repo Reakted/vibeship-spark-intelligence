@@ -9,7 +9,7 @@
 | **P2** | Temporal Decay + Conflict Resolution | MEDIUM | Low | ✅ DONE |
 | **P3** | Project Context + Semantic Matching | HIGH | Medium | ✅ DONE |
 | **P4** | Agent Context Injection | HIGH | Medium | ✅ DONE |
-| **P5** | Worker Health Monitoring | HIGH | Medium | 🔴 NOT STARTED |
+| **P5** | Worker Health Monitoring | HIGH | Medium | ✅ DONE |
 | **P6** | Validation Loop (Predictions) | MEDIUM | Medium | 🔴 NOT STARTED |
 
 ---
@@ -199,33 +199,43 @@ All in `lib/cognitive_learner.py`:
 
 ---
 
-## Phase 5: Operational Reliability (NOT STARTED)
+## Phase 5: Operational Reliability (COMPLETED ✓)
+
+**Completed 2026-01-28**
 
 ### Worker Health Monitoring
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  WORKER HEALTH MONITORING (NEW - Discovered 2026-01-29)         │
+│  WORKER HEALTH MONITORING                                        │
 │                                                                 │
-│  Problem:                                                       │
-│  - bridge_worker.py processes queue but has no health checks    │
-│  - 2,000+ events accumulated without warning                    │
-│  - No auto-restart on crash                                     │
-│  - No alerting when queue grows                                 │
+│  ✅ Watchdog (scripts/watchdog.py)                              │
+│     - Auto-restarts sparkd, dashboard, bridge_worker            │
+│     - Checks HTTP health endpoints                              │
+│     - Monitors heartbeat age for bridge_worker                  │
+│     - Queue pressure warnings (> 500 events for 5+ mins)        │
+│     - Logs to ~/.spark/logs/watchdog.log                        │
 │                                                                 │
-│  Required:                                                      │
-│  🔴 Health check endpoint in sparkd for bridge_worker status    │
-│  🔴 Queue size alerting (warn if > N events)                    │
-│  🔴 Worker heartbeat monitoring                                 │
-│  🔴 Auto-restart capability                                     │
-│  🔴 Processing rate metrics                                     │
+│  ✅ Heartbeat System (lib/bridge_cycle.py)                      │
+│     - bridge_worker writes heartbeat every cycle                │
+│     - bridge_heartbeat_age_s() checks staleness                 │
+│     - File: ~/.spark/bridge_worker_heartbeat.json               │
 │                                                                 │
-│  Workers that should run continuously:                          │
-│  - sparkd.py (port 8787) - MCP daemon                           │
-│  - bridge_worker.py - Queue processing, context sync            │
-│  - dashboard.py (port 8585) - UI                                │
+│  ✅ CLI Health Check (spark/cli.py:cmd_health)                  │
+│     - python -m spark.cli health                                │
+│     - Shows all component status                                │
+│                                                                 │
+│  ✅ Auto-start in start_spark.bat                               │
+│     - Watchdog starts automatically                             │
+│     - Opt-out: set SPARK_NO_WATCHDOG=1                          │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### Implementation Files
+- `scripts/watchdog.py` - Auto-restart + queue alerts
+- `lib/bridge_cycle.py` - Heartbeat write/read helpers
+- `spark/cli.py:cmd_health` - CLI health check
+- `start_spark.bat` - Starts watchdog by default
 
 ---
 
@@ -266,7 +276,7 @@ All in `lib/cognitive_learner.py`:
 | Phase 2: Pattern Detection | ✅ DONE | `lib/pattern_detection/` (15/15 tests) |
 | Phase 3: Decay + Conflicts | ✅ DONE | `lib/cognitive_learner.py` |
 | Phase 4: Context + Semantic | ✅ DONE | `lib/project_context.py`, `lib/orchestration.py` |
-| Phase 5: Worker Health | 🔴 NOT STARTED | - |
+| Phase 5: Worker Health | ✅ DONE | `scripts/watchdog.py`, `lib/bridge_cycle.py` |
 | Phase 6: Validation Loop | 🔴 NOT STARTED | - |
 
 ---
@@ -279,7 +289,7 @@ All in `lib/cognitive_learner.py`:
 | Phase 2 | Patterns detected per session | 5+ meaningful patterns | ✅ |
 | Phase 3 | Stale learnings pruned | < 10% over 90 days old | ✅ |
 | Phase 4 | Context-appropriate learnings | 90%+ relevance score | ✅ |
-| Phase 5 | Worker uptime | 99%+ | 🔴 |
+| Phase 5 | Worker uptime | 99%+ | ✅ |
 | Phase 6 | Prediction accuracy tracking | Baseline + improvement | 🔴 |
 
 ---
@@ -287,14 +297,18 @@ All in `lib/cognitive_learner.py`:
 ## The Feedback Loop
 
 ```
-Current state (Phases 1-4 complete):
+Current state (Phases 1-5 complete):
 
   Capture → Detect → Store → Load → Apply
       ↑                              │
       └──────────────────────────────┘
               (via sync)
 
-Target state (with Phases 5-6):
+  + Watchdog ensures workers stay alive
+  + Heartbeat monitors processing health
+  + Queue alerts prevent backlog
+
+Target state (with Phase 6):
 
   Capture → Detect → Store → Load → Apply → Validate → Improve
       ↑                                                   │
@@ -302,4 +316,4 @@ Target state (with Phases 5-6):
               (continuous learning loop)
 ```
 
-**Next priority: Phase 5 (Worker Health)** - discovered 2026-01-29 when 2,000+ events accumulated because bridge_worker wasn't processing.
+**Next priority: Phase 6 (Validation Loop)** - automatic prediction→outcome→learning cycle.

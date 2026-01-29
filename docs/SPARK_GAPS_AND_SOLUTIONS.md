@@ -14,10 +14,10 @@
 | 8-10 | Content Learning, Export, Timeline | P3 | 🟡 PARTIAL | Some features exist |
 | 11-20 | Deep Gaps | P4 | 🔴 NOT STARTED | Future work |
 | 21-30 | Philosophical Gaps | P5 | 🔴 NOT STARTED | Future work |
-| NEW | Worker Health Monitoring | P1 | 🔴 NOT STARTED | Discovered 2026-01-29 |
+| NEW | Worker Health Monitoring | P1 | ✅ DONE | `scripts/watchdog.py`, `lib/bridge_cycle.py` |
 
 ### Key Discoveries (2026-01-29)
-- **Worker Health Gap**: bridge_worker.py has no health monitoring. 2,000+ events accumulated without warning.
+- **Worker Health**: Already implemented! `scripts/watchdog.py` + `lib/bridge_cycle.py` provide full health monitoring. Events accumulated because services were started manually instead of via `start_spark.bat`.
 - **Validation Loop Gap**: Decay exists but automatic prediction→outcome→learning does not.
 
 ---
