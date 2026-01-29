@@ -43,12 +43,15 @@ Goal: fix the quality loop with minimal code additions.
 | Reliability backfill | DONE | Missing confidence/validation fields coerced on load | `lib/cognitive_learner.py` |
 | Context diagnostics | DONE | `sync-context --diagnose` outputs selection breakdown | `spark/cli.py` |
 | Bridge status robustness | DONE | Handles dict vs object shapes | `lib/bridge.py` |
+| Outcome logging (skills/orchestration/project) | DONE | Unified outcomes log + non-tool signals | `lib/outcome_log.py`, `lib/feedback.py`, `lib/orchestration.py`, `lib/memory_capture.py` |
+| Prediction matching beyond tools | DONE | Non-cognitive matches counted in stats | `lib/prediction_loop.py` |
+| Contextual + skill exposures | DONE | Non-cognitive exposures recorded for predictions | `lib/bridge.py` |
 
 ### Heavy (Deferred)
 
 Goal: keep these in view without building them now.
 
-- Full prediction -> outcome validation loop (Phase 6) (IN PROGRESS: prediction registry + semantic matching + outcomes)
+- Full prediction -> outcome validation loop (Phase 6) (IN PROGRESS: registry + semantic matching + non-tool outcomes)
 - Active learning questions and goal inference
 - Team/shared memory + knowledge graph (PARTIAL: cross-project sink via SQLite + optional embeddings; migration + graph-lite edges)
 

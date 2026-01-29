@@ -50,14 +50,16 @@ What exists:
 - Event capture + queue
 - Cognitive insights + promotions
 - Memory banks + Mind sync
+- Skills index/router (when SPARK_SKILLS_DIR is set)
 - Orchestration core (agents, goals, handoffs)
+- Feedback loop (skill effectiveness + outcomes log)
 - Bridge worker + SPARK_CONTEXT.md
 
 Gaps:
-- Skills are not loaded or used at all
+- Skills are optional and not enforced in workflows
 - Advice is not surfaced consistently at decision time
-- Feedback loop is weak (reliability does not converge)
-- Orchestration is not tied to skill selection
+- Feedback loop is coarse (no explicit outcome check-ins)
+- Orchestration routing is still basic (no learning from handoff quality)
 
 ---
 
@@ -121,12 +123,13 @@ Goal: learn from outcomes without heavy ML.
   - skill effectiveness counters
   - cognitive times_validated / times_contradicted
 - Only adjust when advice was surfaced
+Current: skill effectiveness updates are wired; advice outcome tracking still missing.
 
 ### Phase 5: Orchestration Link (2-3 days)
 Goal: route work to the right skills/agents.
 - Allow agent registration with capabilities = skill IDs
 - When routing/handing off, prefer agents matching top skill
-- Record outcome in orchestration stats
+- Record outcome in orchestration stats (now logged for prediction loop)
 
 ---
 

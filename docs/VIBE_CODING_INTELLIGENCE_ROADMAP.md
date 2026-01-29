@@ -12,8 +12,8 @@ Sources:
 
 Current status highlights:
 - DONE: Session bootstrap, pattern detection, decay/conflicts, project context, worker health.
-- IN PROGRESS: Validation loop v1 (preference + communication validation).
-- PENDING: Skills index/router, advisor activation, feedback loop (skill effectiveness), full prediction->outcome validation.
+- IN PROGRESS: Validation loop v1 + prediction outcome matching (including non-tool outcomes).
+- PENDING: Advisor activation, explicit outcome check-ins, team memory, playbooks.
 
 ## Proposed Day-to-Day Improvements (What We Want)
 
@@ -36,10 +36,10 @@ Current status highlights:
 | Decision snapshots (micro "why") | None | Missing | No systematic capture of reasoning. |
 | Outcome check-ins | Validation Loop | Partial | v1 exists but does not ask for outcomes explicitly. |
 | Auto-apply constraints | Context Sync + SPARK_CONTEXT | Partial | Preferences are present but not enforced automatically. |
-| True prediction->outcome validation | Phase 6 Validation Loop | Partial | Prediction->outcome not implemented. |
+| True prediction->outcome validation | Phase 6 Validation Loop | Partial | Registry + matching + non-tool outcomes exist; missing explicit outcome check-ins + auto-boost/decay for non-cognitive. |
 | Noise control + consolidation | Dedupe signals, decay | Partial | Dedupe exists for signals; duplicates still common. |
 | Context gating | Context Sync + Bridge | Partial | Relevance matching exists but weak; needs stronger gating. |
-| Agent routing learns from outcomes | Orchestration + Feedback Loop | Missing | Feedback loop exists but not tied to routing. |
+| Agent routing learns from outcomes | Orchestration + Feedback Loop | Partial | Handoff outcomes logged + agent success_rate updated; routing still basic. |
 | Team memory across agents | Orchestration | Missing | No shared agent memory or tagging. |
 | Vibe-coding playbooks | Skills/Advisor | Missing | Skills exist conceptually but not enforced as workflows. |
 

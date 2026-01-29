@@ -31,6 +31,8 @@ It combines:
 - **Context-aware bootstrap** — filters learnings by project stack
 - **Semantic intent detection** — catches polite redirects and implicit preferences
 - **Skill extraction** — converts patterns into reusable skills
+- **Outcome logging** — records skill/orchestration/project decision outcomes
+- **Prediction loop** — validates insights against outcomes (beyond tool success/failure)
 
 ---
 

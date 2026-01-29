@@ -257,13 +257,14 @@ All in `lib/cognitive_learner.py`:
 │  Current state:                                                 │
 │  - Decay exists (time-based confidence reduction)               │
 │  - Manual validation via spark_validate MCP tool                │
+│  - Prediction registry + outcome matching (prompts/tool errors) │
+│  - Outcome logging for skills/orchestration/project decisions   │
 │                                                                 │
 │  Missing:                                                       │
-│  🔴 Automatic prediction generation from insights               │
-│  🔴 Outcome observation and matching                            │
-│  🔴 Auto-boost on correct predictions                           │
-│  🔴 Auto-decay on incorrect predictions                         │
-│  🔴 Surprise capture (unexpected outcomes → learning)           │
+│  🔴 Explicit outcome check-ins (user confirmation)              │
+│  🔴 Auto-boost/decay for non-cognitive predictions              │
+│  🔴 Surprise capture for non-cognitive contradictions           │
+│  🔴 Broader project outcome signals (launch metrics, etc.)      │
 │                                                                 │
 │  Example flow:                                                  │
 │  1. Insight: "User prefers TypeScript"                          │
@@ -276,12 +277,15 @@ All in `lib/cognitive_learner.py`:
 ### Implemented (v1)
 - `lib/validation_loop.py` - validates user preference/communication insights from prompts
 - `lib/bridge_cycle.py` - runs validation each cycle
+- `lib/prediction_loop.py` - prediction registry + semantic outcome matching
+- `lib/outcome_log.py` - shared outcome log for non-tool domains
 - `spark validate` - manual scan command
 - `tests/test_validation_loop.py` - matcher unit tests
 
 ### Next (recommended)
 - Monitor v1 for a day or two to confirm low false positives
-- Then extend to tool-outcome validation (tie into observe predictions)
+- Add explicit outcome check-ins + tighter matching thresholds
+- Extend prediction signals to project milestones and agent success KPIs
 
 ---
 
@@ -339,7 +343,7 @@ All in `lib/cognitive_learner.py`:
 | Phase 3: Decay + Conflicts | ✅ DONE | `lib/cognitive_learner.py` |
 | Phase 4: Context + Semantic | ✅ DONE | `lib/project_context.py`, `lib/orchestration.py` |
 | Phase 5: Worker Health | ✅ DONE | `scripts/watchdog.py`, `lib/bridge_cycle.py` |
-| Phase 6: Validation Loop | 🟡 IN PROGRESS | `lib/validation_loop.py`, `lib/bridge_cycle.py` |
+| Phase 6: Validation Loop | 🟡 IN PROGRESS | `lib/validation_loop.py`, `lib/bridge_cycle.py`, `lib/prediction_loop.py`, `lib/outcome_log.py` |
 | Phase 7: Content Learning | ✅ DONE | `lib/content_learner.py` (28/28 tests) |
 
 ---
@@ -353,7 +357,7 @@ All in `lib/cognitive_learner.py`:
 | Phase 3 | Stale learnings pruned | < 10% over 90 days old | ✅ |
 | Phase 4 | Context-appropriate learnings | 90%+ relevance score | ✅ |
 | Phase 5 | Worker uptime | 99%+ | ✅ |
-| Phase 6 | Prediction accuracy tracking | Baseline + improvement | 🔴 |
+| Phase 6 | Prediction accuracy tracking | Baseline + improvement | 🟡 |
 | Phase 7 | Code patterns detected | 3+ unique patterns/project | ✅ |
 
 ---
