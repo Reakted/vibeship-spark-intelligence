@@ -22,6 +22,49 @@ All inputs must be valid SparkEventV1 (see `lib/events.py`):
 - Design / UX signals.
 - Support / feedback signals.
 
+## MCP schemas (draft)
+These are the minimal payload fields the chip expects per profile. All fields are
+optional unless marked required by an observer.
+
+### VibeShip MCPs
+- Idearalph: idea_id, title, spec_summary, risk_tags, decisions
+- Mind: memory_id, query, results_count, top_memories
+- Spawner: route_id, skills, stack_recommendations, confidence
+- Scanner: scan_id, target, findings_count, severity_counts, fix_suggestions
+- Suparalph: test_id, db_target, security_findings, migrations, query_profile
+- Knowledge Base: doc_id, topic, snippets, citations
+
+### Engineering categories
+- Repo/PR: repo, pr_id, author, review_state, merge_state, changed_files, line_stats
+- CI/Test: build_id, status, duration_s, failed_tests, coverage_delta
+- Deploy: release_id, env, status, rollback, deploy_duration_s
+- Runtime: service, metric_name, metric_value, threshold, incident_id
+- Product: feature_id, metric_name, metric_delta, period
+- Design/UX: design_id, figma_file, accessibility_score, lighthouse_score
+- Support: ticket_id, category, severity, resolution_time_s, sentiment
+
+## Scopes (draft)
+All scopes are opt-in and disabled by default.
+
+### VibeShip MCP scopes
+- mcp.idearalph.read
+- mcp.mind.read
+- mcp.spawner.read
+- mcp.scanner.read
+- mcp.suparalph.read
+- mcp.knowledge_base.read
+
+### Engineering data scopes
+- repo.read
+- repo.diff.read
+- pr.read
+- ci.read
+- deploy.read
+- observability.read
+- product_analytics.read
+- design.read
+- support.read
+
 ## Triggers (high level)
 - Code change events: commit, diff, file change, refactor, lint/format.
 - Review events: PR opened, review requested, comments resolved, merge status.

@@ -138,7 +138,33 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/health":
             return self._text(200, "ok")
+        if path == "/v1/stats":
+            return self._get_stats()
+        if path == "/":
+            return self._json(200, {
+                "service": "Mind Lite+",
+                "version": "1.0.0",
+                "status": "running"
+            })
         return self._text(404, "not found")
+
+    def _get_stats(self):
+        conn = self._db()
+        try:
+            row = conn.execute("SELECT COUNT(*) as total FROM memories").fetchone()
+            total = row["total"] if row else 0
+            users = conn.execute("SELECT COUNT(DISTINCT user_id) as users FROM memories").fetchone()
+            user_count = users["users"] if users else 0
+        finally:
+            conn.close()
+        return self._json(200, {
+            "total_memories": total,
+            "total": total,
+            "count": total,
+            "total_learnings": total,
+            "users": user_count,
+            "status": "healthy"
+        })
 
     def do_POST(self):
         path = urlparse(self.path).path
