@@ -67,6 +67,7 @@ from lib.project_profile import (
     record_entry,
     infer_domain,
     set_phase,
+    completion_score,
 )
 from lib.memory_banks import store_memory
 from lib.outcome_log import append_outcome, make_outcome_id
@@ -145,6 +146,18 @@ def cmd_status(args):
         valid = ingest_stats.get("valid", 0) or 0
         print(f"   Ingest Valid (last {processed}): {valid}/{processed} ({invalid} invalid)")
     print()
+
+    # Project intelligence
+    try:
+        profile = load_profile(Path.cwd())
+        score = completion_score(profile)
+        print("🎯 Project Intelligence")
+        print(f"   Domain: {profile.get('domain')}  Phase: {profile.get('phase')}")
+        print(f"   Completion Score: {score['score']}/100")
+        print(f"   Done: {profile.get('done') or 'not set'}")
+        print()
+    except Exception:
+        pass
 
     # Worker heartbeat
     hb_age = bridge_heartbeat_age_s()
@@ -325,7 +338,7 @@ def cmd_promote(args):
     """Run promotion check."""
     dry_run = args.dry_run
     print(f"[SPARK] Checking for promotable insights (dry_run={dry_run})...")
-    stats = check_and_promote(dry_run=dry_run)
+    stats = check_and_promote(dry_run=dry_run, include_project=(not args.no_project))
     print(f"\nResults: {json.dumps(stats, indent=2)}")
 
 
@@ -660,8 +673,11 @@ def cmd_project_init(args):
 
 def cmd_project_status(args):
     profile = load_profile(Path(args.project) if args.project else None)
+    score = completion_score(profile)
     print(f"[SPARK] Project: {profile.get('project_key')}")
     print(f"   Domain: {profile.get('domain')}")
+    print(f"   Phase: {profile.get('phase')}")
+    print(f"   Completion Score: {score['score']}/100")
     print(f"   Goals: {len(profile.get('goals') or [])}")
     print(f"   Done: {'set' if profile.get('done') else 'not set'}")
     print(f"   Milestones: {len(profile.get('milestones') or [])}")
@@ -755,6 +771,7 @@ def cmd_project_phase(args):
     profile = load_profile(Path(args.project) if args.project else None)
     if args.set_phase:
         set_phase(profile, args.set_phase)
+        ensure_questions(profile)
         print(f"[SPARK] Phase set: {profile.get('phase')}")
     else:
         print(f"[SPARK] Phase: {profile.get('phase')}")
@@ -1236,6 +1253,7 @@ Examples:
     # promote
     promote_parser = subparsers.add_parser("promote", help="Run promotion check")
     promote_parser.add_argument("--dry-run", action="store_true", help="Don't actually promote")
+    promote_parser.add_argument("--no-project", action="store_true", help="Skip PROJECT.md update")
     
     # write
     subparsers.add_parser("write", help="Write learnings to markdown")

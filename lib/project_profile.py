@@ -62,6 +62,38 @@ DOMAIN_QUESTIONS: Dict[str, List[Dict[str, str]]] = {
     ],
 }
 
+PHASE_QUESTIONS: Dict[str, List[Dict[str, str]]] = {
+    "discovery": [
+        {"id": "phase_problem", "category": "goal", "question": "What problem are we solving and for whom?"},
+        {"id": "phase_constraints", "category": "risk", "question": "What constraints must we respect?"},
+    ],
+    "prototype": [
+        {"id": "phase_loop", "category": "done", "question": "What must feel good in the prototype?"},
+        {"id": "phase_risk", "category": "risk", "question": "What risk should we validate next?"},
+    ],
+    "polish": [
+        {"id": "phase_quality", "category": "quality", "question": "What quality bar must be met (feel, UX, stability)?"},
+        {"id": "phase_cohesion", "category": "quality", "question": "Where is cohesion or consistency still weak?"},
+    ],
+    "launch": [
+        {"id": "phase_success", "category": "metric", "question": "Which metric defines launch success?"},
+        {"id": "phase_post", "category": "risk", "question": "What could fail after launch?"},
+    ],
+}
+
+DOMAIN_PHASE_QUESTIONS: Dict[str, List[Dict[str, str]]] = {
+    "game_dev:prototype": [
+        {"id": "game_proto_feedback", "category": "feedback", "question": "What immediate player feedback is critical?"},
+        {"id": "game_proto_balance", "category": "insight", "question": "Any tuning or balance rule that must hold?"},
+    ],
+    "marketing:launch": [
+        {"id": "mkt_launch_kpi", "category": "metric", "question": "What KPI tells us this launch worked?"},
+    ],
+    "org:polish": [
+        {"id": "org_polish_bottleneck", "category": "risk", "question": "Which bottleneck still slows execution?"},
+    ],
+}
+
 
 def _now() -> float:
     return time.time()
@@ -170,7 +202,11 @@ def list_profiles() -> List[Dict[str, Any]]:
 
 def ensure_questions(profile: Dict[str, Any]) -> int:
     domain = profile.get("domain") or "general"
-    pool = DOMAIN_QUESTIONS.get(domain, DOMAIN_QUESTIONS["general"])
+    phase = profile.get("phase") or "discovery"
+    pool = []
+    pool.extend(DOMAIN_QUESTIONS.get(domain, DOMAIN_QUESTIONS["general"]))
+    pool.extend(PHASE_QUESTIONS.get(phase, []))
+    pool.extend(DOMAIN_PHASE_QUESTIONS.get(f"{domain}:{phase}", []))
     existing = {q.get("id") for q in profile.get("questions", []) if isinstance(q, dict)}
     added = 0
     for q in pool:
@@ -237,3 +273,46 @@ def set_phase(profile: Dict[str, Any], phase: str) -> None:
         return
     profile["phase"] = phase_val
     record_entry(profile, "phase_history", f"phase -> {phase_val}", meta={})
+
+
+def completion_score(profile: Dict[str, Any]) -> Dict[str, Any]:
+    done = bool(profile.get("done"))
+    goals = profile.get("goals") or []
+    milestones = profile.get("milestones") or []
+    questions = profile.get("questions") or []
+    answered = len([q for q in questions if q.get("answered_at")])
+    insights = profile.get("insights") or []
+    decisions = profile.get("decisions") or []
+    feedback = profile.get("feedback") or []
+    risks = profile.get("risks") or []
+
+    done_score = 20 if done else 0
+    goals_score = 10 if goals else 0
+    q_score = int((answered / max(1, len(questions))) * 20) if questions else 0
+
+    if milestones:
+        done_count = 0
+        for m in milestones:
+            status = (m.get("meta") or {}).get("status") or ""
+            if str(status).lower() in ("done", "complete", "completed"):
+                done_count += 1
+        milestone_score = int((done_count / max(1, len(milestones))) * 25)
+    else:
+        milestone_score = 0
+
+    phase = (profile.get("phase") or "discovery").lower()
+    phase_score = {"discovery": 2, "prototype": 5, "polish": 8, "launch": 10}.get(phase, 2)
+
+    craft_count = len(insights) + len(decisions) + len(feedback) + len(risks)
+    craft_score = min(15, craft_count * 3)
+
+    total = min(100, done_score + goals_score + q_score + milestone_score + phase_score + craft_score)
+    return {
+        "score": total,
+        "done": done_score,
+        "goals": goals_score,
+        "questions": q_score,
+        "milestones": milestone_score,
+        "phase": phase_score,
+        "craft": craft_score,
+    }

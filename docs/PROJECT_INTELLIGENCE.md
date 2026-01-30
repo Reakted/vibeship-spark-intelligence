@@ -46,6 +46,9 @@ Key fields:
    - `sync-context` and `bridge` inject a **Project Focus** block:
      - phase, done criteria, top milestones, goals
    - This ensures domain intelligence outweighs tool telemetry.
+6) **Promotion**
+   - `spark promote` writes a `PROJECT.md` block from the project profile.
+   - This keeps human-readable project intelligence close to the repo.
 
 ## Cross-project learning
 Project entries are stored in memory banks by category:

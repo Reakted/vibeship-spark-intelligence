@@ -402,7 +402,7 @@ python -m spark.cli project capture --type insight --text "Claw physics: grip st
 # View recent learnings
 python -m spark.cli learnings
 
-# Run promotion check
+# Run promotion check (also updates PROJECT.md)
 python -m spark.cli promote
 
 # Sync bootstrap context to platform files

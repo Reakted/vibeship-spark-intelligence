@@ -21,15 +21,19 @@ Promotion criteria:
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Any
 from dataclasses import dataclass
 
 from .cognitive_learner import CognitiveInsight, CognitiveCategory, get_cognitive_learner
+from .project_profile import load_profile
 
 
 # ============= Configuration =============
 DEFAULT_PROMOTION_THRESHOLD = 0.7  # 70% reliability
 DEFAULT_MIN_VALIDATIONS = 3
+PROJECT_SECTION = "## Project Intelligence"
+PROJECT_START = "<!-- SPARK_PROJECT_START -->"
+PROJECT_END = "<!-- SPARK_PROJECT_END -->"
 
 
 @dataclass
@@ -166,7 +170,90 @@ class Promoter:
         # Insert the new line before the next section
         new_content = content[:insert_idx].rstrip() + "\n" + line + "\n" + content[insert_idx:]
         file_path.write_text(new_content)
-    
+
+    def _upsert_block(self, content: str, block: str, section: str) -> str:
+        """Insert or replace a block wrapped by start/end markers in a section."""
+        if PROJECT_START in content and PROJECT_END in content:
+            start_idx = content.index(PROJECT_START)
+            end_idx = content.index(PROJECT_END) + len(PROJECT_END)
+            return content[:start_idx].rstrip() + "\n" + block + "\n" + content[end_idx:].lstrip()
+
+        if section in content:
+            insert_idx = content.index(section) + len(section)
+            insertion = "\n\n" + block + "\n"
+            return content[:insert_idx] + insertion + content[insert_idx:]
+
+        return content.rstrip() + f"\n\n{section}\n\n{block}\n"
+
+    def _render_project_block(self, profile: Dict[str, Any]) -> str:
+        """Render a concise project intelligence block for PROJECT.md."""
+        def _render_items(label: str, items: List[Dict[str, Any]], max_items: int = 5) -> List[str]:
+            if not items:
+                return []
+            lines = [f"{label}:"]
+            for entry in list(reversed(items))[:max_items]:
+                text = (entry.get("text") or "").strip()
+                meta = entry.get("meta") or {}
+                suffix = []
+                status = meta.get("status")
+                if status:
+                    suffix.append(f"status={status}")
+                why = meta.get("why")
+                if why:
+                    suffix.append(f"why={why}")
+                impact = meta.get("impact")
+                if impact:
+                    suffix.append(f"impact={impact}")
+                evidence = meta.get("evidence")
+                if evidence:
+                    suffix.append(f"evidence={evidence}")
+                trailer = f" ({'; '.join(suffix)})" if suffix else ""
+                if text:
+                    lines.append(f"- {text}{trailer}")
+            return lines
+
+        updated = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        lines = [
+            PROJECT_START,
+            f"Updated: {updated}",
+            f"Domain: {profile.get('domain') or 'general'}",
+            f"Phase: {profile.get('phase') or 'discovery'}",
+        ]
+
+        done = (profile.get("done") or "").strip()
+        if done:
+            lines.append(f"Done Definition: {done}")
+
+        lines.extend(_render_items("Goals", profile.get("goals") or []))
+        lines.extend(_render_items("Milestones", profile.get("milestones") or []))
+        lines.extend(_render_items("Decisions", profile.get("decisions") or []))
+        lines.extend(_render_items("Insights", profile.get("insights") or []))
+        lines.extend(_render_items("Feedback", profile.get("feedback") or []))
+        lines.extend(_render_items("Risks", profile.get("risks") or []))
+
+        lines.append(PROJECT_END)
+        return "\n".join(lines)
+
+    def promote_project_profile(self, profile: Optional[Dict[str, Any]] = None) -> bool:
+        """Promote project profile data into PROJECT.md."""
+        try:
+            profile_data = profile or load_profile(self.project_dir)
+            block = self._render_project_block(profile_data)
+            file_path = self.project_dir / "PROJECT.md"
+
+            if file_path.exists():
+                content = file_path.read_text()
+                new_content = self._upsert_block(content, block, PROJECT_SECTION)
+            else:
+                new_content = f"# Project\n\n{PROJECT_SECTION}\n\n{block}\n"
+
+            file_path.write_text(new_content)
+            print("[SPARK] Updated PROJECT.md from project profile")
+            return True
+        except Exception as e:
+            print(f"[SPARK] PROJECT.md update failed: {e}")
+            return False
+
     def get_promotable_insights(self) -> List[Tuple[CognitiveInsight, str, PromotionTarget]]:
         """Get insights ready for promotion with their target files."""
         cognitive = get_cognitive_learner()
@@ -213,11 +300,27 @@ class Promoter:
             print(f"[SPARK] Promotion failed: {e}")
             return False
     
-    def promote_all(self, dry_run: bool = False) -> Dict[str, int]:
+    def promote_all(self, dry_run: bool = False, include_project: bool = True) -> Dict[str, int]:
         """Promote all eligible insights."""
         promotable = self.get_promotable_insights()
-        stats = {"promoted": 0, "skipped": 0, "failed": 0}
-        
+        stats = {
+            "promoted": 0,
+            "skipped": 0,
+            "failed": 0,
+            "project_written": 0,
+            "project_failed": 0,
+        }
+
+        if include_project:
+            if dry_run:
+                print("  [DRY RUN] Would update PROJECT.md from project profile")
+                stats["skipped"] += 1
+            else:
+                if self.promote_project_profile():
+                    stats["project_written"] = 1
+                else:
+                    stats["project_failed"] = 1
+
         if not promotable:
             print("[SPARK] No insights ready for promotion")
             return stats
@@ -270,9 +373,13 @@ def get_promoter(project_dir: Optional[Path] = None) -> Promoter:
 
 
 # ============= Convenience Functions =============
-def check_and_promote(project_dir: Optional[Path] = None, dry_run: bool = False) -> Dict[str, int]:
+def check_and_promote(
+    project_dir: Optional[Path] = None,
+    dry_run: bool = False,
+    include_project: bool = True,
+) -> Dict[str, int]:
     """Check for promotable insights and promote them."""
-    return get_promoter(project_dir).promote_all(dry_run)
+    return get_promoter(project_dir).promote_all(dry_run, include_project=include_project)
 
 
 def get_promotion_status(project_dir: Optional[Path] = None) -> Dict:
