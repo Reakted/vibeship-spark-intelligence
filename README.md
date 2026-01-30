@@ -100,7 +100,17 @@ Windows helper:
 ./scripts/install_autostart_windows.ps1
 ```
 
-macOS/Linux: see `docs/QUICKSTART.md` for launchd/systemd examples.
+macOS (launchd):
+```bash
+launchctl load -w ~/Library/LaunchAgents/co.vibeship.spark.plist
+```
+
+Linux (systemd user service):
+```bash
+systemctl --user enable --now spark-up.service
+```
+
+Full Windows/macOS/Linux examples are in `docs/QUICKSTART.md`.
 
 Per-project ensure (optional):
 ```bash
