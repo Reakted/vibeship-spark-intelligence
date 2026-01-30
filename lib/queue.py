@@ -78,6 +78,13 @@ def quick_capture(event_type: EventType, session_id: str, data: Dict[str, Any],
     Method: Append-only file write, no locking, minimal processing
     """
     try:
+        if not isinstance(event_type, EventType):
+            raise ValueError("invalid_event_type")
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError("invalid_session_id")
+        if not isinstance(data, dict):
+            raise ValueError("invalid_data")
+
         QUEUE_DIR.mkdir(parents=True, exist_ok=True)
         
         event = SparkEvent(

@@ -20,6 +20,7 @@ Usage in .claude/settings.json:
 import sys
 import json
 import time
+import os
 from pathlib import Path
 
 # Add parent to path for imports
@@ -29,11 +30,13 @@ from lib.queue import quick_capture, EventType
 from lib.cognitive_learner import get_cognitive_learner
 from lib.feedback import update_skill_effectiveness, update_self_awareness_reliability
 from lib.diagnostics import log_debug
+from lib.outcome_checkin import record_checkin_request
 
 # ===== Prediction Tracking =====
 # We track predictions made at PreToolUse to compare at PostToolUse
 
 PREDICTION_FILE = Path.home() / ".spark" / "active_predictions.json"
+CHECKIN_MIN_S = int(os.environ.get("SPARK_OUTCOME_CHECKIN_MIN_S", "1800"))
 
 
 def save_prediction(session_id: str, tool_name: str, prediction: dict):
@@ -355,6 +358,17 @@ def main():
             kwargs["error"] = str(error)[:500]
     
     quick_capture(event_type, session_id, data, **kwargs)
+
+    # Optional: emit a lightweight outcome check-in request at session end.
+    if hook_event in ("Stop", "SessionEnd") and os.environ.get("SPARK_OUTCOME_CHECKIN") == "1":
+        recorded = record_checkin_request(
+            session_id=session_id,
+            event=hook_event,
+            reason="session_end",
+            min_interval_s=CHECKIN_MIN_S,
+        )
+        if recorded and os.environ.get("SPARK_OUTCOME_CHECKIN_PROMPT") == "1":
+            sys.stderr.write("[SPARK] Outcome check-in: run `spark outcome`\\n")
 
     sys.exit(0)
 

@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
-from lib.events import SparkEventV1
+from lib.events import SparkEventV1, validate_event_dict
 from lib.queue import quick_capture, EventType
 from lib.orchestration import register_agent, recommend_agent, record_handoff, get_orchestrator
 from lib.bridge_cycle import read_bridge_heartbeat, run_bridge_cycle, write_bridge_heartbeat
@@ -33,6 +33,7 @@ from lib.diagnostics import setup_component_logging
 PORT = 8787
 TOKEN = os.environ.get("SPARKD_TOKEN")
 MAX_BODY_BYTES = int(os.environ.get("SPARKD_MAX_BODY_BYTES", "262144"))
+INVALID_EVENTS_FILE = Path.home() / ".spark" / "invalid_events.jsonl"
 
 
 def _json(handler: BaseHTTPRequestHandler, code: int, payload):
@@ -51,6 +52,20 @@ def _text(handler: BaseHTTPRequestHandler, code: int, body: str):
     handler.send_header("Content-Length", str(len(raw)))
     handler.end_headers()
     handler.wfile.write(raw)
+
+
+def _quarantine_invalid(payload, reason: str) -> None:
+    try:
+        INVALID_EVENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        row = {
+            "reason": reason,
+            "received_at": time.time(),
+            "payload": payload,
+        }
+        with INVALID_EVENTS_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        return
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -180,8 +195,19 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b"{}"
         try:
             data = json.loads(body.decode("utf-8") or "{}")
+        except Exception as e:
+            _quarantine_invalid(body.decode("utf-8", errors="replace"), f"json_decode:{type(e).__name__}")
+            return _json(self, 400, {"ok": False, "error": "invalid_json", "detail": str(e)[:200]})
+
+        ok, err = validate_event_dict(data, strict=True)
+        if not ok:
+            _quarantine_invalid(data, err)
+            return _json(self, 400, {"ok": False, "error": "invalid_event", "detail": err})
+
+        try:
             evt = SparkEventV1.from_dict(data)
         except Exception as e:
+            _quarantine_invalid(data, f"parse_error:{type(e).__name__}")
             return _json(self, 400, {"ok": False, "error": "invalid_event", "detail": str(e)[:200]})
 
         # Store as a Spark queue event (POST_TOOL/USER_PROMPT mapping is adapter-defined)

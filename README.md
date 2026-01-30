@@ -374,6 +374,18 @@ python -m spark.cli validate
 
 # Tip: v1 validates user preferences + communication; monitor before expanding scope
 
+# Record explicit outcome check-in
+python -m spark.cli outcome --result yes --text "Worked as expected"
+
+# Show pending outcome check-in requests
+python -m spark.cli outcome --pending
+
+# Evaluate predictions vs outcomes (last 7 days)
+python -m spark.cli eval --days 7
+
+# Validate recent queue events (ingest hygiene)
+python -m spark.cli validate-ingest --limit 200
+
 # View recent learnings
 python -m spark.cli learnings
 

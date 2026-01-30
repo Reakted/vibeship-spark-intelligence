@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 
 class SparkEventKind(str, Enum):
@@ -57,3 +57,40 @@ class SparkEventV1:
             payload=dict(d.get("payload") or {}),
             trace_id=(str(d["trace_id"]) if d.get("trace_id") else None),
         )
+
+
+def validate_event_dict(d: Dict[str, Any], *, strict: bool = True) -> Tuple[bool, str]:
+    """Validate a raw SparkEventV1 dict before ingestion."""
+    if not isinstance(d, dict):
+        return False, "not_object"
+    required = ("v", "source", "kind", "ts", "session_id", "payload")
+    for key in required:
+        if key not in d:
+            return False, f"missing_{key}"
+    try:
+        if int(d.get("v", 0)) != 1:
+            return False, "unsupported_version"
+    except Exception:
+        return False, "invalid_version"
+    source = d.get("source")
+    if not isinstance(source, str) or not source.strip():
+        return False, "invalid_source"
+    kind = str(d.get("kind") or "")
+    allowed = {k.value for k in SparkEventKind}
+    if kind not in allowed:
+        return False, "invalid_kind"
+    session_id = d.get("session_id")
+    if not isinstance(session_id, str) or not session_id.strip():
+        return False, "invalid_session_id"
+    try:
+        ts = float(d.get("ts") or 0)
+        if ts <= 0:
+            return False, "invalid_ts"
+    except Exception:
+        return False, "invalid_ts"
+    payload = d.get("payload")
+    if payload is None and strict:
+        return False, "missing_payload"
+    if payload is not None and not isinstance(payload, dict):
+        return False, "invalid_payload"
+    return True, ""

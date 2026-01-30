@@ -298,6 +298,8 @@ def match_predictions(
         matched_ids.add(pred_id)
 
         out_pol = best.get("polarity")
+        if out_pol not in ("pos", "neg"):
+            continue
         if pred_type == "failure_pattern":
             validated = True
         else:

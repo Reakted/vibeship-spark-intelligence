@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 OUTCOMES_FILE = Path.home() / ".spark" / "outcomes.jsonl"
 
@@ -36,3 +37,34 @@ def append_outcomes(rows: Iterable[Dict[str, Any]]) -> int:
 
 def append_outcome(row: Dict[str, Any]) -> int:
     return append_outcomes([row] if row else [])
+
+
+def build_explicit_outcome(
+    result: str,
+    text: str = "",
+    *,
+    tool: Optional[str] = None,
+    created_at: Optional[float] = None,
+) -> Tuple[Dict[str, Any], str]:
+    """Build an explicit outcome row from a user check-in."""
+    res = (result or "").strip().lower()
+    if res in {"yes", "y", "success", "ok", "good", "worked"}:
+        polarity = "pos"
+    elif res in {"partial", "mixed", "some", "meh", "unclear"}:
+        polarity = "neutral"
+    else:
+        polarity = "neg"
+    now = float(created_at or time.time())
+    clean_text = (text or "").strip()
+    if not clean_text:
+        clean_text = f"explicit check-in: {res or 'unknown'}"
+    row = {
+        "outcome_id": make_outcome_id(str(now), res, clean_text[:120]),
+        "event_type": "explicit_checkin",
+        "tool": tool,
+        "text": clean_text,
+        "polarity": polarity,
+        "result": res or "unknown",
+        "created_at": now,
+    }
+    return row, polarity

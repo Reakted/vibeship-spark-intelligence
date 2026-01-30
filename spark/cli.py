@@ -17,6 +17,9 @@ Usage:
     python -m spark.cli write      # Write learnings to markdown
     python -m spark.cli health     # Health check
     python -m spark.cli memory     # Memory capture suggestions
+    python -m spark.cli outcome    # Record explicit outcome check-in
+    python -m spark.cli eval       # Evaluate predictions vs outcomes
+    python -m spark.cli validate-ingest  # Validate recent queue events
 """
 
 import sys
@@ -45,6 +48,10 @@ from lib.bridge_cycle import run_bridge_cycle, write_bridge_heartbeat, bridge_he
 from lib.pattern_detection import get_pattern_backlog
 from lib.validation_loop import process_validation_events, get_validation_backlog, get_validation_state
 from lib.prediction_loop import get_prediction_state
+from lib.evaluation import evaluate_predictions
+from lib.outcome_log import append_outcome, build_explicit_outcome
+from lib.outcome_checkin import list_checkins
+from lib.ingest_validation import scan_queue_events
 from lib.memory_capture import (
     process_recent_memory_events,
     list_pending as capture_list_pending,
@@ -104,6 +111,12 @@ def cmd_status(args):
     print(f"   Needs Rotation: {'Yes' if queue_stats['needs_rotation'] else 'No'}")
     print(f"   Pattern Backlog: {get_pattern_backlog()}")
     print(f"   Validation Backlog: {get_validation_backlog()}")
+    ingest_stats = scan_queue_events(limit=200)
+    processed = ingest_stats.get("processed", 0) or 0
+    invalid = ingest_stats.get("invalid", 0) or 0
+    if processed:
+        valid = ingest_stats.get("valid", 0) or 0
+        print(f"   Ingest Valid (last {processed}): {valid}/{processed} ({invalid} invalid)")
     print()
 
     # Worker heartbeat
@@ -460,7 +473,74 @@ def cmd_capture(args):
     if args.accept:
         ok = capture_accept(args.accept)
         print("✓ Accepted" if ok else "✗ Not found / not pending")
+    return
+
+
+def cmd_outcome(args):
+    """Record an explicit outcome check-in."""
+    if args.pending:
+        items = list_checkins(limit=args.limit)
+        if not items:
+            print("[SPARK] No pending check-ins found.")
+            return
+        print("[SPARK] Recent check-in requests:")
+        for item in items:
+            ts = item.get("created_at")
+            sid = item.get("session_id") or "unknown"
+            event = item.get("event") or "unknown"
+            print(f"   - {sid} ({event}) @ {ts}")
         return
+
+    result = args.result
+    text = args.text
+    tool = args.tool
+
+    if not result:
+        try:
+            result = input("Outcome (yes/no/partial): ").strip()
+        except Exception:
+            result = "unknown"
+    if text is None:
+        try:
+            text = input("Notes (optional): ").strip()
+        except Exception:
+            text = ""
+
+    row, polarity = build_explicit_outcome(
+        result=result,
+        text=text or "",
+        tool=tool,
+        created_at=args.time,
+    )
+    append_outcome(row)
+    print(f"[SPARK] Outcome recorded: {row.get('result')} (polarity={polarity})")
+
+
+def cmd_eval(args):
+    """Evaluate prediction accuracy against outcomes."""
+    max_age_s = float(args.days) * 24 * 3600
+    stats = evaluate_predictions(max_age_s=max_age_s, sim_threshold=args.sim)
+    print("[SPARK] Evaluation")
+    print(f"   Predictions: {stats['predictions']}")
+    print(f"   Outcomes: {stats['outcomes']}")
+    print(f"   Matched: {stats['matched']}")
+    print(f"   Validated: {stats['validated']}")
+    print(f"   Contradicted: {stats['contradicted']}")
+    print(f"   Precision: {stats['precision']:.0%}")
+    print(f"   Outcome Coverage: {stats['outcome_coverage']:.0%}")
+
+
+def cmd_validate_ingest(args):
+    """Validate recent queue events for schema issues."""
+    stats = scan_queue_events(limit=args.limit)
+    print("[SPARK] Ingest validation")
+    print(f"   Processed: {stats['processed']}")
+    print(f"   Valid: {stats['valid']}")
+    print(f"   Invalid: {stats['invalid']}")
+    if stats["reasons"]:
+        print("   Reasons:")
+        for k, v in stats["reasons"].items():
+            print(f"     - {k}: {v}")
 
     if args.reject:
         ok = capture_reject(args.reject)
@@ -850,6 +930,24 @@ Examples:
     # events
     events_parser = subparsers.add_parser("events", help="Show recent events")
     events_parser.add_argument("--limit", "-n", type=int, default=20, help="Number to show")
+
+    # outcome
+    outcome_parser = subparsers.add_parser("outcome", help="Record explicit outcome check-in")
+    outcome_parser.add_argument("--result", choices=["yes", "no", "partial", "mixed", "success", "failure"], help="Outcome result")
+    outcome_parser.add_argument("--text", "-t", default=None, help="Optional notes")
+    outcome_parser.add_argument("--tool", help="Associated tool or topic")
+    outcome_parser.add_argument("--time", type=float, default=None, help="Unix timestamp override")
+    outcome_parser.add_argument("--pending", action="store_true", help="List recent check-in requests")
+    outcome_parser.add_argument("--limit", type=int, default=5, help="How many pending items to show")
+
+    # eval
+    eval_parser = subparsers.add_parser("eval", help="Evaluate predictions against outcomes")
+    eval_parser.add_argument("--days", type=float, default=7.0, help="Lookback window in days")
+    eval_parser.add_argument("--sim", type=float, default=0.72, help="Similarity threshold (0-1)")
+
+    # validate-ingest
+    ingest_parser = subparsers.add_parser("validate-ingest", help="Validate recent queue events")
+    ingest_parser.add_argument("--limit", "-n", type=int, default=200, help="Events to scan")
     
     # learn
     learn_parser = subparsers.add_parser("learn", help="Manually learn an insight")
@@ -934,6 +1032,9 @@ Examples:
         "decay": cmd_decay,
         "health": cmd_health,
         "events": cmd_events,
+        "outcome": cmd_outcome,
+        "eval": cmd_eval,
+        "validate-ingest": cmd_validate_ingest,
         "capture": cmd_capture,
         "learn": cmd_learn,
         "surprises": cmd_surprises,
