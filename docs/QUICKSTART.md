@@ -74,24 +74,97 @@ python3 -m spark.cli down
 # or: spark down
 ```
 
-### Auto-start at Login (Recommended)
+### Automated Always-On (Quick Start)
 
-Keep Spark always on so hooks never miss events.
+Keep Spark running at login so hooks never miss events.
 
-**Windows Task Scheduler**
-- Action: `spark`
-- Args: `up --sync-context`
-- Start in: your repo root (or any folder on your PATH)
-- Trigger: At log on
+#### Windows (Task Scheduler)
+Manual setup:
+1) Open Task Scheduler -> Create Task
+2) Trigger: At log on
+3) Action: Start a program
+   - Program/script: `spark` (or full `python.exe`)
+   - Add arguments: `up --sync-context --project "C:\path\to\your\project"`
+   - Start in: `C:\path\to\your\project`
 
 Helper script (creates the task automatically):
 ```powershell
 ./scripts/install_autostart_windows.ps1
 ```
 
-**macOS/Linux (cron or systemd)**
+Remove the task:
+```powershell
+./scripts/remove_autostart_windows.ps1
 ```
-@reboot python3 -m spark.cli up --sync-context >/dev/null 2>&1
+
+If you get "Access is denied", run PowerShell as Administrator.
+
+#### macOS (launchd)
+Create `~/Library/LaunchAgents/co.vibeship.spark.plist`:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key><string>co.vibeship.spark</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/python3</string>
+      <string>-m</string>
+      <string>spark.cli</string>
+      <string>up</string>
+      <string>--sync-context</string>
+      <string>--project</string>
+      <string>/path/to/your/project</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>$HOME/.spark/logs/launchd.out</string>
+    <key>StandardErrorPath</key><string>$HOME/.spark/logs/launchd.err</string>
+  </dict>
+</plist>
+```
+
+Load it:
+```bash
+launchctl load -w ~/Library/LaunchAgents/co.vibeship.spark.plist
+```
+
+Unload it:
+```bash
+launchctl unload ~/Library/LaunchAgents/co.vibeship.spark.plist
+```
+
+#### Linux (systemd user service)
+Create `~/.config/systemd/user/spark-up.service`:
+```ini
+[Unit]
+Description=Spark background services
+
+[Service]
+Type=simple
+ExecStart=python3 -m spark.cli up --sync-context --project /path/to/your/project
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+Enable and start:
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now spark-up.service
+```
+
+Stop:
+```bash
+systemctl --user disable --now spark-up.service
+```
+
+#### Fallback (cron)
+If you prefer cron:
+```
+@reboot python3 -m spark.cli up --sync-context --project /path/to/your/project >/dev/null 2>&1
 ```
 
 ### Per-Project Ensure (Optional)
@@ -107,6 +180,11 @@ spark ensure --sync-context --project .
 Windows helper (run from project root):
 ```bat
 scripts\ensure_spark.bat
+```
+
+macOS/Linux helper:
+```bash
+spark ensure --sync-context --project "$(pwd)"
 ```
 
 ### Create Learnings (Programmatic)
