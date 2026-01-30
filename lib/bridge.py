@@ -17,6 +17,7 @@ from lib.memory_banks import infer_project_key, retrieve as bank_retrieve
 from lib.tastebank import infer_domain as taste_infer_domain, retrieve as taste_retrieve
 from lib.diagnostics import log_debug
 from lib.exposure_tracker import record_exposures, infer_latest_session_id
+from lib.project_profile import load_profile
 
 # Paths
 SPARK_DIR = Path(__file__).parent.parent
@@ -383,6 +384,11 @@ def generate_active_context(query: Optional[str] = None) -> str:
     lessons = get_recent_lessons()
     opinions = get_strong_opinions()
     growth = get_growth_moments()
+    project_profile = None
+    try:
+        project_profile = load_profile(Path.cwd())
+    except Exception:
+        project_profile = None
     advisor_block = ""
     if query:
         try:
@@ -448,6 +454,24 @@ def generate_active_context(query: Optional[str] = None) -> str:
     if query:
         lines.append("## Current Focus")
         lines.append(query.replace("\n", " ")[:200] + ("..." if len(query) > 200 else ""))
+        lines.append("")
+
+    if project_profile:
+        lines.append("## Project Focus")
+        phase = project_profile.get("phase") or ""
+        done = project_profile.get("done") or ""
+        if phase:
+            lines.append(f"- Phase: {phase}")
+        if done:
+            lines.append(f"- Done means: {done}")
+        goals = project_profile.get("goals") or []
+        for g in goals[:3]:
+            lines.append(f"- Goal: {g.get('text') or g}")
+        milestones = project_profile.get("milestones") or []
+        for m in milestones[:3]:
+            status = (m.get("meta") or {}).get("status") or ""
+            tag = f" [{status}]" if status else ""
+            lines.append(f"- Milestone: {m.get('text')}{tag}")
         lines.append("")
 
     if contextual:

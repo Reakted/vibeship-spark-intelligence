@@ -18,8 +18,9 @@ from .output_adapters import (
     write_exports,
 )
 from .project_context import get_project_context, filter_insights_for_context
-from .sync_tracker import get_sync_tracker
+from .project_profile import load_profile
 from .exposure_tracker import record_exposures, infer_latest_session_id
+from .sync_tracker import get_sync_tracker
 
 
 DEFAULT_MIN_RELIABILITY = 0.7
@@ -219,6 +220,7 @@ def _load_promoted_lines(project_dir: Path) -> List[str]:
 def _format_context(
     insights: List[CognitiveInsight],
     promoted: List[str],
+    project_profile: Optional[Dict[str, Any]] = None,
 ) -> str:
     lines = [
         "## Spark Bootstrap",
@@ -236,6 +238,26 @@ def _format_context(
         lines.append(
             f"- [{ins.category.value}] {ins.insight} ({rel} reliable, {ins.times_validated} validations)"
         )
+
+    if project_profile:
+        done = project_profile.get("done") or ""
+        goals = project_profile.get("goals") or []
+        milestones = project_profile.get("milestones") or []
+        phase = project_profile.get("phase") or ""
+        lines.append("")
+        lines.append("## Project Focus")
+        if phase:
+            lines.append(f"- Phase: {phase}")
+        if done:
+            lines.append(f"- Done means: {done}")
+        if goals:
+            for g in goals[:3]:
+                lines.append(f"- Goal: {g.get('text') or g}")
+        if milestones:
+            for m in milestones[:3]:
+                status = (m.get("meta") or {}).get("status") or ""
+                tag = f" [{status}]" if status else ""
+                lines.append(f"- Milestone: {m.get('text')}{tag}")
 
     if promoted:
         lines.append("")
@@ -319,12 +341,38 @@ def sync_context(
     except Exception:
         pass
 
+    try:
+        profile = load_profile(root)
+        p_exposures = []
+        if profile.get("done"):
+            p_exposures.append({
+                "insight_key": f"project:done:{profile.get('project_key')}",
+                "category": "project_done",
+                "text": profile.get("done"),
+            })
+        for m in profile.get("milestones") or []:
+            p_exposures.append({
+                "insight_key": f"project:milestone:{profile.get('project_key')}:{m.get('entry_id')}",
+                "category": "project_milestone",
+                "text": m.get("text"),
+            })
+        if p_exposures:
+            record_exposures("sync_context:project", p_exposures, session_id=infer_latest_session_id())
+    except Exception:
+        pass
+
     promoted = _load_promoted_lines(root) if include_promoted else []
     # De-dupe promoted vs selected insights
     seen = {_normalize_text(i.insight) for i in insights}
     promoted = [p for p in promoted if _normalize_text(p) not in seen]
 
-    context = _format_context(insights, promoted)
+    profile = None
+    try:
+        profile = load_profile(root)
+    except Exception:
+        profile = None
+
+    context = _format_context(insights, promoted, project_profile=profile)
     targets: Dict[str, str] = {}
 
     try:

@@ -79,6 +79,13 @@ def evaluate_predictions(
                 linked.sort(key=lambda o: float(o.get("created_at") or 0.0), reverse=True)
                 best = linked[0]
                 best_sim = 1.0
+        entity_id = pred.get("entity_id")
+        if entity_id:
+            linked_entity = [o for o in outcomes if o.get("entity_id") == entity_id]
+            if linked_entity:
+                linked_entity.sort(key=lambda o: float(o.get("created_at") or 0.0), reverse=True)
+                best = linked_entity[0]
+                best_sim = 1.0
         pred_sid = pred.get("session_id")
         cand_indices = list(range(len(outcomes)))
         if pred_sid:

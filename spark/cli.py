@@ -66,8 +66,10 @@ from lib.project_profile import (
     record_answer,
     record_entry,
     infer_domain,
+    set_phase,
 )
 from lib.memory_banks import store_memory
+from lib.outcome_log import append_outcome, make_outcome_id
 from lib.memory_capture import (
     process_recent_memory_events,
     list_pending as capture_list_pending,
@@ -622,11 +624,19 @@ def cmd_validate_ingest(args):
 def _print_project_questions(profile, limit: int = 5):
     questions = profile.get("questions") or []
     unanswered = [q for q in questions if not q.get("answered_at")]
-    if not unanswered:
+    extra = []
+    if not profile.get("done"):
+        extra.append({"category": "done", "id": "proj_done", "question": "How will you know this is complete?"})
+    if not profile.get("goals"):
+        extra.append({"category": "goal", "id": "proj_goal", "question": "What is the primary goal for this project?"})
+    if not profile.get("milestones"):
+        extra.append({"category": "milestone", "id": "proj_milestone", "question": "What is the next milestone?"})
+
+    if not unanswered and not extra:
         print("[SPARK] No unanswered questions.")
         return
     print("[SPARK] Suggested questions:")
-    for q in unanswered[: max(1, int(limit or 5))]:
+    for q in (unanswered + extra)[: max(1, int(limit or 5))]:
         cat = q.get("category") or "general"
         qid = q.get("id") or "unknown"
         text = q.get("question") or ""
@@ -709,7 +719,7 @@ def cmd_project_capture(args):
     if entry_type == "done":
         profile["done"] = text
         save_profile(profile)
-    record_entry(profile, entry_type, text, meta=meta)
+    entry = record_entry(profile, entry_type, text, meta=meta)
 
     category_map = {
         "goal": "project_goal",
@@ -721,7 +731,33 @@ def cmd_project_capture(args):
         "risk": "project_risk",
     }
     store_memory(text, category=category_map.get(entry_type, "project_note"))
+
+    # If milestone or done is marked complete, record an outcome for validation.
+    status = (args.status or "").strip().lower()
+    if entry_type == "done" or (entry_type == "milestone" and status in ("done", "complete", "completed")):
+        sid = infer_latest_session_id()
+        outcome_text = f"{entry_type} complete: {text}"
+        append_outcome({
+            "outcome_id": make_outcome_id(profile.get("project_key") or "project", entry.get("entry_id") or "", "done"),
+            "event_type": "project_outcome",
+            "text": outcome_text,
+            "polarity": "pos",
+            "created_at": time.time(),
+            "project_key": profile.get("project_key"),
+            "domain": profile.get("domain"),
+            "entity_id": entry.get("entry_id"),
+            "session_id": sid,
+        })
     print(f"[SPARK] Captured {entry_type}.")
+
+
+def cmd_project_phase(args):
+    profile = load_profile(Path(args.project) if args.project else None)
+    if args.set_phase:
+        set_phase(profile, args.set_phase)
+        print(f"[SPARK] Phase set: {profile.get('phase')}")
+    else:
+        print(f"[SPARK] Phase: {profile.get('phase')}")
 
 def cmd_surprises(args):
     """Show surprise moments (aha!)."""
@@ -1341,6 +1377,10 @@ Examples:
     project_capture.add_argument("--impact", help="Impact")
     project_capture.add_argument("--evidence", help="Evidence or feedback source")
 
+    project_phase = project_sub.add_parser("phase", help="Get or set project phase")
+    project_phase.add_argument("--set", dest="set_phase", help="Set phase (discovery/prototype/polish/launch)")
+    project_phase.add_argument("--project", help="Project root path")
+
     # moltbook - AI agent social network
     moltbook_parser = subparsers.add_parser("moltbook", help="Moltbook agent - social network for AI agents")
     moltbook_parser.add_argument("action", nargs="?", default="status",
@@ -1408,6 +1448,8 @@ Examples:
             cmd_project_answer(args)
         elif args.project_cmd == "capture":
             cmd_project_capture(args)
+        elif args.project_cmd == "phase":
+            cmd_project_phase(args)
         else:
             project_parser.print_help()
         return

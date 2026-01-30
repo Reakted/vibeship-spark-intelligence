@@ -21,6 +21,7 @@ from lib.diagnostics import log_debug
 from lib.exposure_tracker import read_recent_exposures
 from lib.embeddings import embed_texts
 from lib.outcome_log import OUTCOMES_FILE, append_outcomes, make_outcome_id
+from lib.project_profile import list_profiles
 
 
 PREDICTIONS_FILE = Path.home() / ".spark" / "predictions.jsonl"
@@ -141,6 +142,67 @@ def build_predictions(max_age_s: float = 6 * 3600) -> int:
             "session_id": session_id,
         }
         preds.append(pred)
+
+    _append_jsonl(PREDICTIONS_FILE, preds)
+    return len(preds)
+
+
+def build_project_predictions(max_age_s: float = 14 * 24 * 3600) -> int:
+    """Generate predictions from project profiles (done + milestones)."""
+    profiles = list_profiles()
+    if not profiles:
+        return 0
+    existing = {p.get("prediction_id") for p in _load_jsonl(PREDICTIONS_FILE, limit=800)}
+    now = time.time()
+    preds: List[Dict] = []
+
+    for profile in profiles:
+        project_key = profile.get("project_key") or "project"
+        domain = profile.get("domain") or "general"
+        done_text = profile.get("done") or ""
+        if done_text:
+            pred_id = _hash_id("project_done", project_key, done_text[:120])
+            if pred_id not in existing:
+                preds.append({
+                    "prediction_id": pred_id,
+                    "insight_key": f"project:done:{project_key}",
+                    "category": "project_done",
+                    "type": "project_done",
+                    "text": f"Project done: {done_text}",
+                    "expected_polarity": "pos",
+                    "created_at": now,
+                    "expires_at": now + max_age_s,
+                    "source": "project_profile",
+                    "project_key": project_key,
+                    "domain": domain,
+                    "entity_id": _hash_id(project_key, "done"),
+                })
+
+        for m in profile.get("milestones") or []:
+            text = (m.get("text") or "").strip()
+            if not text:
+                continue
+            status = (m.get("meta") or {}).get("status") or ""
+            if str(status).lower() in ("done", "complete", "completed"):
+                continue
+            entity_id = m.get("entry_id") or _hash_id(project_key, "milestone", text[:120])
+            pred_id = _hash_id("project_milestone", project_key, entity_id)
+            if pred_id in existing:
+                continue
+            preds.append({
+                "prediction_id": pred_id,
+                "insight_key": f"project:milestone:{project_key}:{entity_id}",
+                "category": "project_milestone",
+                "type": "project_milestone",
+                "text": f"Milestone pending: {text}",
+                "expected_polarity": "pos",
+                "created_at": now,
+                "expires_at": now + max_age_s,
+                "source": "project_profile",
+                "project_key": project_key,
+                "domain": domain,
+                "entity_id": entity_id,
+            })
 
     _append_jsonl(PREDICTIONS_FILE, preds)
     return len(preds)
@@ -292,6 +354,12 @@ def match_predictions(
                 links = outcome.get("linked_insights") or []
                 if isinstance(links, list) and insight_key in links:
                     linked_hits.append(outcome)
+        # Hard link by entity_id (project milestones/done)
+        entity_id = pred.get("entity_id")
+        if entity_id:
+            for outcome in outcomes:
+                if outcome.get("entity_id") == entity_id:
+                    linked_hits.append(outcome)
         if linked_hits:
             linked_hits.sort(key=lambda o: float(o.get("created_at") or 0.0), reverse=True)
             best = linked_hits[0]
@@ -380,6 +448,10 @@ def process_prediction_cycle(limit: int = 200) -> Dict[str, int]:
         stats["predictions"] = build_predictions()
     except Exception as e:
         log_debug("prediction", "build_predictions failed", e)
+    try:
+        stats["predictions"] += build_project_predictions()
+    except Exception as e:
+        log_debug("prediction", "build_project_predictions failed", e)
     try:
         outcome_stats = collect_outcomes(limit=limit)
         stats["outcomes"] = outcome_stats.get("outcomes", 0)

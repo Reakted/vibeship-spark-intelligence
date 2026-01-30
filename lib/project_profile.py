@@ -73,10 +73,12 @@ def _default_profile(project_key: str, domain: str) -> Dict[str, Any]:
         "domain": domain,
         "created_at": _now(),
         "updated_at": _now(),
+        "phase": "discovery",
         "questions": [],
         "answers": [],
         "goals": [],
         "done": "",
+        "done_history": [],
         "milestones": [],
         "decisions": [],
         "insights": [],
@@ -136,6 +138,9 @@ def load_profile(project_dir: Optional[Path] = None) -> Dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("invalid_profile")
+        if not data.get("phase"):
+            data["phase"] = "discovery"
+            save_profile(data)
         return data
     except Exception as e:
         log_debug("project_profile", "load_profile failed", e)
@@ -148,6 +153,19 @@ def save_profile(profile: Dict[str, Any]) -> None:
     profile["updated_at"] = _now()
     path = _profile_path(project_key)
     path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+
+
+def list_profiles() -> List[Dict[str, Any]]:
+    PROJECT_DIR.mkdir(parents=True, exist_ok=True)
+    profiles: List[Dict[str, Any]] = []
+    for path in PROJECT_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                profiles.append(data)
+        except Exception:
+            continue
+    return profiles
 
 
 def ensure_questions(profile: Dict[str, Any]) -> int:
@@ -196,6 +214,7 @@ def record_answer(profile: Dict[str, Any], question_id: str, answer: str) -> Opt
 def record_entry(profile: Dict[str, Any], entry_type: str, text: str, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     now = _now()
     entry = {
+        "entry_id": _hash_id(profile.get("project_key") or "", entry_type, (text or "").strip()[:160]),
         "text": (text or "").strip(),
         "created_at": now,
         "meta": meta or {},
@@ -210,3 +229,11 @@ def record_entry(profile: Dict[str, Any], entry_type: str, text: str, meta: Opti
         profile[target] = [entry]
     save_profile(profile)
     return entry
+
+
+def set_phase(profile: Dict[str, Any], phase: str) -> None:
+    phase_val = (phase or "").strip().lower()
+    if not phase_val:
+        return
+    profile["phase"] = phase_val
+    record_entry(profile, "phase_history", f"phase -> {phase_val}", meta={})

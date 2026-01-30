@@ -444,6 +444,13 @@ Together, they create AI agents that continuously improve.
 
 ---
 
+## Project Intelligence
+
+Spark now supports project-level questioning and capture. See:
+`docs/PROJECT_INTELLIGENCE.md`
+
+---
+
 ## License
 
 MIT
