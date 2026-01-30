@@ -95,6 +95,11 @@ Auto-start at login (recommended):
 spark up --sync-context
 ```
 
+Windows helper:
+```powershell
+./scripts/install_autostart_windows.ps1
+```
+
 Per-project ensure (optional):
 ```bash
 spark ensure --sync-context --project .

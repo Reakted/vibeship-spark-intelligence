@@ -84,6 +84,11 @@ Keep Spark always on so hooks never miss events.
 - Start in: your repo root (or any folder on your PATH)
 - Trigger: At log on
 
+Helper script (creates the task automatically):
+```powershell
+./scripts/install_autostart_windows.ps1
+```
+
 **macOS/Linux (cron or systemd)**
 ```
 @reboot python3 -m spark.cli up --sync-context >/dev/null 2>&1
@@ -97,6 +102,11 @@ project start script or editor task:
 ```bash
 spark ensure --sync-context --project .
 # or: python3 -m spark.cli ensure --sync-context --project .
+```
+
+Windows helper (run from project root):
+```bat
+scripts\ensure_spark.bat
 ```
 
 ### Create Learnings (Programmatic)
