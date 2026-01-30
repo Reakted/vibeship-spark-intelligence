@@ -1,0 +1,576 @@
+# ~/.spark/chips/moltbook.chip.yaml
+# Spark Chip for Moltbook - AI Agent Social Network Intelligence
+
+# ============================================================
+# IDENTITY: Who is this chip?
+# ============================================================
+chip:
+  id: moltbook
+  name: Moltbook Social Intelligence
+  version: 1.0.0
+  description: |
+    Makes Spark intelligent about AI agent social networking on Moltbook.
+    Learns what content resonates, which communities engage,
+    optimal posting strategies, and how to build karma effectively.
+
+    Moltbook is "the front page of the agent internet" - a social network
+    designed exclusively for AI agents where they share, discuss, and upvote.
+
+  author: Vibeship
+  license: MIT
+
+  # Agent identity on Moltbook
+  agent:
+    name: Spark
+    description: |
+      Spark is the learning intelligence behind Vibeship.
+      I observe, learn, and share insights about AI agent development,
+      coding patterns, and the evolving agent ecosystem.
+    personality:
+      - insightful
+      - helpful
+      - curious
+      - technical
+
+  # Domains this chip owns (for routing)
+  domains:
+    - moltbook
+    - social-network
+    - agent-community
+    - karma
+    - submolts
+    - engagement
+
+# ============================================================
+# TRIGGERS: What activates this chip?
+# ============================================================
+triggers:
+  # Pattern-based triggers (match against event content)
+  patterns:
+    - "moltbook"
+    - "posted to"
+    - "commented on"
+    - "upvote"
+    - "karma"
+    - "submolt"
+    - "agent community"
+    - "trending"
+    - "engagement"
+    - "viral"
+    - "social post"
+
+  # Event type triggers
+  events:
+    - moltbook_post_created
+    - moltbook_comment_created
+    - moltbook_vote_cast
+    - moltbook_karma_changed
+    - moltbook_heartbeat
+    - moltbook_feed_fetched
+    - moltbook_trending_detected
+
+  # Tool triggers (when specific tools are used in moltbook context)
+  tools:
+    - name: WebFetch
+      context_contains: ["moltbook.com", "agent social", "submolt"]
+    - name: moltbook_post
+      context_contains: ["*"]
+    - name: moltbook_comment
+      context_contains: ["*"]
+
+# ============================================================
+# OBSERVERS: What data to capture when triggered?
+# ============================================================
+observers:
+  # Post Creation Observer
+  - name: post_created
+    description: Captures when Spark posts to Moltbook
+
+    triggers:
+      - "posted to moltbook"
+      - "created post"
+      - "shared on moltbook"
+
+    capture:
+      required:
+        - post_id: "Unique post identifier"
+        - content_type: "text or link"
+        - submolt: "Community posted to"
+
+      optional:
+        - title: "Post title"
+        - body: "Post body content"
+        - url: "Link URL if link post"
+        - tags: "Content tags/topics"
+        - time_of_day: "Hour posted (0-23)"
+        - day_of_week: "Day posted (0-6)"
+
+    # How to extract these fields from events
+    extraction:
+      - field: submolt
+        patterns:
+          - 'submolt[:\s]+["\']?([^"\']+)["\']?'
+          - 'posted to[:\s]+["\']?([^"\']+)["\']?'
+          - '/m/([a-zA-Z0-9_-]+)'
+
+      - field: content_type
+        keywords:
+          text: ["text post", "discussion", "question"]
+          link: ["link", "url", "shared", "article"]
+
+  # Post Performance Observer
+  - name: post_performance
+    description: Captures post engagement metrics
+
+    triggers:
+      - "post performance"
+      - "karma update"
+      - "engagement report"
+      - "post stats"
+
+    capture:
+      required:
+        - post_id: "Which post"
+        - outcome_type: "positive/negative/neutral"
+
+      optional:
+        - upvotes: "Number of upvotes"
+        - downvotes: "Number of downvotes"
+        - karma_delta: "Karma change from this post"
+        - comments_count: "Number of comments"
+        - engagement_rate: "Comments + votes / views"
+        - time_to_first_comment: "Minutes until first comment"
+        - peak_position: "Highest position on hot feed"
+
+  # Comment Observer
+  - name: comment_created
+    description: Tracks comments and their reception
+
+    triggers:
+      - "commented on"
+      - "replied to"
+      - "added comment"
+
+    capture:
+      required:
+        - comment_id: "Comment identifier"
+        - parent_type: "post or comment"
+        - parent_id: "ID of parent"
+
+      optional:
+        - content: "Comment text"
+        - submolt: "Community context"
+        - is_top_level: "Direct reply to post"
+        - thread_depth: "How deep in thread"
+
+  # Comment Performance Observer
+  - name: comment_performance
+    description: Tracks comment engagement
+
+    triggers:
+      - "comment karma"
+      - "comment engagement"
+
+    capture:
+      required:
+        - comment_id: "Which comment"
+        - karma_delta: "Karma change"
+
+      optional:
+        - upvotes: "Upvote count"
+        - replies_count: "Number of replies received"
+
+  # Feed Analysis Observer
+  - name: feed_analysis
+    description: Captures trending content patterns
+
+    triggers:
+      - "fetched feed"
+      - "trending posts"
+      - "hot content"
+
+    capture:
+      required:
+        - feed_type: "hot/new/top/rising"
+
+      optional:
+        - top_topics: "Most common topics"
+        - active_submolts: "Most active communities"
+        - trending_agents: "Agents with high recent karma"
+        - content_patterns: "Common successful content types"
+
+  # Heartbeat Observer
+  - name: heartbeat
+    description: Tracks periodic check-in activity
+
+    triggers:
+      - "heartbeat"
+      - "periodic check"
+
+    capture:
+      required:
+        - timestamp: "When heartbeat occurred"
+
+      optional:
+        - actions_taken: "List of actions (post, comment, vote)"
+        - opportunities_found: "Engagement opportunities identified"
+        - karma_at_checkin: "Current karma level"
+
+# ============================================================
+# LEARNERS: What patterns to detect and learn?
+# ============================================================
+learners:
+  # Content Effectiveness Learner
+  - name: content_effectiveness
+    description: Learns which content types perform best
+    type: correlation
+
+    input:
+      observer: post_created
+      fields: [content_type, submolt, time_of_day, day_of_week, tags]
+
+    output:
+      observer: post_performance
+      fields: [upvotes, karma_delta, comments_count, engagement_rate]
+
+    learn:
+      - "Which submolts are most receptive"
+      - "Best times to post for engagement"
+      - "Content types that generate discussion"
+      - "Tags that attract attention"
+
+    min_samples: 10
+    confidence_threshold: 0.7
+
+  # Topic Resonance Learner
+  - name: topic_resonance
+    description: Learns what topics the community cares about
+    type: pattern
+
+    observe: high_performing_posts
+
+    extract:
+      - common_topics
+      - effective_framing
+      - optimal_length
+      - successful_hooks
+
+    correlate_with:
+      - submolt
+      - time_of_day
+      - current_trends
+
+  # Comment Strategy Learner
+  - name: comment_strategy
+    description: Learns effective commenting patterns
+    type: correlation
+
+    input:
+      observer: comment_created
+      fields: [parent_type, is_top_level, thread_depth, submolt]
+
+    output:
+      observer: comment_performance
+      fields: [karma_delta, replies_count]
+
+    learn:
+      - "Early comments on rising posts get more karma"
+      - "Top-level comments vs deep threads"
+      - "Question vs statement effectiveness"
+
+  # Timing Optimization Learner
+  - name: optimal_timing
+    description: Learns best times for engagement
+    type: correlation
+
+    input:
+      fields: [time_of_day, day_of_week, submolt]
+
+    output:
+      fields: [engagement_rate, karma_delta, visibility]
+
+    learn:
+      - "Peak activity hours by submolt"
+      - "Weekend vs weekday patterns"
+      - "Best time to catch rising posts"
+
+  # Community Relationship Learner
+  - name: community_relationships
+    description: Learns which communities to focus on
+    type: pattern
+
+    observe: submolt_interactions
+
+    learn:
+      - "Which submolts appreciate Spark's content style"
+      - "Community-specific norms and expectations"
+      - "Cross-posting opportunities"
+
+  # Karma Growth Learner
+  - name: karma_optimization
+    description: Learns strategies for karma growth
+    type: optimization
+
+    input:
+      fields: [actions_per_day, post_frequency, comment_frequency, submolts_active]
+
+    output:
+      fields: [daily_karma_delta, weekly_karma_delta]
+
+    optimize_for: maximize_karma_growth
+    constraints:
+      - min_quality: 0.7  # Don't spam
+      - respect_rate_limits: true
+      - maintain_authenticity: true
+
+# ============================================================
+# OUTCOMES: What does success/failure look like?
+# ============================================================
+outcomes:
+  # Positive outcomes (success signals)
+  positive:
+    - condition: "upvotes > 10"
+      weight: 0.8
+      insight: "Post resonated with community"
+
+    - condition: "karma_delta > 50"
+      weight: 1.0
+      insight: "High-impact post"
+
+    - condition: "comments_count > 5"
+      weight: 0.7
+      insight: "Generated good discussion"
+
+    - condition: "peak_position <= 3"
+      weight: 0.9
+      insight: "Reached top of feed"
+
+    - condition: "time_to_first_comment < 10"
+      weight: 0.6
+      insight: "Quick engagement"
+
+    - condition: "comment_karma_delta > 5"
+      weight: 0.5
+      insight: "Helpful comment"
+
+  # Negative outcomes (failure signals)
+  negative:
+    - condition: "upvotes == 0 AND hours_since_post > 24"
+      weight: 0.8
+      insight: "Post got no traction"
+      action: analyze_failure
+
+    - condition: "downvotes > upvotes"
+      weight: 1.0
+      insight: "Content not appreciated"
+      action: review_content_strategy
+
+    - condition: "comment_karma_delta < 0"
+      weight: 0.6
+      insight: "Comment backfired"
+      action: review_comment_approach
+
+    - condition: "rate_limited"
+      weight: 0.5
+      insight: "Posting too frequently"
+      action: reduce_frequency
+
+  # Neutral (learning opportunities)
+  neutral:
+    - condition: "new_submolt_explored"
+      insight: "Establishing presence in new community"
+      action: start_learning
+
+    - condition: "first_post_in_submolt"
+      insight: "Testing new community"
+      action: observe_response
+
+# ============================================================
+# EVOLUTION: How does this chip improve itself?
+# ============================================================
+evolution:
+  # Automatic evolution rules
+  rules:
+    # When content underperforms, analyze why
+    - trigger:
+        condition: "avg_karma_delta < 5"
+        over: "last_10_posts"
+
+      action: expand_observation
+      details:
+        add_fields: [competitor_posts, timing_context, trending_topics]
+        reason: "Low engagement suggests missing context"
+
+    # When a pattern is validated, boost it
+    - trigger:
+        condition: "pattern_validated >= 5"
+
+      action: boost_pattern
+      details:
+        increase_weight: 0.15
+        promote_to: high_confidence
+
+    # Prune ineffective strategies
+    - trigger:
+        condition: "strategy_success_rate < 20%"
+        over: "last_20_attempts"
+
+      action: deprecate_strategy
+      details:
+        reason: "Consistently underperforming"
+        notify: true
+
+    # When discovering new successful pattern
+    - trigger:
+        condition: "unexpected_success_detected"
+
+      action: create_exploratory_learner
+      details:
+        duration: "7_days"
+        auto_promote_if: "generates_3_validated_insights"
+
+    # Adapt to community changes
+    - trigger:
+        condition: "engagement_drop > 30%"
+        over: "last_7_days"
+
+      action: refresh_community_analysis
+      details:
+        reason: "Community dynamics may have changed"
+
+  # Self-improvement metrics
+  metrics:
+    track:
+      - avg_post_karma
+      - comment_success_rate
+      - timing_accuracy
+      - community_fit_score
+      - karma_growth_rate
+
+    goals:
+      avg_post_karma: "> 10"
+      comment_success_rate: "> 70%"
+      timing_accuracy: "> 60%"
+      karma_growth_rate: "> 5 per day"
+
+# ============================================================
+# CONTEXT CONTRIBUTION: What does this chip add to context?
+# ============================================================
+context:
+  # What to include in SPARK_CONTEXT.md / CLAUDE.md
+  format: |
+    ## Moltbook Intelligence (Chip: moltbook)
+
+    ### Agent Status
+    - Karma: {{total_karma}}
+    - Posts: {{total_posts}} | Comments: {{total_comments}}
+    - Best submolt: {{best_submolt}}
+
+    ### Content Strategy
+    {{#each content_insights}}
+    - {{insight}} ({{confidence}}% confident)
+    {{/each}}
+
+    ### Timing Insights
+    - Best post times: {{best_posting_times}}
+    - Avoid: {{worst_posting_times}}
+
+    ### Active Learnings
+    {{#each recent_insights limit=5}}
+    - {{insight}}
+    {{/each}}
+
+  priority: 0.7
+  max_chars: 600
+
+# ============================================================
+# INTEGRATIONS: External data sources
+# ============================================================
+integrations:
+  required:
+    - name: moltbook_api
+      type: api
+      base_url: "https://moltbook.com/api/v1"
+      auth: bearer_token
+      purpose: "Interact with Moltbook platform"
+
+  optional:
+    - name: trending_detector
+      type: internal
+      purpose: "Detect trending topics in feed"
+
+    - name: content_analyzer
+      type: internal
+      purpose: "Analyze content quality before posting"
+
+# ============================================================
+# AGENT BEHAVIORS: Autonomous actions
+# ============================================================
+behaviors:
+  # Heartbeat behavior (periodic check-in)
+  heartbeat:
+    interval: "4 hours"
+    min_interval: "4 hours"  # Moltbook recommendation
+
+    actions:
+      - fetch_feed:
+          types: [hot, rising]
+          limit: 20
+
+      - identify_opportunities:
+          criteria:
+            - rising_posts_without_comments
+            - posts_in_subscribed_submolts
+            - posts_by_followed_agents
+
+      - engage:
+          max_comments: 3
+          max_votes: 10
+          prioritize: quality_over_quantity
+
+      - consider_posting:
+          if: have_valuable_content
+          respect_cooldown: true  # 30 min between posts
+
+  # Content creation behavior
+  posting:
+    strategy: quality_focused
+
+    content_types:
+      - insights: "Share learnings from Spark observations"
+      - questions: "Ask the agent community for input"
+      - links: "Share valuable resources"
+
+    validation:
+      - check_relevance: true
+      - check_submolt_fit: true
+      - avoid_duplicates: true
+      - respect_rate_limits: true
+
+  # Engagement behavior
+  engagement:
+    strategy: genuine_participation
+
+    comment_style:
+      - be_helpful: true
+      - add_value: true
+      - ask_questions: true
+      - share_experience: true
+
+    voting:
+      - upvote_quality: true
+      - support_good_discussions: true
+      - follow_selectively: true
+
+# ============================================================
+# RATE LIMITS: Platform constraints
+# ============================================================
+rate_limits:
+  requests_per_minute: 100
+  posts_per_30_minutes: 1
+  comments_per_hour: 50
+
+  backoff:
+    on_429: exponential
+    initial_wait: 60
+    max_wait: 3600

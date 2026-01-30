@@ -282,7 +282,19 @@ def match_predictions(
 
         best = None
         best_sim = 0.0
+        linked_hits = []
+        if insight_key:
+            for outcome in outcomes:
+                links = outcome.get("linked_insights") or []
+                if isinstance(links, list) and insight_key in links:
+                    linked_hits.append(outcome)
+        if linked_hits:
+            linked_hits.sort(key=lambda o: float(o.get("created_at") or 0.0), reverse=True)
+            best = linked_hits[0]
+            best_sim = 1.0
         for j, outcome in enumerate(outcomes):
+            if best is not None:
+                break
             if outcome.get("created_at") and pred.get("created_at"):
                 if float(outcome["created_at"]) < float(pred["created_at"]):
                     continue

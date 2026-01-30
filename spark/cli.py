@@ -52,6 +52,7 @@ from lib.evaluation import evaluate_predictions
 from lib.outcome_log import append_outcome, build_explicit_outcome
 from lib.outcome_checkin import list_checkins
 from lib.ingest_validation import scan_queue_events, write_ingest_report
+from lib.exposure_tracker import read_recent_exposures
 from lib.memory_capture import (
     process_recent_memory_events,
     list_pending as capture_list_pending,
@@ -521,6 +522,25 @@ def cmd_outcome(args):
         tool=tool,
         created_at=args.time,
     )
+    link_keys = []
+    if args.link_key:
+        link_keys.extend([k for k in args.link_key if k])
+    link_count = int(args.link_count or 0)
+    if args.link_latest:
+        link_count = max(link_count, 1)
+    if link_count > 0:
+        exposures = read_recent_exposures(limit=link_count)
+        for ex in exposures:
+            key = ex.get("insight_key")
+            if key:
+                link_keys.append(key)
+        row["linked_texts"] = [ex.get("text") for ex in exposures if ex.get("text")]
+    if link_keys:
+        deduped = []
+        for k in link_keys:
+            if k and k not in deduped:
+                deduped.append(k)
+        row["linked_insights"] = deduped
     append_outcome(row)
     print(f"[SPARK] Outcome recorded: {row.get('result')} (polarity={polarity})")
 
@@ -1066,6 +1086,9 @@ Examples:
     outcome_parser.add_argument("--time", type=float, default=None, help="Unix timestamp override")
     outcome_parser.add_argument("--pending", action="store_true", help="List recent check-in requests")
     outcome_parser.add_argument("--limit", type=int, default=5, help="How many pending items to show")
+    outcome_parser.add_argument("--link-latest", action="store_true", help="Link to most recent exposure")
+    outcome_parser.add_argument("--link-count", type=int, default=0, help="Link to last N exposures")
+    outcome_parser.add_argument("--link-key", action="append", help="Explicit insight_key to link")
 
     # eval
     eval_parser = subparsers.add_parser("eval", help="Evaluate predictions against outcomes")

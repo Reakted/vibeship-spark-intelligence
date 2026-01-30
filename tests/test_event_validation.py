@@ -67,6 +67,8 @@ def test_build_explicit_outcome():
     row, polarity = build_explicit_outcome(result="yes", text="ok")
     assert row["polarity"] == "pos"
     assert polarity == "pos"
+    row["linked_insights"] = ["insight:1"]
+    assert "linked_insights" in row
 
 
 def test_adapter_fixtures():

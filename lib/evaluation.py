@@ -72,7 +72,16 @@ def evaluate_predictions(
     for i, pred in enumerate(preds):
         best = None
         best_sim = 0.0
+        insight_key = pred.get("insight_key")
+        if insight_key:
+            linked = [o for o in outcomes if isinstance(o.get("linked_insights"), list) and insight_key in o.get("linked_insights")]
+            if linked:
+                linked.sort(key=lambda o: float(o.get("created_at") or 0.0), reverse=True)
+                best = linked[0]
+                best_sim = 1.0
         for j, outcome in enumerate(outcomes):
+            if best is not None:
+                break
             if outcome.get("created_at") and pred.get("created_at"):
                 if float(outcome["created_at"]) < float(pred["created_at"]):
                     continue

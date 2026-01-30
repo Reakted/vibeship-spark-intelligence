@@ -380,6 +380,9 @@ python -m spark.cli outcome --result yes --text "Worked as expected"
 # Show pending outcome check-in requests
 python -m spark.cli outcome --pending
 
+# Link outcome to last exposure (improves matching)
+python -m spark.cli outcome --result yes --link-latest --text "Worked as expected"
+
 # Evaluate predictions vs outcomes (last 7 days)
 python -m spark.cli eval --days 7
 
