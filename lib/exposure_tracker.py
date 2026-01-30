@@ -9,9 +9,10 @@ from typing import Dict, Iterable, List, Optional
 
 
 EXPOSURES_FILE = Path.home() / ".spark" / "exposures.jsonl"
+LAST_EXPOSURE_FILE = Path.home() / ".spark" / "last_exposure.json"
 
 
-def record_exposures(source: str, items: Iterable[Dict]) -> int:
+def record_exposures(source: str, items: Iterable[Dict], *, session_id: Optional[str] = None) -> int:
     """Append exposure entries. Returns count written."""
     rows: List[Dict] = []
     now = time.time()
@@ -24,6 +25,7 @@ def record_exposures(source: str, items: Iterable[Dict]) -> int:
             "insight_key": item.get("insight_key"),
             "category": item.get("category"),
             "text": item.get("text"),
+            "session_id": session_id,
         })
 
     if not rows:
@@ -33,6 +35,12 @@ def record_exposures(source: str, items: Iterable[Dict]) -> int:
     with EXPOSURES_FILE.open("a", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    try:
+        # Persist the most recent exposure for quick linking.
+        LAST_EXPOSURE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        LAST_EXPOSURE_FILE.write_text(json.dumps(rows[-1], ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
     return len(rows)
 
 
@@ -56,3 +64,35 @@ def read_recent_exposures(limit: int = 200, max_age_s: float = 6 * 3600) -> List
             continue
         out.append(row)
     return out
+
+
+def read_exposures_within(*, max_age_s: float, now: Optional[float] = None, limit: int = 200) -> List[Dict]:
+    """Read exposures within max_age_s relative to now."""
+    if not EXPOSURES_FILE.exists():
+        return []
+    try:
+        lines = EXPOSURES_FILE.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return []
+    now_ts = float(now or time.time())
+    out: List[Dict] = []
+    for line in reversed(lines[-limit:]):
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        ts = float(row.get("ts") or 0.0)
+        if max_age_s and ts and (now_ts - ts) > max_age_s:
+            continue
+        out.append(row)
+    return out
+
+
+def read_last_exposure() -> Optional[Dict]:
+    """Return the most recent exposure record if available."""
+    if not LAST_EXPOSURE_FILE.exists():
+        return None
+    try:
+        return json.loads(LAST_EXPOSURE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return None

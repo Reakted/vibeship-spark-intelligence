@@ -383,6 +383,9 @@ python -m spark.cli outcome --pending
 # Link outcome to last exposure (improves matching)
 python -m spark.cli outcome --result yes --link-latest --text "Worked as expected"
 
+# Auto-link outcomes within a 30-minute window
+python -m spark.cli outcome --result yes --auto-link --text "Worked as expected"
+
 # Evaluate predictions vs outcomes (last 7 days)
 python -m spark.cli eval --days 7
 

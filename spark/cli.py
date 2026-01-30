@@ -52,7 +52,7 @@ from lib.evaluation import evaluate_predictions
 from lib.outcome_log import append_outcome, build_explicit_outcome
 from lib.outcome_checkin import list_checkins
 from lib.ingest_validation import scan_queue_events, write_ingest_report
-from lib.exposure_tracker import read_recent_exposures
+from lib.exposure_tracker import read_recent_exposures, read_exposures_within, read_last_exposure
 from lib.memory_capture import (
     process_recent_memory_events,
     list_pending as capture_list_pending,
@@ -522,6 +522,8 @@ def cmd_outcome(args):
         tool=tool,
         created_at=args.time,
     )
+    if args.session_id:
+        row["session_id"] = args.session_id
     link_keys = []
     if args.link_key:
         link_keys.extend([k for k in args.link_key if k])
@@ -535,6 +537,22 @@ def cmd_outcome(args):
             if key:
                 link_keys.append(key)
         row["linked_texts"] = [ex.get("text") for ex in exposures if ex.get("text")]
+    else:
+        auto_link = args.auto_link or os.environ.get("SPARK_OUTCOME_AUTO_LINK") == "1"
+        if auto_link:
+            window_s = float(args.link_window_mins or 30) * 60
+            now_ts = float(args.time or 0) or None
+            exposures = read_exposures_within(max_age_s=window_s, now=now_ts, limit=200)
+            if not exposures:
+                last = read_last_exposure()
+                if last:
+                    exposures = [last]
+            for ex in exposures:
+                key = ex.get("insight_key")
+                if key:
+                    link_keys.append(key)
+            if exposures:
+                row["linked_texts"] = [ex.get("text") for ex in exposures if ex.get("text")]
     if link_keys:
         deduped = []
         for k in link_keys:
@@ -1089,6 +1107,9 @@ Examples:
     outcome_parser.add_argument("--link-latest", action="store_true", help="Link to most recent exposure")
     outcome_parser.add_argument("--link-count", type=int, default=0, help="Link to last N exposures")
     outcome_parser.add_argument("--link-key", action="append", help="Explicit insight_key to link")
+    outcome_parser.add_argument("--auto-link", action="store_true", help="Auto-link exposures within a time window")
+    outcome_parser.add_argument("--link-window-mins", type=float, default=30.0, help="Auto-link window in minutes")
+    outcome_parser.add_argument("--session-id", help="Attach session_id to outcome")
 
     # eval
     eval_parser = subparsers.add_parser("eval", help="Evaluate predictions against outcomes")
