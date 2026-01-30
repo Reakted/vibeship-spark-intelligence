@@ -242,6 +242,15 @@ def get_suggested_questions(profile: Dict[str, Any], limit: int = 3) -> List[Dic
         extra.append({"category": "goal", "id": "proj_goal", "question": "What is the primary goal for this project?"})
     if not profile.get("milestones"):
         extra.append({"category": "milestone", "id": "proj_milestone", "question": "What is the next milestone?"})
+    references = profile.get("references") or []
+    transfers = profile.get("transfers") or []
+    if references and len(transfers) < len(references):
+        ref_text = (references[-1].get("text") or "").strip()
+        ref_snip = ref_text[:80] + ("..." if len(ref_text) > 80 else "")
+        prompt = "What principle should transfer from the latest reference?"
+        if ref_snip:
+            prompt = f"{prompt} ({ref_snip})"
+        extra.append({"category": "transfer", "id": "proj_transfer", "question": prompt})
     return (unanswered + extra)[: max(1, int(limit or 3))]
 
 

@@ -28,6 +28,7 @@ Key fields:
    - `spark project init` seeds domain questions.
    - `spark project questions` shows unanswered + dynamic questions.
    - Domain questions include references + transferable heuristics.
+   - If a reference exists without a transfer, Spark asks for a transfer principle.
 
 2) **Capture**
    - `spark project capture` records insights, milestones, done criteria, etc.
