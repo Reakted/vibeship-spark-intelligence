@@ -53,8 +53,8 @@ def run_bridge_cycle(
         stats["errors"].append("memory")
         log_debug("bridge_worker", "memory capture failed", e)
 
+    events = read_recent_events(40)
     try:
-        events = read_recent_events(40)
         for e in reversed(events[-10:]):
             if e.event_type != EventType.USER_PROMPT:
                 continue
@@ -93,14 +93,27 @@ def run_bridge_cycle(
     try:
         content_count = 0
         for ev in events:
-            if ev.event_type != EventType.TOOL_RESULT:
+            if ev.event_type != EventType.POST_TOOL:
                 continue
-            payload = (ev.data or {}).get("payload") or {}
-            tool = payload.get("tool") or ""
+            tool = (ev.tool_name or "").strip()
             if tool not in ("Edit", "Write"):
                 continue
-            file_path = payload.get("file_path") or ""
-            content = payload.get("new_string") or payload.get("content") or ""
+            tool_input = ev.tool_input or {}
+            payload = (ev.data or {}).get("payload") or {}
+            file_path = (
+                tool_input.get("file_path")
+                or tool_input.get("path")
+                or payload.get("file_path")
+                or payload.get("path")
+                or ""
+            )
+            content = (
+                tool_input.get("new_string")
+                or tool_input.get("content")
+                or payload.get("new_string")
+                or payload.get("content")
+                or ""
+            )
             if file_path and content and len(content) > 50:
                 patterns = learn_from_edit_event(file_path, content)
                 if patterns:
