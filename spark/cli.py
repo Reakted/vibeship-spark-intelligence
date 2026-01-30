@@ -52,7 +52,12 @@ from lib.evaluation import evaluate_predictions
 from lib.outcome_log import append_outcome, build_explicit_outcome
 from lib.outcome_checkin import list_checkins
 from lib.ingest_validation import scan_queue_events, write_ingest_report
-from lib.exposure_tracker import read_recent_exposures, read_exposures_within, read_last_exposure
+from lib.exposure_tracker import (
+    read_recent_exposures,
+    read_exposures_within,
+    read_last_exposure,
+    infer_latest_session_id,
+)
 from lib.memory_capture import (
     process_recent_memory_events,
     list_pending as capture_list_pending,
@@ -532,6 +537,10 @@ def cmd_outcome(args):
         link_count = max(link_count, 1)
     if link_count > 0:
         exposures = read_recent_exposures(limit=link_count)
+        if row.get("session_id"):
+            same = [ex for ex in exposures if ex.get("session_id") == row.get("session_id")]
+            if same:
+                exposures = same
         for ex in exposures:
             key = ex.get("insight_key")
             if key:
@@ -540,6 +549,10 @@ def cmd_outcome(args):
     else:
         auto_link = args.auto_link or os.environ.get("SPARK_OUTCOME_AUTO_LINK") == "1"
         if auto_link:
+            if not row.get("session_id"):
+                sid = infer_latest_session_id()
+                if sid:
+                    row["session_id"] = sid
             window_s = float(args.link_window_mins or 30) * 60
             now_ts = float(args.time or 0) or None
             exposures = read_exposures_within(max_age_s=window_s, now=now_ts, limit=200)
@@ -547,6 +560,10 @@ def cmd_outcome(args):
                 last = read_last_exposure()
                 if last:
                     exposures = [last]
+            if row.get("session_id"):
+                same = [ex for ex in exposures if ex.get("session_id") == row.get("session_id")]
+                if same:
+                    exposures = same
             for ex in exposures:
                 key = ex.get("insight_key")
                 if key:

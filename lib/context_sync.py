@@ -19,7 +19,7 @@ from .output_adapters import (
 )
 from .project_context import get_project_context, filter_insights_for_context
 from .sync_tracker import get_sync_tracker
-from .exposure_tracker import record_exposures
+from .exposure_tracker import record_exposures, infer_latest_session_id
 
 
 DEFAULT_MIN_RELIABILITY = 0.7
@@ -315,7 +315,7 @@ def sync_context(
                 "category": ins.category.value,
                 "text": ins.insight,
             })
-        record_exposures("sync_context", exposures)
+        record_exposures("sync_context", exposures, session_id=infer_latest_session_id())
     except Exception:
         pass
 

@@ -96,3 +96,20 @@ def read_last_exposure() -> Optional[Dict]:
         return json.loads(LAST_EXPOSURE_FILE.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def infer_latest_session_id() -> Optional[str]:
+    """Best-effort latest session id from last exposure or recent queue events."""
+    last = read_last_exposure()
+    if last:
+        sid = last.get("session_id")
+        if isinstance(sid, str) and sid.strip():
+            return sid
+    try:
+        from lib.queue import read_recent_events
+        events = read_recent_events(1)
+        if events:
+            return events[-1].session_id
+    except Exception:
+        return None
+    return None

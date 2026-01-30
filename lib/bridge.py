@@ -16,7 +16,7 @@ from typing import List, Dict, Any, Optional
 from lib.memory_banks import infer_project_key, retrieve as bank_retrieve
 from lib.tastebank import infer_domain as taste_infer_domain, retrieve as taste_retrieve
 from lib.diagnostics import log_debug
-from lib.exposure_tracker import record_exposures
+from lib.exposure_tracker import record_exposures, infer_latest_session_id
 
 # Paths
 SPARK_DIR = Path(__file__).parent.parent
@@ -375,6 +375,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
     if not query:
         query = infer_current_focus()
 
+    session_id = infer_latest_session_id()
     contextual = get_contextual_insights(query, limit=6) if query else []
     skills = get_relevant_skills(query, limit=3) if query else []
     insights = get_high_value_insights()
@@ -408,7 +409,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
                     "category": f"{item.get('source')}:{cat}",
                     "text": text[:240],
                 })
-            record_exposures("spark_context:contextual", exposures)
+            record_exposures("spark_context:contextual", exposures, session_id=session_id)
         except Exception:
             pass
 
@@ -431,7 +432,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
                     "category": "skill",
                     "text": text[:240],
                 })
-            record_exposures("spark_context:skills", exposures)
+            record_exposures("spark_context:skills", exposures, session_id=session_id)
         except Exception:
             pass
     
@@ -495,6 +496,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
                     {"insight_key": w.get("insight_key"), "category": w.get("category"), "text": w.get("text")}
                     for w in warnings
                 ],
+                session_id=session_id,
             )
         except Exception:
             pass
@@ -519,6 +521,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
                     {"insight_key": i.get("insight_key"), "category": i.get("category"), "text": i.get("insight")}
                     for i in insights[:5]
                 ],
+                session_id=session_id,
             )
         except Exception:
             pass

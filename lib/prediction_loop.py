@@ -121,6 +121,7 @@ def build_predictions(max_age_s: float = 6 * 3600) -> int:
         text = ex.get("text") or ""
         category = ex.get("category") or ""
         source = ex.get("source") or "exposure"
+        session_id = ex.get("session_id")
         if not text:
             continue
         pred_id = _hash_id(key or "", text, source)
@@ -137,6 +138,7 @@ def build_predictions(max_age_s: float = 6 * 3600) -> int:
             "created_at": now,
             "expires_at": now + max_age_s,
             "source": source,
+            "session_id": session_id,
         }
         preds.append(pred)
 
@@ -188,6 +190,7 @@ def collect_outcomes(limit: int = 200) -> Dict[str, int]:
                 "text": text,
                 "polarity": polarity,
                 "created_at": ev.timestamp,
+                "session_id": ev.session_id,
             })
         elif ev.event_type in (EventType.POST_TOOL_FAILURE,):
             tool = ev.tool_name or ""
@@ -205,6 +208,7 @@ def collect_outcomes(limit: int = 200) -> Dict[str, int]:
                 "text": text,
                 "polarity": "neg",
                 "created_at": ev.timestamp,
+                "session_id": ev.session_id,
             })
 
     append_outcomes(rows)
@@ -292,7 +296,16 @@ def match_predictions(
             linked_hits.sort(key=lambda o: float(o.get("created_at") or 0.0), reverse=True)
             best = linked_hits[0]
             best_sim = 1.0
-        for j, outcome in enumerate(outcomes):
+
+        pred_sid = pred.get("session_id")
+        cand_indices = list(range(len(outcomes)))
+        if pred_sid:
+            same = [idx for idx, o in enumerate(outcomes) if o.get("session_id") == pred_sid]
+            if same:
+                cand_indices = same
+
+        for j in cand_indices:
+            outcome = outcomes[j]
             if best is not None:
                 break
             if outcome.get("created_at") and pred.get("created_at"):
