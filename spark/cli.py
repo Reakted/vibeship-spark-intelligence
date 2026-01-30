@@ -20,6 +20,7 @@ Usage:
     python -m spark.cli outcome    # Record explicit outcome check-in
     python -m spark.cli eval       # Evaluate predictions vs outcomes
     python -m spark.cli validate-ingest  # Validate recent queue events
+    python -m spark.cli project    # Project questioning + capture
 """
 
 import sys
@@ -58,6 +59,15 @@ from lib.exposure_tracker import (
     read_last_exposure,
     infer_latest_session_id,
 )
+from lib.project_profile import (
+    load_profile,
+    save_profile,
+    ensure_questions,
+    record_answer,
+    record_entry,
+    infer_domain,
+)
+from lib.memory_banks import store_memory
 from lib.memory_capture import (
     process_recent_memory_events,
     list_pending as capture_list_pending,
@@ -608,6 +618,110 @@ def cmd_validate_ingest(args):
         for k, v in stats["reasons"].items():
             print(f"     - {k}: {v}")
 
+
+def _print_project_questions(profile, limit: int = 5):
+    questions = profile.get("questions") or []
+    unanswered = [q for q in questions if not q.get("answered_at")]
+    if not unanswered:
+        print("[SPARK] No unanswered questions.")
+        return
+    print("[SPARK] Suggested questions:")
+    for q in unanswered[: max(1, int(limit or 5))]:
+        cat = q.get("category") or "general"
+        qid = q.get("id") or "unknown"
+        text = q.get("question") or ""
+        print(f"   - [{cat}] {qid}: {text}")
+
+
+def cmd_project_init(args):
+    profile = load_profile(Path(args.project) if args.project else None)
+    if args.domain:
+        profile["domain"] = args.domain
+        save_profile(profile)
+    if not profile.get("domain"):
+        profile["domain"] = infer_domain(Path(args.project) if args.project else None)
+        save_profile(profile)
+    added = ensure_questions(profile)
+    print(f"[SPARK] Project: {profile.get('project_key')}  Domain: {profile.get('domain')}")
+    if added:
+        print(f"[SPARK] Added {added} domain questions")
+    _print_project_questions(profile, args.limit)
+
+
+def cmd_project_status(args):
+    profile = load_profile(Path(args.project) if args.project else None)
+    print(f"[SPARK] Project: {profile.get('project_key')}")
+    print(f"   Domain: {profile.get('domain')}")
+    print(f"   Goals: {len(profile.get('goals') or [])}")
+    print(f"   Done: {'set' if profile.get('done') else 'not set'}")
+    print(f"   Milestones: {len(profile.get('milestones') or [])}")
+    print(f"   Decisions: {len(profile.get('decisions') or [])}")
+    print(f"   Insights: {len(profile.get('insights') or [])}")
+    print(f"   Feedback: {len(profile.get('feedback') or [])}")
+    print(f"   Risks: {len(profile.get('risks') or [])}")
+    questions = profile.get("questions") or []
+    answered = len([q for q in questions if q.get("answered_at")])
+    print(f"   Questions answered: {answered}/{len(questions)}")
+
+
+def cmd_project_questions(args):
+    profile = load_profile(Path(args.project) if args.project else None)
+    ensure_questions(profile)
+    _print_project_questions(profile, args.limit)
+
+
+def cmd_project_answer(args):
+    profile = load_profile(Path(args.project) if args.project else None)
+    ensure_questions(profile)
+    entry = record_answer(profile, args.id, args.text or "")
+    if not entry:
+        print("[SPARK] Answer not recorded (missing id or text).")
+        return
+    # Store as project-scoped memory for retrieval
+    qtext = ""
+    for q in profile.get("questions") or []:
+        if q.get("id") == args.id:
+            qtext = q.get("question") or ""
+            break
+    note = f"{qtext} Answer: {args.text}".strip() if qtext else (args.text or "").strip()
+    if note:
+        store_memory(note, category=f"project_answer:{entry.get('category') or 'general'}")
+    print("[SPARK] Answer recorded.")
+
+
+def cmd_project_capture(args):
+    profile = load_profile(Path(args.project) if args.project else None)
+    entry_type = args.type
+    text = (args.text or "").strip()
+    if not text:
+        print("[SPARK] Missing --text")
+        return
+    meta = {}
+    if args.status:
+        meta["status"] = args.status
+    if args.why:
+        meta["why"] = args.why
+    if args.impact:
+        meta["impact"] = args.impact
+    if args.evidence:
+        meta["evidence"] = args.evidence
+
+    if entry_type == "done":
+        profile["done"] = text
+        save_profile(profile)
+    record_entry(profile, entry_type, text, meta=meta)
+
+    category_map = {
+        "goal": "project_goal",
+        "done": "project_done",
+        "milestone": "project_milestone",
+        "decision": "project_decision",
+        "insight": "project_insight",
+        "feedback": "project_feedback",
+        "risk": "project_risk",
+    }
+    store_memory(text, category=category_map.get(entry_type, "project_note"))
+    print(f"[SPARK] Captured {entry_type}.")
 
 def cmd_surprises(args):
     """Show surprise moments (aha!)."""
@@ -1197,6 +1311,36 @@ Examples:
     # memory-migrate
     subparsers.add_parser("memory-migrate", help="Backfill JSONL memories into SQLite store")
 
+    # project - questioning and capture
+    project_parser = subparsers.add_parser("project", help="Project questioning and capture")
+    project_sub = project_parser.add_subparsers(dest="project_cmd")
+
+    project_init = project_sub.add_parser("init", help="Initialize or update project profile")
+    project_init.add_argument("--domain", help="Set project domain (game_dev, marketing, org, product, engineering)")
+    project_init.add_argument("--project", help="Project root path")
+    project_init.add_argument("--limit", type=int, default=5, help="How many questions to show")
+
+    project_status = project_sub.add_parser("status", help="Show project profile summary")
+    project_status.add_argument("--project", help="Project root path")
+
+    project_questions = project_sub.add_parser("questions", help="Show suggested project questions")
+    project_questions.add_argument("--project", help="Project root path")
+    project_questions.add_argument("--limit", type=int, default=5, help="How many questions to show")
+
+    project_answer = project_sub.add_parser("answer", help="Answer a project question")
+    project_answer.add_argument("id", help="Question id")
+    project_answer.add_argument("--text", "-t", required=True, help="Answer text")
+    project_answer.add_argument("--project", help="Project root path")
+
+    project_capture = project_sub.add_parser("capture", help="Capture a project insight/decision/milestone")
+    project_capture.add_argument("--type", required=True, choices=["goal", "done", "milestone", "decision", "insight", "feedback", "risk"], help="Capture type")
+    project_capture.add_argument("--text", "-t", required=True, help="Capture text")
+    project_capture.add_argument("--project", help="Project root path")
+    project_capture.add_argument("--status", help="Status (for milestones)")
+    project_capture.add_argument("--why", help="Decision rationale")
+    project_capture.add_argument("--impact", help="Impact")
+    project_capture.add_argument("--evidence", help="Evidence or feedback source")
+
     # moltbook - AI agent social network
     moltbook_parser = subparsers.add_parser("moltbook", help="Moltbook agent - social network for AI agents")
     moltbook_parser.add_argument("action", nargs="?", default="status",
@@ -1250,8 +1394,24 @@ Examples:
         "memory": cmd_memory,
         "memory-migrate": cmd_memory_migrate,
         "moltbook": cmd_moltbook,
+        "project": None,
     }
     
+    if args.command == "project":
+        if args.project_cmd == "init":
+            cmd_project_init(args)
+        elif args.project_cmd == "status":
+            cmd_project_status(args)
+        elif args.project_cmd == "questions":
+            cmd_project_questions(args)
+        elif args.project_cmd == "answer":
+            cmd_project_answer(args)
+        elif args.project_cmd == "capture":
+            cmd_project_capture(args)
+        else:
+            project_parser.print_help()
+        return
+
     if args.command in commands:
         commands[args.command](args)
     else:

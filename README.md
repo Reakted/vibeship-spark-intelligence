@@ -393,6 +393,12 @@ python -m spark.cli eval --days 7
 python -m spark.cli validate-ingest --limit 200
 # This writes ~/.spark/ingest_report.json unless --no-write is set
 
+# Project questioning + capture
+python -m spark.cli project init --domain game_dev
+python -m spark.cli project questions
+python -m spark.cli project answer game_core_loop --text "Core loop feels satisfying when the grab succeeds 60% of the time."
+python -m spark.cli project capture --type insight --text "Claw physics: grip strength vs weight balance matters" --impact "player success rate"
+
 # View recent learnings
 python -m spark.cli learnings
 
