@@ -100,6 +100,8 @@ Windows helper:
 ./scripts/install_autostart_windows.ps1
 ```
 
+macOS/Linux: see `docs/QUICKSTART.md` for launchd/systemd examples.
+
 Per-project ensure (optional):
 ```bash
 spark ensure --sync-context --project .
