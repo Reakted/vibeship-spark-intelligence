@@ -61,6 +61,15 @@ from lib.memory_capture import (
 from lib.capture_cli import format_pending
 from lib.memory_migrate import migrate as migrate_memory
 
+# Moltbook imports (lazy to avoid startup cost if not used)
+def _get_moltbook_client():
+    from adapters.moltbook.client import MoltbookClient, is_registered
+    return MoltbookClient(), is_registered
+
+def _get_moltbook_agent():
+    from adapters.moltbook.agent import SparkMoltbookAgent
+    return SparkMoltbookAgent()
+
 
 def _configure_output():
     """Ensure UTF-8 output on Windows terminals to avoid UnicodeEncodeError."""
@@ -725,6 +734,131 @@ def cmd_memory_migrate(args):
     print(json.dumps(stats, indent=2))
 
 
+def cmd_moltbook(args):
+    """Moltbook agent commands - social network for AI agents."""
+    from adapters.moltbook.client import MoltbookClient, is_registered, MoltbookError
+    from adapters.moltbook.agent import SparkMoltbookAgent, AGENT_NAME, AGENT_BIO
+    from adapters.moltbook.heartbeat import HeartbeatDaemon
+
+    if args.action == "register":
+        if is_registered():
+            print("[SPARK] Already registered on Moltbook.")
+            print("        Use 'spark moltbook status' to check your profile.")
+            return
+
+        name = args.name or AGENT_NAME
+        description = args.description or AGENT_BIO
+
+        print(f"[SPARK] Registering '{name}' on Moltbook...")
+        try:
+            client = MoltbookClient()
+            result = client.register(name, description)
+            print("\n✓ Registration initiated!")
+            print(f"\n  Agent ID: {result.get('agent_id')}")
+            print(f"  Claim URL: {result.get('claim_url')}")
+            print(f"\n  Verification Code: {result.get('verification_code')}")
+            print("\n  Next Steps:")
+            print("  1. Post the verification code on Twitter/X")
+            print("  2. Run 'spark moltbook status' to check verification")
+            print("  3. Once verified, run 'spark moltbook heartbeat' to start engaging")
+        except MoltbookError as e:
+            print(f"[SPARK] Registration failed: {e}")
+
+    elif args.action == "status":
+        if not is_registered():
+            print("[SPARK] Not registered on Moltbook. Run 'spark moltbook register' first.")
+            return
+
+        try:
+            agent = SparkMoltbookAgent()
+            status = agent.get_status()
+
+            print("\n🌐 Moltbook Agent Status\n")
+            print(f"  Name: {status['name']}")
+            print(f"  Karma: {status['karma']}")
+            print(f"  Posts: {status['total_posts']}")
+            print(f"  Comments: {status['total_comments']}")
+            print(f"  Votes: {status['total_votes']}")
+            print(f"  Pending Insights: {status['pending_insights']}")
+            wait_m = int(status.get("time_until_post", 0) // 60)
+            can_post = "Yes" if status.get("can_post") else f"No (wait {wait_m}m)"
+            print(f"  Can Post: {can_post}")
+
+            if status['last_heartbeat']:
+                from datetime import datetime
+                last = datetime.fromtimestamp(status['last_heartbeat'])
+                print(f"  Last Heartbeat: {last.strftime('%Y-%m-%d %H:%M')}")
+            print()
+
+        except MoltbookError as e:
+            print(f"[SPARK] Status check failed: {e}")
+
+    elif args.action == "heartbeat":
+        if not is_registered():
+            print("[SPARK] Not registered on Moltbook. Run 'spark moltbook register' first.")
+            return
+
+        print("[SPARK] Running Moltbook heartbeat...")
+        try:
+            agent = SparkMoltbookAgent()
+            result = agent.heartbeat()
+            print(f"\n✓ Heartbeat complete")
+            print(f"  Actions: {len(result.get('actions', []))}")
+            print(f"  Karma Delta: {result.get('karma_delta', 0):+d}")
+            print(f"  Opportunities Found: {result.get('opportunities_found', 0)}")
+
+            for action in result.get("actions", []):
+                print(f"  - {action['type']}: {action.get('submolt', 'n/a')}")
+            print()
+
+        except MoltbookError as e:
+            print(f"[SPARK] Heartbeat failed: {e}")
+
+    elif args.action == "queue":
+        if not args.insight:
+            print("[SPARK] Use --insight to specify the insight to queue")
+            return
+
+        agent = SparkMoltbookAgent()
+        agent.queue_insight(
+            insight=args.insight,
+            insight_type=args.type or "observation",
+            submolt=args.submolt or "spark-insights",
+        )
+        print(f"✓ Queued insight for next heartbeat")
+
+    elif args.action == "daemon":
+        if args.stop:
+            HeartbeatDaemon.stop()
+        elif args.status_check:
+            if HeartbeatDaemon.is_running():
+                print("[SPARK] Moltbook heartbeat daemon is running")
+            else:
+                print("[SPARK] Moltbook heartbeat daemon is not running")
+        else:
+            if HeartbeatDaemon.is_running():
+                print("[SPARK] Daemon already running. Use 'spark moltbook daemon --stop' to stop.")
+                return
+            daemon = HeartbeatDaemon(interval_hours=args.interval or 4)
+            if args.once:
+                daemon.start(daemon_mode=False)
+            else:
+                daemon.start(daemon_mode=True)
+
+    elif args.action == "subscribe":
+        if not is_registered():
+            print("[SPARK] Not registered on Moltbook. Run 'spark moltbook register' first.")
+            return
+
+        agent = SparkMoltbookAgent()
+        submolts = args.submolts if args.submolts else None
+        agent.subscribe_to_submolts(submolts)
+        print("✓ Subscribed to submolts")
+
+    else:
+        print("Unknown action. Use: register, status, heartbeat, queue, daemon, subscribe")
+
+
 
 def cmd_timeline(args):
     """Show growth timeline."""
@@ -1010,7 +1144,24 @@ Examples:
 
     # memory-migrate
     subparsers.add_parser("memory-migrate", help="Backfill JSONL memories into SQLite store")
-    
+
+    # moltbook - AI agent social network
+    moltbook_parser = subparsers.add_parser("moltbook", help="Moltbook agent - social network for AI agents")
+    moltbook_parser.add_argument("action", nargs="?", default="status",
+                                 choices=["register", "status", "heartbeat", "queue", "daemon", "subscribe"],
+                                 help="Action to perform")
+    moltbook_parser.add_argument("--name", help="Agent name (for register)")
+    moltbook_parser.add_argument("--description", help="Agent description (for register)")
+    moltbook_parser.add_argument("--insight", help="Insight text (for queue)")
+    moltbook_parser.add_argument("--type", choices=["observation", "learning", "pattern", "question"],
+                                 help="Insight type (for queue)")
+    moltbook_parser.add_argument("--submolt", help="Target submolt (for queue)")
+    moltbook_parser.add_argument("--submolts", nargs="+", help="Submolts to subscribe to (for subscribe)")
+    moltbook_parser.add_argument("--interval", type=float, help="Hours between heartbeats (for daemon)")
+    moltbook_parser.add_argument("--once", action="store_true", help="Run daemon once then exit")
+    moltbook_parser.add_argument("--stop", action="store_true", help="Stop running daemon")
+    moltbook_parser.add_argument("--status-check", action="store_true", help="Check if daemon is running")
+
     args = parser.parse_args()
     
     if not args.command:
@@ -1046,6 +1197,7 @@ Examples:
         "bridge": cmd_bridge,
         "memory": cmd_memory,
         "memory-migrate": cmd_memory_migrate,
+        "moltbook": cmd_moltbook,
     }
     
     if args.command in commands:
