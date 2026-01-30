@@ -51,7 +51,7 @@ from lib.prediction_loop import get_prediction_state
 from lib.evaluation import evaluate_predictions
 from lib.outcome_log import append_outcome, build_explicit_outcome
 from lib.outcome_checkin import list_checkins
-from lib.ingest_validation import scan_queue_events
+from lib.ingest_validation import scan_queue_events, write_ingest_report
 from lib.memory_capture import (
     process_recent_memory_events,
     list_pending as capture_list_pending,
@@ -533,6 +533,8 @@ def cmd_eval(args):
 def cmd_validate_ingest(args):
     """Validate recent queue events for schema issues."""
     stats = scan_queue_events(limit=args.limit)
+    if not args.no_write:
+        write_ingest_report(stats)
     print("[SPARK] Ingest validation")
     print(f"   Processed: {stats['processed']}")
     print(f"   Valid: {stats['valid']}")
@@ -948,6 +950,7 @@ Examples:
     # validate-ingest
     ingest_parser = subparsers.add_parser("validate-ingest", help="Validate recent queue events")
     ingest_parser.add_argument("--limit", "-n", type=int, default=200, help="Events to scan")
+    ingest_parser.add_argument("--no-write", action="store_true", help="Skip writing ingest report file")
     
     # learn
     learn_parser = subparsers.add_parser("learn", help="Manually learn an insight")

@@ -385,6 +385,7 @@ python -m spark.cli eval --days 7
 
 # Validate recent queue events (ingest hygiene)
 python -m spark.cli validate-ingest --limit 200
+# This writes ~/.spark/ingest_report.json unless --no-write is set
 
 # View recent learnings
 python -m spark.cli learnings

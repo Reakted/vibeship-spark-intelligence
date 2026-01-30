@@ -10,6 +10,8 @@ from typing import Any, Dict
 from lib.queue import EVENTS_FILE, EventType
 from lib.diagnostics import log_debug
 
+REPORT_FILE = Path.home() / ".spark" / "ingest_report.json"
+
 
 def _tail_lines(path: Path, limit: int) -> deque:
     lines: deque = deque(maxlen=limit)
@@ -53,6 +55,8 @@ def _validate_event_row(row: Dict[str, Any]) -> str:
 def scan_queue_events(*, limit: int = 500) -> Dict[str, Any]:
     """Scan recent queue events and report schema issues."""
     stats: Dict[str, Any] = {
+        "checked_at": None,
+        "window": limit,
         "processed": 0,
         "valid": 0,
         "invalid": 0,
@@ -62,6 +66,7 @@ def scan_queue_events(*, limit: int = 500) -> Dict[str, Any]:
         return stats
 
     lines = _tail_lines(EVENTS_FILE, limit)
+    stats["checked_at"] = __import__("time").time()
     for line in lines:
         stats["processed"] += 1
         try:
@@ -78,3 +83,12 @@ def scan_queue_events(*, limit: int = 500) -> Dict[str, Any]:
         stats["valid"] += 1
 
     return stats
+
+
+def write_ingest_report(stats: Dict[str, Any], path: Path = REPORT_FILE) -> None:
+    """Write the latest ingest validation report to disk."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
+    except Exception as e:
+        log_debug("ingest_validation", "write_report failed", e)
