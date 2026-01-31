@@ -81,6 +81,15 @@ from lib.memory_capture import (
 from lib.capture_cli import format_pending
 from lib.memory_migrate import migrate as migrate_memory
 
+# Chips imports (lazy to avoid startup cost if not used)
+def _get_chips_registry():
+    from lib.chips import get_registry
+    return get_registry()
+
+def _get_chips_router():
+    from lib.chips import get_router
+    return get_router()
+
 # Moltbook imports (lazy to avoid startup cost if not used)
 def _get_moltbook_client():
     from adapters.moltbook.client import MoltbookClient, is_registered
@@ -1083,6 +1092,180 @@ def cmd_moltbook(args):
 
 
 
+def cmd_chips(args):
+    """Manage Spark chips - domain-specific intelligence modules."""
+    from pathlib import Path
+    from lib.chips import get_registry, load_chip, ChipRunner, get_chip_store
+
+    registry = get_registry()
+
+    if args.action == "list":
+        chips = registry.list_all()
+        if not chips:
+            print("\n[SPARK] No chips installed.")
+            print("        Use 'spark chips install <path>' to install a chip.")
+            return
+
+        print(f"\n{'=' * 50}")
+        print("  SPARK CHIPS - Domain Intelligence")
+        print(f"{'=' * 50}\n")
+
+        active = [c for c in chips if c.active]
+        inactive = [c for c in chips if not c.active]
+
+        if active:
+            print("Active Chips:")
+            for chip in active:
+                print(f"  [*] {chip.id} v{chip.version}")
+                print(f"      {chip.name}")
+                print(f"      Insights: {chip.stats.insights_generated} | Events: {chip.stats.events_processed}")
+
+        if inactive:
+            print("\nInactive Chips:")
+            for chip in inactive:
+                print(f"  [ ] {chip.id} v{chip.version}")
+                print(f"      {chip.name}")
+
+        print()
+
+    elif args.action == "install":
+        if not args.path:
+            print("[SPARK] Use --path to specify chip YAML file")
+            return
+
+        path = Path(args.path).expanduser()
+        if not path.exists():
+            print(f"[SPARK] File not found: {path}")
+            return
+
+        try:
+            entry = registry.install(path, source=args.source or "custom")
+            print(f"[SPARK] Installed chip: {entry.id} v{entry.version}")
+            print(f"        Name: {entry.name}")
+            print(f"        Source: {entry.source}")
+            print(f"        Use 'spark chips activate {entry.id}' to enable")
+        except Exception as e:
+            print(f"[SPARK] Install failed: {e}")
+
+    elif args.action == "uninstall":
+        if not args.chip_id:
+            print("[SPARK] Specify chip ID to uninstall")
+            return
+
+        if registry.uninstall(args.chip_id):
+            print(f"[SPARK] Uninstalled chip: {args.chip_id}")
+        else:
+            print(f"[SPARK] Chip not found: {args.chip_id}")
+
+    elif args.action == "activate":
+        if not args.chip_id:
+            print("[SPARK] Specify chip ID to activate")
+            return
+
+        if registry.activate(args.chip_id):
+            print(f"[SPARK] Activated chip: {args.chip_id}")
+        else:
+            print(f"[SPARK] Chip not found: {args.chip_id}")
+
+    elif args.action == "deactivate":
+        if not args.chip_id:
+            print("[SPARK] Specify chip ID to deactivate")
+            return
+
+        if registry.deactivate(args.chip_id):
+            print(f"[SPARK] Deactivated chip: {args.chip_id}")
+        else:
+            print(f"[SPARK] Chip not found: {args.chip_id}")
+
+    elif args.action == "status":
+        chip_id = args.chip_id
+        if not chip_id:
+            # Show overall status
+            stats = registry.get_stats()
+            print(f"\n[SPARK] Chips Status")
+            print(f"  Installed: {stats['total_installed']}")
+            print(f"  Active: {stats['total_active']}")
+            return
+
+        entry = registry.get(chip_id)
+        if not entry:
+            print(f"[SPARK] Chip not found: {chip_id}")
+            return
+
+        spec = registry.get_spec(chip_id)
+        print(f"\n[SPARK] Chip: {entry.id}")
+        print(f"  Name: {entry.name}")
+        print(f"  Version: {entry.version}")
+        print(f"  Source: {entry.source}")
+        print(f"  Active: {'Yes' if entry.active else 'No'}")
+        print(f"  Installed: {entry.installed_at[:10]}")
+        print(f"\n  Stats:")
+        print(f"    Insights Generated: {entry.stats.insights_generated}")
+        print(f"    Events Processed: {entry.stats.events_processed}")
+        print(f"    Predictions Made: {entry.stats.predictions_made}")
+        if entry.stats.last_active:
+            print(f"    Last Active: {entry.stats.last_active[:19]}")
+
+        if spec:
+            print(f"\n  Components:")
+            print(f"    Domains: {', '.join(spec.domains[:5])}")
+            print(f"    Triggers: {len(spec.triggers.patterns)} patterns, {len(spec.triggers.events)} events")
+            print(f"    Observers: {len(spec.observers)}")
+            print(f"    Learners: {len(spec.learners)}")
+            print(f"    Outcomes: {len(spec.outcomes_positive)}+ / {len(spec.outcomes_negative)}-")
+
+    elif args.action == "insights":
+        chip_id = args.chip_id
+        if not chip_id:
+            print("[SPARK] Specify chip ID to view insights")
+            return
+
+        store = get_chip_store(chip_id)
+        insights = store.get_insights(limit=args.limit or 10)
+
+        if not insights:
+            print(f"\n[SPARK] No insights for chip: {chip_id}")
+            return
+
+        print(f"\n[SPARK] Insights from {chip_id} (showing {len(insights)})\n")
+        for i in insights:
+            conf = i.get("confidence", 0)
+            print(f"  [{i.get('category', 'general')}] {i.get('insight')}")
+            print(f"      Confidence: {conf:.0%} | Validations: {i.get('validations', 0)}")
+            print()
+
+    elif args.action == "test":
+        chip_id = args.chip_id
+        if not chip_id:
+            print("[SPARK] Specify chip ID to test")
+            return
+
+        spec = registry.get_spec(chip_id)
+        if not spec:
+            print(f"[SPARK] Chip not found: {chip_id}")
+            return
+
+        # Test with sample event
+        test_text = args.test_text or "This is a test event"
+        test_event = {
+            "session_id": "test-session",
+            "hook_event": "UserPromptSubmit",
+            "payload": {"text": test_text},
+        }
+
+        runner = ChipRunner(spec)
+        insights = runner.process_event(test_event)
+
+        print(f"\n[SPARK] Test chip: {chip_id}")
+        print(f"  Input: {test_text[:80]}...")
+        print(f"  Insights generated: {len(insights)}")
+        for ins in insights:
+            print(f"    - {ins.get('insight', '')[:100]}")
+
+    else:
+        print("Unknown action. Use: list, install, uninstall, activate, deactivate, status, insights, test")
+
+
 def cmd_timeline(args):
     """Show growth timeline."""
     growth = get_growth_tracker()
@@ -1409,6 +1592,18 @@ Examples:
     project_phase.add_argument("--set", dest="set_phase", help="Set phase (discovery/prototype/polish/launch)")
     project_phase.add_argument("--project", help="Project root path")
 
+    # chips - domain-specific intelligence
+    chips_parser = subparsers.add_parser("chips", help="Manage Spark chips - domain-specific intelligence")
+    chips_parser.add_argument("action", nargs="?", default="list",
+                              choices=["list", "install", "uninstall", "activate", "deactivate", "status", "insights", "test"],
+                              help="Action to perform")
+    chips_parser.add_argument("chip_id", nargs="?", help="Chip ID (for activate/deactivate/status/insights/test)")
+    chips_parser.add_argument("--path", "-p", help="Path to chip YAML file (for install)")
+    chips_parser.add_argument("--source", choices=["official", "community", "custom"], default="custom",
+                              help="Chip source (for install)")
+    chips_parser.add_argument("--limit", "-n", type=int, default=10, help="Number of insights to show")
+    chips_parser.add_argument("--test-text", "-t", help="Test text for chip testing")
+
     # moltbook - AI agent social network
     moltbook_parser = subparsers.add_parser("moltbook", help="Moltbook agent - social network for AI agents")
     moltbook_parser.add_argument("action", nargs="?", default="status",
@@ -1461,6 +1656,7 @@ Examples:
         "bridge": cmd_bridge,
         "memory": cmd_memory,
         "memory-migrate": cmd_memory_migrate,
+        "chips": cmd_chips,
         "moltbook": cmd_moltbook,
         "project": None,
     }

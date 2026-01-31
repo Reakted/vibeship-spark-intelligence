@@ -1,0 +1,132 @@
+# Spark Core Intelligence Chip
+# Built-in chip that captures coding and tool patterns
+
+chip:
+  id: spark-core
+  name: Spark Core Intelligence
+  version: 1.0.0
+  description: |
+    Core intelligence for coding and tool patterns.
+    Learns what works in software development workflows.
+  author: Vibeship
+  license: MIT
+  domains:
+    - coding
+    - development
+    - debugging
+    - tools
+
+triggers:
+  patterns:
+    - "worked because"
+    - "failed because"
+    - "the issue was"
+    - "fixed by"
+    - "better approach"
+    - "prefer"
+    - "always"
+    - "never"
+    - "remember to"
+
+  events:
+    - PostToolUse
+    - PostToolUseFailure
+    - UserPromptSubmit
+
+observers:
+  - name: success_pattern
+    description: Captures when something works and why
+    triggers:
+      - "worked because"
+      - "fixed by"
+      - "the solution was"
+    capture:
+      required:
+        pattern: What worked
+      optional:
+        reason: Why it worked
+        context: Surrounding context
+
+  - name: failure_pattern
+    description: Captures when something fails and why
+    triggers:
+      - "failed because"
+      - "the issue was"
+      - "the problem was"
+    capture:
+      required:
+        pattern: What failed
+      optional:
+        reason: Why it failed
+        fix: How to fix it
+
+  - name: preference
+    description: Captures user preferences
+    triggers:
+      - "prefer"
+      - "better"
+      - "always"
+      - "never"
+    capture:
+      required:
+        preference: The preference
+      optional:
+        reason: Why they prefer it
+
+learners:
+  - name: tool_effectiveness
+    description: Learns which tools work best for which tasks
+    type: correlation
+    input:
+      fields:
+        - tool_name
+        - task_type
+    output:
+      fields:
+        - success
+        - time_taken
+    learn:
+      - "Which tools succeed most often"
+      - "Which tools are fastest"
+
+  - name: error_patterns
+    description: Learns common error patterns and fixes
+    type: pattern
+    observe: failure_pattern
+    learn:
+      - "Common error types"
+      - "Effective fixes"
+
+outcomes:
+  positive:
+    - condition: "success == true"
+      weight: 1.0
+      insight: "Approach worked"
+    - condition: "time_taken < 30"
+      weight: 0.7
+      insight: "Fast resolution"
+
+  negative:
+    - condition: "success == false"
+      weight: 1.0
+      insight: "Approach failed"
+    - condition: "retry_count > 2"
+      weight: 0.8
+      insight: "Multiple retries needed"
+
+context:
+  format: |
+    ## Spark Core Intelligence
+
+    ### Tool Effectiveness
+    {{#each tool_insights}}
+    - {{tool}}: {{effectiveness}}
+    {{/each}}
+
+    ### Error Patterns
+    {{#each error_patterns}}
+    - {{pattern}}: {{fix}}
+    {{/each}}
+
+  priority: 0.9
+  max_chars: 500
