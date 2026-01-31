@@ -7,6 +7,7 @@ Detects meaningful patterns from raw events:
 - RepetitionDetector: same request 3+ times
 - SequenceDetector: successful tool patterns
 - SemanticIntentDetector: polite redirects and implicit preferences
+- WhyDetector: reasoning, causality, and principles (HIGH VALUE)
 
 These feed into CognitiveLearner for insight synthesis.
 """
@@ -17,6 +18,7 @@ from .sentiment import SentimentDetector
 from .repetition import RepetitionDetector
 from .sequence import SequenceDetector
 from .semantic import SemanticIntentDetector
+from .why import WhyDetector
 from .aggregator import PatternAggregator, get_aggregator
 from .worker import process_pattern_events, get_pattern_backlog
 
@@ -29,6 +31,7 @@ __all__ = [
     "RepetitionDetector",
     "SequenceDetector",
     "SemanticIntentDetector",
+    "WhyDetector",
     "PatternAggregator",
     "get_aggregator",
     "process_pattern_events",

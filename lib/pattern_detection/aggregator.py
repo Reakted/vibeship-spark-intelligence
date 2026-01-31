@@ -21,6 +21,7 @@ from .sentiment import SentimentDetector
 from .repetition import RepetitionDetector
 from .sequence import SequenceDetector
 from .semantic import SemanticIntentDetector
+from .why import WhyDetector
 
 
 # Confidence threshold to trigger learning
@@ -67,6 +68,7 @@ class PatternAggregator:
             RepetitionDetector(),
             SequenceDetector(),
             SemanticIntentDetector(),
+            WhyDetector(),  # Phase 4: Capture reasoning and principles
         ]
         self._patterns_count = 0
         self._session_patterns: Dict[str, List[DetectedPattern]] = {}
