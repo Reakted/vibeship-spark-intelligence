@@ -46,6 +46,12 @@ telegram_token.txt
 .learnings/
 *.db
 
+# Moltbook credentials - NEVER commit
+moltbook_credentials.json
+.moltbook/
+*moltbook*.key
+*moltbook*_sk_*
+
 # OS
 .DS_Store
 Thumbs.db

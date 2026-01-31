@@ -36,6 +36,15 @@ It combines:
 
 ---
 
+## Core Documents (Start Here)
+
+- `CORE.md` — Vision and phase roadmap from primitive telemetry to superintelligence
+- `CORE_GAPS.md` — What exists vs what must be built or cleaned
+- `CORE_GAPS_PLAN.md` — How each gap gets filled with workflows and architecture
+- `CORE_IMPLEMENTATION_PLAN.md` — Context-rich build plan with sequencing and metrics
+
+---
+
 ## Quick Start
 
 ### 1. Install
