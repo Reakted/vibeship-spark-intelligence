@@ -84,8 +84,8 @@ from lib.project_profile import (
     set_phase,
     completion_score,
 )
-from lib.memory_banks import store_memory
-from lib.outcome_log import append_outcome, make_outcome_id
+from lib.memory_banks import store_memory, sync_insights_to_banks, get_bank_stats
+from lib.outcome_log import append_outcome, make_outcome_id, auto_link_outcomes, get_linkable_candidates
 from lib.memory_capture import (
     process_recent_memory_events,
     list_pending as capture_list_pending,
@@ -737,6 +737,80 @@ def cmd_outcome_links(args):
         validated = "Y" if link.get("validated") else "N"
         result = link.get("validation_result", "-")
         print(f"   {lid}... {oid}... -> {ikey} [validated={validated} result={result}]")
+
+
+def cmd_auto_link(args):
+    """Auto-link unlinked outcomes to matching insights."""
+    min_sim = float(getattr(args, 'min_similarity', 0.25) or 0.25)
+    limit = int(getattr(args, 'limit', 50) or 50)
+    dry_run = getattr(args, 'dry_run', False)
+    preview = getattr(args, 'preview', False)
+
+    if preview:
+        candidates = get_linkable_candidates(limit=limit)
+        if not candidates:
+            print("[SPARK] No linkable candidates found.")
+            return
+        print(f"[SPARK] Linkable candidates ({len(candidates)}):")
+        for c in candidates:
+            print(f"   [{c['similarity']:.2f}] {c['outcome_preview'][:40]}...")
+            print(f"         -> {c['insight_preview'][:50]}...")
+        return
+
+    stats = auto_link_outcomes(min_similarity=min_sim, limit=limit, dry_run=dry_run)
+
+    mode = "DRY RUN" if dry_run else "APPLIED"
+    print(f"[SPARK] Auto-Link Outcomes ({mode})")
+    print(f"   Processed: {stats['processed']}")
+    print(f"   Linked: {stats['linked']}")
+    print(f"   Skipped: {stats['skipped']}")
+
+    if stats.get('matches') and len(stats['matches']) > 0:
+        print(f"\n   Top matches:")
+        for m in stats['matches'][:5]:
+            print(f"   [{m['similarity']:.2f}] {m['outcome_preview'][:35]}... -> {m['insight_preview'][:35]}...")
+
+
+def cmd_sync_banks(args):
+    """Sync high-value cognitive insights to memory banks."""
+    min_rel = float(getattr(args, 'min_reliability', 0.7) or 0.7)
+    dry_run = getattr(args, 'dry_run', False)
+    categories = None
+    if hasattr(args, 'categories') and args.categories:
+        categories = args.categories.split(',')
+
+    stats = sync_insights_to_banks(min_reliability=min_rel, categories=categories, dry_run=dry_run)
+
+    mode = "DRY RUN" if dry_run else "APPLIED"
+    print(f"[SPARK] Sync Insights to Banks ({mode})")
+    print(f"   Processed: {stats['processed']}")
+    print(f"   Synced: {stats['synced']}")
+    print(f"   Skipped (low reliability): {stats['skipped']}")
+    print(f"   Duplicates: {stats['duplicates']}")
+
+    if stats.get('entries') and len(stats['entries']) > 0:
+        print(f"\n   Synced entries ({len(stats['entries'])}):")
+        for e in stats['entries'][:10]:
+            print(f"   [{e['reliability']:.0%}] {e['category']}: {e['preview'][:50]}...")
+
+
+def cmd_bank_stats(args):
+    """Show memory bank statistics."""
+    stats = get_bank_stats()
+
+    print("[SPARK] Memory Bank Stats")
+    print(f"   Global entries: {stats['global_entries']}")
+    print(f"   Project files: {stats['project_files']}")
+
+    if stats['project_counts']:
+        print("\n   Projects:")
+        for name, count in stats['project_counts'].items():
+            print(f"      - {name}: {count}")
+
+    if stats['by_category']:
+        print("\n   By category:")
+        for cat, count in stats['by_category'].items():
+            print(f"      - {cat}: {count}")
 
 
 def cmd_validate_ingest(args):
@@ -1669,6 +1743,22 @@ Examples:
     outcome_links_parser.add_argument("--chip-id", help="Filter by chip ID")
     outcome_links_parser.add_argument("--limit", "-n", type=int, default=50, help="Max to show")
 
+    # auto-link: Auto-link outcomes to insights
+    auto_link_parser = subparsers.add_parser("auto-link", help="Auto-link unlinked outcomes to matching insights")
+    auto_link_parser.add_argument("--min-similarity", type=float, default=0.25, help="Min similarity threshold (0-1)")
+    auto_link_parser.add_argument("--limit", "-n", type=int, default=50, help="Max outcomes to process")
+    auto_link_parser.add_argument("--dry-run", action="store_true", help="Preview without creating links")
+    auto_link_parser.add_argument("--preview", action="store_true", help="Show linkable candidates only")
+
+    # sync-banks: Sync insights to memory banks
+    sync_banks_parser = subparsers.add_parser("sync-banks", help="Sync high-value insights to memory banks")
+    sync_banks_parser.add_argument("--min-reliability", type=float, default=0.7, help="Min reliability threshold (0-1)")
+    sync_banks_parser.add_argument("--categories", help="Comma-separated categories to sync")
+    sync_banks_parser.add_argument("--dry-run", action="store_true", help="Preview without syncing")
+
+    # bank-stats: Show memory bank statistics
+    subparsers.add_parser("bank-stats", help="Show memory bank statistics")
+
     # validate-ingest
     ingest_parser = subparsers.add_parser("validate-ingest", help="Validate recent queue events")
     ingest_parser.add_argument("--limit", "-n", type=int, default=200, help="Events to scan")
@@ -1828,6 +1918,9 @@ Examples:
         "outcome-validate": cmd_outcome_validate,
         "outcome-unlinked": cmd_outcome_unlinked,
         "outcome-links": cmd_outcome_links,
+        "auto-link": cmd_auto_link,
+        "sync-banks": cmd_sync_banks,
+        "bank-stats": cmd_bank_stats,
         "eval": cmd_eval,
         "validate-ingest": cmd_validate_ingest,
         "capture": cmd_capture,

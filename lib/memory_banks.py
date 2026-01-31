@@ -307,3 +307,129 @@ def retrieve(query: str, project_key: Optional[str] = None, limit: int = 6) -> L
         if len(out) >= max(0, int(limit or 0)):
             break
     return out
+
+
+# =============================================================================
+# Phase 3.5: Sync Cognitive Insights to Memory Banks
+# =============================================================================
+
+def sync_insights_to_banks(
+    min_reliability: float = 0.7,
+    categories: Optional[List[str]] = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """
+    Sync high-value cognitive insights to memory banks.
+
+    This ensures that validated insights are stored in the appropriate
+    memory bank (global or project) for fast retrieval.
+
+    Args:
+        min_reliability: Minimum reliability threshold (0.0-1.0)
+        categories: Categories to sync (default: user_understanding, communication)
+        dry_run: If True, don't store, just return what would be synced
+
+    Returns:
+        Stats about syncing: processed, synced, skipped, duplicates
+    """
+    from lib.cognitive_learner import get_cognitive_learner, CognitiveCategory
+
+    if categories is None:
+        categories = ["user_understanding", "communication", "wisdom"]
+
+    # Map string categories to enum values
+    category_map = {
+        "user_understanding": CognitiveCategory.USER_UNDERSTANDING,
+        "communication": CognitiveCategory.COMMUNICATION,
+        "wisdom": CognitiveCategory.WISDOM,
+        "reasoning": CognitiveCategory.REASONING,
+        "context": CognitiveCategory.CONTEXT,
+        "meta_learning": CognitiveCategory.META_LEARNING,
+        "self_awareness": CognitiveCategory.SELF_AWARENESS,
+    }
+
+    target_categories = set()
+    for cat in categories:
+        if cat in category_map:
+            target_categories.add(category_map[cat])
+
+    cog = get_cognitive_learner()
+
+    # Get existing entries to avoid duplicates
+    existing_texts = set()
+    for entry in _read_jsonl(GLOBAL_FILE, limit=2000):
+        text = (entry.get("text") or "").strip().lower()
+        if text:
+            existing_texts.add(text[:120])
+
+    stats = {"processed": 0, "synced": 0, "skipped": 0, "duplicates": 0, "entries": []}
+
+    for key, insight in cog.insights.items():
+        if insight.category not in target_categories:
+            continue
+
+        stats["processed"] += 1
+
+        # Check reliability threshold
+        reliability = getattr(insight, "reliability", 0.0)
+        if reliability < min_reliability:
+            stats["skipped"] += 1
+            continue
+
+        insight_text = getattr(insight, "insight", "") or str(insight)
+        if not insight_text:
+            stats["skipped"] += 1
+            continue
+
+        # Check for duplicates
+        normalized = insight_text.strip().lower()[:120]
+        if normalized in existing_texts:
+            stats["duplicates"] += 1
+            continue
+
+        # Determine category string
+        cat_str = insight.category.value if hasattr(insight.category, "value") else str(insight.category)
+
+        if not dry_run:
+            store_memory(
+                text=insight_text,
+                category=cat_str,
+                source="cognitive_sync",
+            )
+            existing_texts.add(normalized)
+
+        stats["synced"] += 1
+        stats["entries"].append({
+            "key": key,
+            "category": cat_str,
+            "reliability": round(reliability, 2),
+            "preview": insight_text[:80],
+        })
+
+    return stats
+
+
+def get_bank_stats() -> Dict[str, Any]:
+    """Get statistics about memory banks."""
+    _ensure_dirs()
+
+    global_entries = _read_jsonl(GLOBAL_FILE, limit=5000)
+
+    project_files = list(PROJECTS_DIR.glob("*.jsonl"))
+    project_counts = {}
+    for pf in project_files:
+        entries = _read_jsonl(pf, limit=2000)
+        project_counts[pf.stem] = len(entries)
+
+    # Count by category
+    by_category = {}
+    for entry in global_entries:
+        cat = entry.get("category", "unknown")
+        by_category[cat] = by_category.get(cat, 0) + 1
+
+    return {
+        "global_entries": len(global_entries),
+        "project_files": len(project_files),
+        "project_counts": project_counts,
+        "by_category": by_category,
+    }

@@ -243,3 +243,122 @@ def get_outcome_stats(chip_id: Optional[str] = None) -> Dict[str, Any]:
         "validated_links": validated_links,
         "unlinked": len(outcomes) - len(links),
     }
+
+
+# =============================================================================
+# Phase 3.5: Auto-Linking Outcomes to Insights
+# =============================================================================
+
+def _extract_keywords(text: str) -> List[str]:
+    """Extract meaningful keywords from text for matching."""
+    import re
+    stopwords = {
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "must", "shall", "can", "need", "dare",
+        "ought", "used", "to", "of", "in", "for", "on", "with", "at", "by",
+        "from", "as", "into", "through", "during", "before", "after", "above",
+        "below", "between", "under", "again", "further", "then", "once", "here",
+        "there", "when", "where", "why", "how", "all", "each", "few", "more",
+        "most", "other", "some", "such", "no", "nor", "not", "only", "own",
+        "same", "so", "than", "too", "very", "just", "and", "but", "if", "or",
+        "because", "until", "while", "this", "that", "these", "those", "it",
+        "its", "user", "prefers", "likes", "tool", "worked", "failed",
+    }
+    words = re.findall(r'\b[a-z]{3,}\b', text.lower())
+    return [w for w in words if w not in stopwords][:10]
+
+
+def _compute_similarity(text1: str, text2: str) -> float:
+    """Compute simple keyword overlap similarity between two texts."""
+    kw1 = set(_extract_keywords(text1))
+    kw2 = set(_extract_keywords(text2))
+    if not kw1 or not kw2:
+        return 0.0
+    intersection = len(kw1 & kw2)
+    union = len(kw1 | kw2)
+    return intersection / union if union > 0 else 0.0
+
+
+def auto_link_outcomes(
+    min_similarity: float = 0.25,
+    limit: int = 50,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """
+    Automatically link unlinked outcomes to relevant insights.
+
+    Uses keyword similarity to match outcomes to insights.
+    Only links if similarity exceeds min_similarity threshold.
+
+    Args:
+        min_similarity: Minimum similarity score to create a link (0.0-1.0)
+        limit: Maximum unlinked outcomes to process
+        dry_run: If True, don't create links, just return what would be linked
+
+    Returns:
+        Stats about linking: processed, linked, skipped, matches
+    """
+    from lib.cognitive_learner import get_cognitive_learner
+
+    unlinked = get_unlinked_outcomes(limit=limit)
+    if not unlinked:
+        return {"processed": 0, "linked": 0, "skipped": 0, "matches": []}
+
+    cog = get_cognitive_learner()
+    insights = cog.insights
+
+    stats = {"processed": 0, "linked": 0, "skipped": 0, "matches": []}
+
+    for outcome in unlinked:
+        stats["processed"] += 1
+        outcome_text = outcome.get("text", "") or outcome.get("insight", "")
+        outcome_id = outcome.get("outcome_id")
+
+        if not outcome_text or not outcome_id:
+            stats["skipped"] += 1
+            continue
+
+        # Find best matching insight
+        best_match = None
+        best_score = 0.0
+
+        for key, insight in insights.items():
+            insight_text = getattr(insight, "insight", "") or str(insight)
+            score = _compute_similarity(outcome_text, insight_text)
+
+            if score > best_score and score >= min_similarity:
+                best_score = score
+                best_match = (key, insight_text[:100])
+
+        if best_match:
+            if not dry_run:
+                link_outcome_to_insight(
+                    outcome_id=outcome_id,
+                    insight_key=best_match[0],
+                    chip_id=outcome.get("chip_id"),
+                    confidence=best_score,
+                    notes=f"auto-linked (similarity={best_score:.2f})",
+                )
+            stats["linked"] += 1
+            stats["matches"].append({
+                "outcome_id": outcome_id,
+                "insight_key": best_match[0],
+                "similarity": round(best_score, 3),
+                "outcome_preview": outcome_text[:60],
+                "insight_preview": best_match[1][:60],
+            })
+        else:
+            stats["skipped"] += 1
+
+    return stats
+
+
+def get_linkable_candidates(limit: int = 20) -> List[Dict[str, Any]]:
+    """
+    Preview which outcomes could be auto-linked and to what insights.
+
+    Useful for reviewing before running auto_link_outcomes.
+    """
+    result = auto_link_outcomes(min_similarity=0.2, limit=limit, dry_run=True)
+    return result.get("matches", [])
