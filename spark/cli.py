@@ -1372,8 +1372,47 @@ def cmd_chips(args):
         for ins in insights:
             print(f"    - {ins.get('insight', '')[:100]}")
 
+    elif args.action == "questions":
+        # Phase 5: Show questions from active chips
+        chip_id = args.chip_id
+        phase = getattr(args, 'phase', None)
+
+        if chip_id:
+            # Show questions for a specific chip
+            spec = registry.get_spec(chip_id)
+            if not spec:
+                print(f"[SPARK] Chip not found: {chip_id}")
+                return
+
+            if not spec.questions:
+                print(f"[SPARK] Chip {chip_id} has no questions defined")
+                return
+
+            print(f"\n[SPARK] Questions from {chip_id}:\n")
+            for q in spec.questions:
+                phase_tag = f" [{q.phase}]" if q.phase else ""
+                affects = ", ".join(q.affects_learning[:3]) if q.affects_learning else "general"
+                print(f"  [{q.category}]{phase_tag} {q.question}")
+                print(f"      ID: {q.id} | Affects: {affects}")
+                print()
+        else:
+            # Show questions from all active chips
+            questions = registry.get_active_questions(phase=phase)
+            if not questions:
+                print("[SPARK] No questions from active chips.")
+                print("        Activate chips with 'spark chips activate <chip_id>'")
+                return
+
+            print(f"\n[SPARK] Questions from Active Chips:\n")
+            for q in questions:
+                phase_tag = f" [{q['phase']}]" if q.get('phase') else ""
+                affects = ", ".join(q.get('affects_learning', [])[:3]) or "general"
+                print(f"  [{q['category']}]{phase_tag} {q['question']}")
+                print(f"      ID: {q['id']} | Chip: {q['chip_id']} | Affects: {affects}")
+                print()
+
     else:
-        print("Unknown action. Use: list, install, uninstall, activate, deactivate, status, insights, test")
+        print("Unknown action. Use: list, install, uninstall, activate, deactivate, status, insights, test, questions")
 
 
 def cmd_timeline(args):
@@ -1731,14 +1770,16 @@ Examples:
     # chips - domain-specific intelligence
     chips_parser = subparsers.add_parser("chips", help="Manage Spark chips - domain-specific intelligence")
     chips_parser.add_argument("action", nargs="?", default="list",
-                              choices=["list", "install", "uninstall", "activate", "deactivate", "status", "insights", "test"],
+                              choices=["list", "install", "uninstall", "activate", "deactivate", "status", "insights", "test", "questions"],
                               help="Action to perform")
-    chips_parser.add_argument("chip_id", nargs="?", help="Chip ID (for activate/deactivate/status/insights/test)")
+    chips_parser.add_argument("chip_id", nargs="?", help="Chip ID (for activate/deactivate/status/insights/test/questions)")
     chips_parser.add_argument("--path", "-p", help="Path to chip YAML file (for install)")
     chips_parser.add_argument("--source", choices=["official", "community", "custom"], default="custom",
                               help="Chip source (for install)")
     chips_parser.add_argument("--limit", "-n", type=int, default=10, help="Number of insights to show")
     chips_parser.add_argument("--test-text", "-t", help="Test text for chip testing")
+    chips_parser.add_argument("--phase", choices=["discovery", "prototype", "polish", "launch"],
+                              help="Filter questions by phase (for questions)")
 
     # moltbook - AI agent social network
     moltbook_parser = subparsers.add_parser("moltbook", help="Moltbook agent - social network for AI agents")

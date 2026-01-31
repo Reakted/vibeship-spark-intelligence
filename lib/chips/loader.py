@@ -54,6 +54,17 @@ class OutcomeSpec:
 
 
 @dataclass
+class QuestionSpec:
+    """Defines a project question from a chip."""
+    id: str
+    question: str
+    category: str = "goal"  # goal, done, risk, quality, metric, insight, etc.
+    phase: str = ""  # Optional: discovery, prototype, polish, launch
+    required: bool = False
+    affects_learning: List[str] = field(default_factory=list)  # Which learners this affects
+
+
+@dataclass
 class TriggerSpec:
     """Defines what activates this chip."""
     patterns: List[str] = field(default_factory=list)
@@ -105,6 +116,7 @@ class ChipSpec:
     outcomes_positive: List[OutcomeSpec] = field(default_factory=list)
     outcomes_negative: List[OutcomeSpec] = field(default_factory=list)
     outcomes_neutral: List[OutcomeSpec] = field(default_factory=list)
+    questions: List[QuestionSpec] = field(default_factory=list)
 
     # Metadata
     source_path: Optional[Path] = None
@@ -237,6 +249,17 @@ class ChipLoader:
                 weight=outcome_data.get("weight", 1.0),
                 insight=outcome_data.get("insight", ""),
                 action=outcome_data.get("action", ""),
+            ))
+
+        # Parse questions
+        for q_data in raw.get("questions", []):
+            spec.questions.append(QuestionSpec(
+                id=q_data.get("id", ""),
+                question=q_data.get("question", ""),
+                category=q_data.get("category", "goal"),
+                phase=q_data.get("phase", ""),
+                required=q_data.get("required", False),
+                affects_learning=q_data.get("affects_learning", []),
             ))
 
         return spec

@@ -114,6 +114,45 @@ outcomes:
       weight: 0.8
       insight: "Multiple retries needed"
 
+questions:
+  - id: core_stack
+    question: What is the primary tech stack (language, framework, tools)?
+    category: goal
+    affects_learning:
+      - tool_effectiveness
+      - error_patterns
+
+  - id: core_quality
+    question: What quality signals matter most (tests passing, no lint errors, type safety)?
+    category: quality
+    affects_learning:
+      - success_pattern
+
+  - id: core_done
+    question: How do we know a task is truly done (just works, or also tested/documented)?
+    category: done
+    affects_learning:
+      - success_pattern
+
+  - id: core_patterns
+    question: What coding patterns or conventions should we follow?
+    category: insight
+    affects_learning:
+      - preference
+
+  - id: core_antipatterns
+    question: What should we avoid (anti-patterns, risky approaches)?
+    category: risk
+    affects_learning:
+      - failure_pattern
+
+  - id: core_debug
+    question: What debugging approach works best for this codebase?
+    category: insight
+    phase: prototype
+    affects_learning:
+      - error_patterns
+
 context:
   format: |
     ## Spark Core Intelligence

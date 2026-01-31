@@ -231,6 +231,33 @@ class ChipRegistry:
                 specs.append(spec)
         return specs
 
+    def get_active_questions(self, phase: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get all questions from active chips.
+
+        Args:
+            phase: Optional phase filter (discovery, prototype, polish, launch)
+
+        Returns:
+            List of question dicts with chip_id included
+        """
+        questions = []
+        for spec in self.get_active_specs():
+            for q in spec.questions:
+                # Filter by phase if specified
+                if phase and q.phase and q.phase != phase:
+                    continue
+                questions.append({
+                    "id": f"{spec.id}:{q.id}",
+                    "chip_id": spec.id,
+                    "question": q.question,
+                    "category": q.category,
+                    "phase": q.phase,
+                    "required": q.required,
+                    "affects_learning": q.affects_learning,
+                })
+        return questions
+
     def update_stats(self, chip_id: str, **updates):
         """Update chip statistics."""
         entry = self._chips.get(chip_id)

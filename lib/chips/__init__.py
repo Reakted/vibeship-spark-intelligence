@@ -14,7 +14,7 @@ Components:
 - store.py: Per-chip insight storage
 """
 
-from .loader import ChipLoader, ChipSpec, load_chip
+from .loader import ChipLoader, ChipSpec, QuestionSpec, load_chip
 from .registry import ChipRegistry, get_registry
 from .router import ChipRouter, get_router
 from .runner import ChipRunner
@@ -23,6 +23,7 @@ from .store import ChipStore, get_chip_store
 __all__ = [
     "ChipLoader",
     "ChipSpec",
+    "QuestionSpec",
     "load_chip",
     "ChipRegistry",
     "get_registry",

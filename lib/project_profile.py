@@ -17,6 +17,16 @@ from lib.project_context import get_project_context
 
 PROJECT_DIR = Path.home() / ".spark" / "projects"
 
+
+def _get_chip_questions(phase: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get questions from active chips."""
+    try:
+        from lib.chips.registry import get_registry
+        registry = get_registry()
+        return registry.get_active_questions(phase=phase)
+    except Exception:
+        return []
+
 DOMAIN_QUESTIONS: Dict[str, List[Dict[str, str]]] = {
     "game_dev": [
         {"id": "game_core_loop", "category": "done", "question": "What makes the core loop satisfying?"},
@@ -231,7 +241,7 @@ def ensure_questions(profile: Dict[str, Any]) -> int:
     return added
 
 
-def get_suggested_questions(profile: Dict[str, Any], limit: int = 3) -> List[Dict[str, Any]]:
+def get_suggested_questions(profile: Dict[str, Any], limit: int = 3, include_chips: bool = True) -> List[Dict[str, Any]]:
     ensure_questions(profile)
     questions = profile.get("questions") or []
     unanswered = [q for q in questions if not q.get("answered_at")]
@@ -251,7 +261,23 @@ def get_suggested_questions(profile: Dict[str, Any], limit: int = 3) -> List[Dic
         if ref_snip:
             prompt = f"{prompt} ({ref_snip})"
         extra.append({"category": "transfer", "id": "proj_transfer", "question": prompt})
-    return (unanswered + extra)[: max(1, int(limit or 3))]
+
+    # Include chip questions (Phase 5)
+    chip_questions = []
+    if include_chips:
+        phase = profile.get("phase")
+        answered_ids = {a.get("question_id") for a in profile.get("answers", [])}
+        for cq in _get_chip_questions(phase=phase):
+            if cq.get("id") not in answered_ids:
+                chip_questions.append({
+                    "id": cq["id"],
+                    "category": cq.get("category", "goal"),
+                    "question": cq["question"],
+                    "chip_id": cq.get("chip_id"),
+                    "affects_learning": cq.get("affects_learning", []),
+                })
+
+    return (unanswered + extra + chip_questions)[: max(1, int(limit or 3))]
 
 
 def record_answer(profile: Dict[str, Any], question_id: str, answer: str) -> Optional[Dict[str, Any]]:
