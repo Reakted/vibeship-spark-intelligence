@@ -103,24 +103,24 @@ observers:
 
     capture:
       required:
-        - post_id: "Unique post identifier"
-        - content_type: "text or link"
-        - submolt: "Community posted to"
+        post_id: "Unique post identifier"
+        content_type: "text or link"
+        submolt: "Community posted to"
 
       optional:
-        - title: "Post title"
-        - body: "Post body content"
-        - url: "Link URL if link post"
-        - tags: "Content tags/topics"
-        - time_of_day: "Hour posted (0-23)"
-        - day_of_week: "Day posted (0-6)"
+        title: "Post title"
+        body: "Post body content"
+        url: "Link URL if link post"
+        tags: "Content tags/topics"
+        time_of_day: "Hour posted (0-23)"
+        day_of_week: "Day posted (0-6)"
 
     # How to extract these fields from events
     extraction:
       - field: submolt
         patterns:
-          - 'submolt[:\s]+["\']?([^"\']+)["\']?'
-          - 'posted to[:\s]+["\']?([^"\']+)["\']?'
+          - "submolt[:\\s]+[\"']?([^\"']+)[\"']?"
+          - "posted to[:\\s]+[\"']?([^\"']+)[\"']?"
           - '/m/([a-zA-Z0-9_-]+)'
 
       - field: content_type
@@ -140,17 +140,17 @@ observers:
 
     capture:
       required:
-        - post_id: "Which post"
-        - outcome_type: "positive/negative/neutral"
+        post_id: "Which post"
+        outcome_type: "positive/negative/neutral"
 
       optional:
-        - upvotes: "Number of upvotes"
-        - downvotes: "Number of downvotes"
-        - karma_delta: "Karma change from this post"
-        - comments_count: "Number of comments"
-        - engagement_rate: "Comments + votes / views"
-        - time_to_first_comment: "Minutes until first comment"
-        - peak_position: "Highest position on hot feed"
+        upvotes: "Number of upvotes"
+        downvotes: "Number of downvotes"
+        karma_delta: "Karma change from this post"
+        comments_count: "Number of comments"
+        engagement_rate: "Comments + votes / views"
+        time_to_first_comment: "Minutes until first comment"
+        peak_position: "Highest position on hot feed"
 
   # Comment Observer
   - name: comment_created
@@ -163,15 +163,15 @@ observers:
 
     capture:
       required:
-        - comment_id: "Comment identifier"
-        - parent_type: "post or comment"
-        - parent_id: "ID of parent"
+        comment_id: "Comment identifier"
+        parent_type: "post or comment"
+        parent_id: "ID of parent"
 
       optional:
-        - content: "Comment text"
-        - submolt: "Community context"
-        - is_top_level: "Direct reply to post"
-        - thread_depth: "How deep in thread"
+        content: "Comment text"
+        submolt: "Community context"
+        is_top_level: "Direct reply to post"
+        thread_depth: "How deep in thread"
 
   # Comment Performance Observer
   - name: comment_performance
@@ -183,12 +183,12 @@ observers:
 
     capture:
       required:
-        - comment_id: "Which comment"
-        - karma_delta: "Karma change"
+        comment_id: "Which comment"
+        karma_delta: "Karma change"
 
       optional:
-        - upvotes: "Upvote count"
-        - replies_count: "Number of replies received"
+        upvotes: "Upvote count"
+        replies_count: "Number of replies received"
 
   # Feed Analysis Observer
   - name: feed_analysis
@@ -201,13 +201,13 @@ observers:
 
     capture:
       required:
-        - feed_type: "hot/new/top/rising"
+        feed_type: "hot/new/top/rising"
 
       optional:
-        - top_topics: "Most common topics"
-        - active_submolts: "Most active communities"
-        - trending_agents: "Agents with high recent karma"
-        - content_patterns: "Common successful content types"
+        top_topics: "Most common topics"
+        active_submolts: "Most active communities"
+        trending_agents: "Agents with high recent karma"
+        content_patterns: "Common successful content types"
 
   # Heartbeat Observer
   - name: heartbeat
@@ -219,12 +219,12 @@ observers:
 
     capture:
       required:
-        - timestamp: "When heartbeat occurred"
+        timestamp: "When heartbeat occurred"
 
       optional:
-        - actions_taken: "List of actions (post, comment, vote)"
-        - opportunities_found: "Engagement opportunities identified"
-        - karma_at_checkin: "Current karma level"
+        actions_taken: "List of actions (post, comment, vote)"
+        opportunities_found: "Engagement opportunities identified"
+        karma_at_checkin: "Current karma level"
 
 # ============================================================
 # LEARNERS: What patterns to detect and learn?

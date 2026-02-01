@@ -46,6 +46,15 @@ observers:
       optional:
         reason: Why it worked
         context: Surrounding context
+    extraction:
+      - field: pattern
+        patterns:
+          - "worked because\\s+(.+)"
+          - "fixed by\\s+(.+)"
+          - "the solution was\\s+(.+)"
+      - field: reason
+        patterns:
+          - "because\\s+(.+)"
 
   - name: failure_pattern
     description: Captures when something fails and why
@@ -59,6 +68,16 @@ observers:
       optional:
         reason: Why it failed
         fix: How to fix it
+    extraction:
+      - field: pattern
+        patterns:
+          - "failed because\\s+(.+)"
+          - "the issue was\\s+(.+)"
+          - "the problem was\\s+(.+)"
+      - field: fix
+        patterns:
+          - "fixed by\\s+(.+)"
+          - "solution was\\s+(.+)"
 
   - name: preference
     description: Captures user preferences
@@ -72,6 +91,16 @@ observers:
         preference: The preference
       optional:
         reason: Why they prefer it
+    extraction:
+      - field: preference
+        patterns:
+          - "prefer\\s+(.+)"
+          - "always\\s+(.+)"
+          - "never\\s+(.+)"
+          - "better\\s+(.+)"
+      - field: reason
+        patterns:
+          - "because\\s+(.+)"
 
 learners:
   - name: tool_effectiveness

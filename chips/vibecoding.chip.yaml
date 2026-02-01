@@ -51,6 +51,23 @@ observers:
         branch: "Branch name"
         files_changed: "Count of files changed"
         diff_lines: "Lines added/removed"
+    extraction:
+      - field: repo
+        patterns:
+          - "repo\\s*[:=]\\s*([A-Za-z0-9._/-]+)"
+      - field: commit_id
+        patterns:
+          - "commit(?:_id)?\\s*[:=]?\\s*([a-f0-9]{7,40})"
+          - "sha\\s*[:=]\\s*([a-f0-9]{7,40})"
+      - field: branch
+        patterns:
+          - "branch\\s*[:=]\\s*([A-Za-z0-9._/-]+)"
+      - field: files_changed
+        patterns:
+          - "files?\\s*changed\\s*[:=]?\\s*(\\d+)"
+      - field: diff_lines
+        patterns:
+          - "lines?\\s*[:=]?\\s*(\\+?\\d+\\s*/\\s*-?\\d+)"
 
   - name: ci_failure
     description: Tracks CI/test failures
@@ -62,6 +79,21 @@ observers:
       optional:
         error_code: "Error/exception identifier"
         build_id: "Build ID"
+    extraction:
+      - field: repo
+        patterns:
+          - "repo\\s*[:=]\\s*([A-Za-z0-9._/-]+)"
+      - field: test_name
+        patterns:
+          - "test\\s*[:=]\\s*([A-Za-z0-9._/-]+)"
+          - "failing\\s+test\\s+([A-Za-z0-9._/-]+)"
+      - field: error_code
+        patterns:
+          - "error\\s*[:=]\\s*([A-Za-z0-9_]+)"
+          - "exception\\s*[:=]\\s*([A-Za-z0-9_]+)"
+      - field: build_id
+        patterns:
+          - "build\\s*[:=]\\s*([A-Za-z0-9_-]+)"
 
   - name: deploy_event
     description: Tracks deploys and rollbacks
@@ -74,6 +106,23 @@ observers:
         status: "success/failure"
         release_id: "Release identifier"
         rollback: "true/false"
+    extraction:
+      - field: repo
+        patterns:
+          - "repo\\s*[:=]\\s*([A-Za-z0-9._/-]+)"
+      - field: env
+        patterns:
+          - "env(?:ironment)?\\s*[:=]\\s*([A-Za-z0-9_-]+)"
+      - field: status
+        keywords:
+          success: ["succeeded", "success", "green"]
+          failure: ["failed", "error", "red"]
+      - field: release_id
+        patterns:
+          - "release\\s*[:=]\\s*([A-Za-z0-9_-]+)"
+      - field: rollback
+        keywords:
+          "true": ["rollback", "rolled back"]
 
 outcomes:
   positive:

@@ -51,6 +51,20 @@ observers:
       optional:
         segment: "Player segment"
         notes: "Summary of feedback"
+    extraction:
+      - field: playtest_id
+        patterns:
+          - "playtest\\s*#?\\s*([A-Za-z0-9_-]+)"
+      - field: rating
+        patterns:
+          - "rating\\s*[:=]?\\s*([1-5])"
+          - "([1-5])\\s*/\\s*5"
+      - field: segment
+        patterns:
+          - "segment\\s*[:=]\\s*([A-Za-z0-9_-]+)"
+      - field: notes
+        patterns:
+          - "feedback\\s*[:=]\\s*(.+)"
 
   - name: balance_change
     description: Tracks balance and tuning changes
@@ -62,6 +76,24 @@ observers:
       optional:
         before: "Previous value"
         after: "New value"
+    extraction:
+      - field: system
+        keywords:
+          combat: ["combat", "damage", "enemy"]
+          economy: ["economy", "currency", "gold"]
+          rewards: ["reward", "loot", "drop rate"]
+          difficulty: ["difficulty", "hard", "easy"]
+      - field: change
+        patterns:
+          - "change\\s*[:=]\\s*(.+)"
+          - "tuned\\s+(.+)"
+          - "balance\\s+(.+)"
+      - field: before
+        patterns:
+          - "before\\s*[:=]\\s*(\\S+)"
+      - field: after
+        patterns:
+          - "after\\s*[:=]\\s*(\\S+)"
 
   - name: retention_metric
     description: Tracks retention and engagement signals
@@ -72,6 +104,20 @@ observers:
         metric_value: "Metric value"
       optional:
         period: "Time window"
+    extraction:
+      - field: metric_name
+        keywords:
+          D1: ["d1", "day 1", "day1"]
+          D7: ["d7", "day 7", "day7"]
+          D30: ["d30", "day 30", "day30"]
+          retention: ["retention"]
+          churn: ["churn"]
+      - field: metric_value
+        patterns:
+          - "(?:retention|churn|session length)\\s*[:=]?\\s*(\\d+(?:\\.\\d+)?)"
+      - field: period
+        patterns:
+          - "period\\s*[:=]\\s*([A-Za-z0-9_-]+)"
 
 outcomes:
   positive:

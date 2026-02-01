@@ -45,6 +45,20 @@ observers:
       optional:
         dependency: "Dependency"
         mitigation: "Mitigation plan"
+    extraction:
+      - field: owner
+        patterns:
+          - "owner\\s*[:=]\\s*(.+)"
+          - "team\\s*[:=]\\s*(.+)"
+      - field: risk
+        patterns:
+          - "risk\\s*[:=]\\s*(.+)"
+      - field: dependency
+        patterns:
+          - "dependency\\s*[:=]\\s*(.+)"
+      - field: mitigation
+        patterns:
+          - "mitigation\\s*[:=]\\s*(.+)"
 
   - name: pricing_experiment
     description: Tracks pricing experiment setup
@@ -57,6 +71,23 @@ observers:
         price_point: "Price point"
         duration: "Experiment duration"
         success_metric: "Success metric"
+    extraction:
+      - field: variant_id
+        patterns:
+          - "variant\\s*#?\\s*([A-Za-z0-9_-]+)"
+          - "variant_id\\s*[:=]\\s*([A-Za-z0-9_-]+)"
+      - field: target_segment
+        patterns:
+          - "segment\\s*[:=]\\s*(.+)"
+      - field: price_point
+        patterns:
+          - "price\\s*point\\s*[:=]\\s*(.+)"
+      - field: duration
+        patterns:
+          - "duration\\s*[:=]\\s*(.+)"
+      - field: success_metric
+        patterns:
+          - "success\\s*metric\\s*[:=]\\s*(.+)"
 
   - name: forecast
     description: Tracks forecast assumptions and outputs
@@ -68,6 +99,19 @@ observers:
       optional:
         revenue: "Projected revenue"
         burn: "Projected burn"
+    extraction:
+      - field: horizon
+        patterns:
+          - "horizon\\s*[:=]\\s*(.+)"
+      - field: assumption
+        patterns:
+          - "assumption\\s*[:=]\\s*(.+)"
+      - field: revenue
+        patterns:
+          - "revenue\\s*[:=]\\s*(.+)"
+      - field: burn
+        patterns:
+          - "burn\\s*[:=]\\s*(.+)"
 
 outcomes:
   positive:
