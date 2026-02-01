@@ -65,3 +65,7 @@ htmlcov/
 # Benchmark artifacts
 benchmarks/out/
 benchmarks/logs/
+
+# Sandbox artifacts
+sandbox/spark_sandbox/
+sandbox/spark_sandbox_diff.json
