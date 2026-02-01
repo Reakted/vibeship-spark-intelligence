@@ -64,6 +64,7 @@ triggers:
 
   # Event type triggers
   events:
+    - x_research  # From X research event pipeline
     - x_search_completed
     - competitor_analyzed
     - trend_identified

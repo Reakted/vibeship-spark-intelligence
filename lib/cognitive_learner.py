@@ -641,10 +641,13 @@ class CognitiveLearner:
         return [i for _, i in relevant[:limit]]
 
     def add_insight(self, category: CognitiveCategory, insight: str,
-                    context: str = "", confidence: float = 0.7) -> CognitiveInsight:
+                    context: str = "", confidence: float = 0.7,
+                    record_exposure: bool = True) -> CognitiveInsight:
         """Add a generic insight directly.
 
         Boosts confidence on repeated validations.
+        If record_exposure=True, also creates an exposure record so predictions
+        can be generated and validated.
         """
         # Generate key from first few words of insight
         key_part = insight[:40].replace(" ", "_").lower()
@@ -668,6 +671,22 @@ class CognitiveLearner:
             )
 
         self._save_insights()
+
+        # Record exposure so predictions can be generated
+        if record_exposure:
+            try:
+                from lib.exposure_tracker import record_exposures
+                record_exposures(
+                    source="spark_inject",
+                    items=[{
+                        "insight_key": key,
+                        "category": category.value,
+                        "text": insight,
+                    }]
+                )
+            except Exception:
+                pass  # Don't fail if exposure tracking unavailable
+
         return self.insights[key]
 
     def get_self_awareness_insights(self) -> List[CognitiveInsight]:

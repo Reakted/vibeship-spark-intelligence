@@ -23,6 +23,8 @@ from typing import List, Dict, Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lib.cognitive_learner import get_cognitive_learner, CognitiveCategory
+from lib.x_research_events import process_x_research_through_chips, bulk_research_to_events
+from lib.chip_merger import merge_chip_insights
 
 
 # ============================================
@@ -206,13 +208,56 @@ def store_daily_report(insights: List[Dict], recommendations: List[Dict]):
 
 
 def inject_to_spark(insights: List[Dict]):
-    """Inject top insights into Spark cognitive learner."""
-    learner = get_cognitive_learner()
+    """
+    Process insights through the proper Spark learning pipeline.
 
-    # Only inject high-engagement insights
+    NEW FLOW (correct):
+    1. Convert insights to X research events
+    2. Process through chip system (market-intel chip)
+    3. Chip captures domain-specific observations
+    4. Merge chip insights into cognitive system
+    5. Predictions generated from exposures
+    6. Validation loop tests predictions against outcomes
+
+    This is TRUE Spark evolution, not just storage.
+    """
+    # Only process high-engagement insights
     top_insights = sorted(insights, key=lambda x: x['engagement'], reverse=True)[:20]
 
+    if not top_insights:
+        print("No insights to process")
+        return 0
+
+    # Convert to research format for event pipeline
+    research_results = []
     for insight in top_insights:
+        research_results.append({
+            "query": insight.get('topic', ''),
+            "text": insight.get('text', ''),
+            "engagement": insight.get('engagement', 0),
+            "ecosystem": insight.get('topic', '').replace('_', ' '),
+            "sentiment": "bullish" if insight.get('engagement', 0) > 50 else "neutral",
+        })
+
+    # Process through chip system
+    print(f"Processing {len(research_results)} insights through chip system...")
+    chip_stats = process_x_research_through_chips(research_results)
+    print(f"  - Events created: {chip_stats['events_created']}")
+    print(f"  - Chip insights captured: {chip_stats['insights_captured']}")
+    print(f"  - Chips used: {chip_stats['chips_used']}")
+
+    # Merge chip insights into cognitive system
+    print("\nMerging chip insights into cognitive pipeline...")
+    merge_stats = merge_chip_insights(min_confidence=0.6, limit=50)
+    print(f"  - Processed: {merge_stats['processed']}")
+    print(f"  - Merged: {merge_stats['merged']}")
+    print(f"  - By chip: {merge_stats['by_chip']}")
+
+    # Also do direct injection for high-value insights (as backup)
+    # This ensures predictions are generated even if chip processing fails
+    learner = get_cognitive_learner()
+    direct_injected = 0
+    for insight in top_insights[:5]:  # Top 5 only for direct injection
         topic_config = RESEARCH_TOPICS.get(insight['topic'], {})
         category = topic_config.get('category', CognitiveCategory.CONTEXT)
 
@@ -220,10 +265,14 @@ def inject_to_spark(insights: List[Dict]):
             category=category,
             insight=f"[{insight['topic']}] {insight['text'][:200]}",
             context=f"X research {datetime.now().strftime('%Y-%m-%d')} - engagement: {insight['engagement']}",
-            confidence=min(0.95, 0.6 + (insight['engagement'] / 500))
+            confidence=min(0.95, 0.6 + (insight['engagement'] / 500)),
+            record_exposure=True,  # This creates exposure → predictions
         )
+        direct_injected += 1
 
-    print(f"Injected {len(top_insights)} insights into Spark")
+    print(f"\nDirect injected (top 5): {direct_injected}")
+    print(f"Total processed: {len(top_insights)}")
+
     return len(top_insights)
 
 
