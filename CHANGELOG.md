@@ -4,6 +4,126 @@ All notable changes to Spark Intelligence are documented here.
 
 ---
 
+## [Phase 3 Complete] - 2026-02-02
+
+### Theme: EIDOS - Self-Evolving Intelligence System
+
+**Goal**: Force learning through decision packets, prediction loops, and mandatory memory binding.
+
+### The Core Problem
+
+Intelligence wasn't compounding because:
+1. **Thrashing**: Fix loops and rabbit holes without learning
+2. **Forgetting to write**: Stopped storing after initial phase
+3. **Not reading**: Retrieval wasn't binding
+4. **No enforcement**: LLM decided everything, no guardrails
+
+### The Solution: EIDOS Architecture
+
+**EIDOS** = Explicit Intelligence with Durable Outcomes & Semantics
+
+The system now enforces a **vertical loop**:
+```
+Action → Prediction → Outcome → Evaluation → Policy Update → Distillation → Mandatory Reuse
+```
+
+### The Five Layers
+
+| Layer | Purpose |
+|-------|---------|
+| **Canonical Memory** | SQLite - source of truth for episodes, steps, distillations, policies |
+| **Semantic Index** | Embeddings for retrieval (never as truth) |
+| **Control Plane** | Deterministic enforcement - watchers, budgets, phase control |
+| **Reasoning Engine** | LLM - constrained by Control Plane |
+| **Distillation Engine** | Post-episode rule extraction |
+
+### Core Primitives
+
+| Primitive | Purpose |
+|-----------|---------|
+| **Episode** | Bounded learning unit with goal, success criteria, budget |
+| **Step** | Decision packet - intent, prediction, result, evaluation, lesson |
+| **Distillation** | Extracted rules - heuristics, sharp edges, anti-patterns, playbooks |
+| **Policy** | Operating constraints - what must be respected |
+
+### Watchers (Hard Gates)
+
+| Watcher | Trigger | Action |
+|---------|---------|--------|
+| **Repeat Error** | Same error 2x | Diagnostic phase + new hypothesis |
+| **No-New-Info** | 5 steps without evidence | Stop; data-gather plan |
+| **Diff Thrash** | Same file modified 3x | Freeze file, focus elsewhere |
+| **Confidence Stagnation** | Delta < 0.05 for 3 steps | Force alternative or escalate |
+| **Memory Bypass** | Action without citing memory | Block action |
+
+### Memory Gate
+
+Not everything becomes durable memory. Steps must earn persistence:
+
+| Signal | Weight |
+|--------|--------|
+| High impact (unblocked progress) | +0.3 |
+| Novelty (new pattern) | +0.2 |
+| Surprise (prediction ≠ outcome) | +0.3 |
+| Recurrence (3+ times) | +0.2 |
+| Irreversible (security, prod) | +0.4 |
+
+**Score > 0.5 → durable memory**
+
+### Files Added
+
+- `lib/eidos/__init__.py` - Package initialization
+- `lib/eidos/models.py` - Core data models (Episode, Step, Distillation, Policy)
+- `lib/eidos/control_plane.py` - Watchers, budget enforcement, phase control
+- `lib/eidos/memory_gate.py` - Importance scoring for step persistence
+- `lib/eidos/distillation_engine.py` - Post-episode reflection and rule extraction
+- `lib/eidos/store.py` - SQLite persistence layer
+- `EIDOS_ARCHITECTURE.md` - Full architecture documentation
+
+### CLI Commands
+
+```bash
+# EIDOS overview
+spark eidos
+
+# Statistics
+spark eidos --stats
+
+# List episodes
+spark eidos --episodes
+
+# List distillations (extracted rules)
+spark eidos --distillations
+spark eidos --distillations --type heuristic
+
+# List policies
+spark eidos --policies
+
+# List decision packets
+spark eidos --steps
+spark eidos --steps --episode <episode_id>
+```
+
+### Success Metrics
+
+| Metric | What It Measures | Target |
+|--------|------------------|--------|
+| **Reuse Rate** | Episodes using prior distillations | >40% |
+| **Outcome Improvement** | Time-to-success decrease | -20%/month |
+| **Loop Suppression** | Fix-loop depth | <3 retries |
+| **Distillation Quality** | Rules useful when reused | >60% |
+
+### The Fundamental Shift
+
+```
+OLD: "How do we store more?"
+NEW: "How do we force learning?"
+```
+
+Intelligence = compression + reuse + behavior change. Not storage. Not retrieval. **Enforcement.**
+
+---
+
 ## [Phase 2 Complete] - 2026-02-02
 
 ### Theme: Importance Scoring Foundation

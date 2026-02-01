@@ -1360,6 +1360,141 @@ def cmd_contradictions(args):
     print()
 
 
+def cmd_eidos(args):
+    """EIDOS - Self-evolving intelligence system."""
+    from lib.eidos import (
+        get_store, get_control_plane, get_distillation_engine,
+        Episode, Step, Distillation, Policy,
+        Phase, Outcome, DistillationType
+    )
+
+    store = get_store()
+
+    if args.stats:
+        stats = store.get_stats()
+        print(f"\n{'=' * 60}")
+        print(f"  EIDOS Intelligence Store")
+        print(f"{'=' * 60}")
+        print(f"\n  Episodes: {stats['episodes']}")
+        print(f"  Steps: {stats['steps']}")
+        print(f"  Distillations: {stats['distillations']}")
+        print(f"  Policies: {stats['policies']}")
+        print(f"  Success Rate: {stats['success_rate']:.1%}")
+        print(f"  High-Confidence Distillations: {stats['high_confidence_distillations']}")
+        print(f"\n  Database: {stats['db_path']}")
+        print()
+        return
+
+    if args.episodes:
+        episodes = store.get_recent_episodes(limit=args.limit or 10)
+        print(f"\n{'=' * 60}")
+        print(f"  Recent Episodes ({len(episodes)})")
+        print(f"{'=' * 60}")
+        for ep in episodes:
+            status_icon = {
+                "success": "✓",
+                "failure": "✗",
+                "partial": "~",
+                "escalated": "↑",
+                "in_progress": "..."
+            }.get(ep.outcome.value, "?")
+            print(f"\n  [{status_icon}] {ep.goal[:60]}")
+            print(f"      ID: {ep.episode_id}")
+            print(f"      Phase: {ep.phase.value} | Outcome: {ep.outcome.value}")
+            print(f"      Steps: {ep.step_count}/{ep.budget.max_steps}")
+        print()
+        return
+
+    if args.distillations:
+        dtype = None
+        if args.type:
+            dtype = DistillationType(args.type)
+            distillations = store.get_distillations_by_type(dtype, limit=args.limit or 20)
+        else:
+            distillations = store.get_high_confidence_distillations(
+                min_confidence=0.5, limit=args.limit or 20
+            )
+        print(f"\n{'=' * 60}")
+        print(f"  Distillations ({len(distillations)})")
+        print(f"{'=' * 60}")
+        for d in distillations:
+            type_icon = {
+                "heuristic": "→",
+                "sharp_edge": "⚠",
+                "anti_pattern": "✗",
+                "playbook": "📋",
+                "policy": "📜"
+            }.get(d.type.value, "•")
+            print(f"\n  [{type_icon}] {d.statement[:70]}")
+            print(f"      Confidence: {d.confidence:.2f} | Used: {d.times_used} | Helped: {d.times_helped}")
+            if d.domains:
+                print(f"      Domains: {', '.join(d.domains[:3])}")
+        print()
+        return
+
+    if args.policies:
+        policies = store.get_all_policies()
+        print(f"\n{'=' * 60}")
+        print(f"  Policies ({len(policies)})")
+        print(f"{'=' * 60}")
+        for p in policies:
+            print(f"\n  [{p.scope}:{p.priority}] {p.statement[:60]}")
+            print(f"      Source: {p.source}")
+        print()
+        return
+
+    if args.steps:
+        episode_id = args.episode
+        if episode_id:
+            steps = store.get_episode_steps(episode_id)
+        else:
+            steps = store.get_recent_steps(limit=args.limit or 20)
+        print(f"\n{'=' * 60}")
+        print(f"  Steps ({len(steps)})")
+        print(f"{'=' * 60}")
+        for s in steps:
+            eval_icon = {
+                "pass": "✓",
+                "fail": "✗",
+                "partial": "~",
+                "unknown": "?"
+            }.get(s.evaluation.value, "?")
+            print(f"\n  [{eval_icon}] {s.intent[:50]}")
+            print(f"      Decision: {s.decision[:50]}")
+            print(f"      Confidence: {s.confidence_before:.2f} → {s.confidence_after:.2f}")
+            if s.lesson:
+                print(f"      Lesson: {s.lesson[:50]}")
+        print()
+        return
+
+    # Default: show overview
+    stats = store.get_stats()
+    print(f"\n{'=' * 60}")
+    print(f"  EIDOS: Self-Evolving Intelligence")
+    print(f"{'=' * 60}")
+    print(f"""
+  EIDOS forces learning through:
+  • Decision packets (not just logs)
+  • Prediction → Outcome → Evaluation loops
+  • Memory binding (retrieval required)
+  • Distillation (experience → rules)
+
+  Current State:
+    Episodes: {stats['episodes']}
+    Steps: {stats['steps']}
+    Distillations: {stats['distillations']}
+    Policies: {stats['policies']}
+
+  Commands:
+    --stats         Show detailed statistics
+    --episodes      List recent episodes
+    --distillations List distillations
+    --policies      List policies
+    --steps         List recent steps
+    --episode <id>  Show steps for specific episode
+""")
+
+
 def cmd_memory(args):
     """Configure/view Clawdbot semantic memory (embeddings provider)."""
     from lib.clawdbot_memory_setup import (
@@ -2080,7 +2215,19 @@ Examples:
                                        help="How to resolve")
     contradictions_parser.add_argument("--resolution", help="Resolution notes")
     contradictions_parser.add_argument("--limit", "-n", type=int, default=10, help="Max items to show")
-    
+
+    # eidos - self-evolving intelligence system
+    eidos_parser = subparsers.add_parser("eidos", help="EIDOS - Self-evolving intelligence with decision packets")
+    eidos_parser.add_argument("--stats", "-s", action="store_true", help="Show detailed statistics")
+    eidos_parser.add_argument("--episodes", "-e", action="store_true", help="List recent episodes")
+    eidos_parser.add_argument("--distillations", "-d", action="store_true", help="List distillations (extracted rules)")
+    eidos_parser.add_argument("--type", choices=["heuristic", "sharp_edge", "anti_pattern", "playbook", "policy"],
+                              help="Filter distillations by type")
+    eidos_parser.add_argument("--policies", "-p", action="store_true", help="List operating policies")
+    eidos_parser.add_argument("--steps", action="store_true", help="List recent steps (decision packets)")
+    eidos_parser.add_argument("--episode", help="Show steps for specific episode ID")
+    eidos_parser.add_argument("--limit", "-n", type=int, default=10, help="Max items to show")
+
     # voice
     voice_parser = subparsers.add_parser("voice", help="Spark's personality")
     voice_parser.add_argument("--introduce", "-i", action="store_true", help="Introduce Spark")
@@ -2233,6 +2380,7 @@ Examples:
         "curiosity": cmd_curiosity,
         "hypotheses": cmd_hypotheses,
         "contradictions": cmd_contradictions,
+        "eidos": cmd_eidos,
         "voice": cmd_voice,
         "timeline": cmd_timeline,
         "bridge": cmd_bridge,
