@@ -9,7 +9,101 @@ These documents define the evolution from primitive telemetry to superintelligen
 3. **CORE_GAPS_PLAN.md** - How to fill each gap (workflows, architecture, code targets)
 4. **CORE_IMPLEMENTATION_PLAN.md** - Buildable execution plan with sequencing
 
-### Current Phase: Phase 2 - Importance Scoring ✅ COMPLETE
+### Current Phase: Phase 3 - EIDOS ✅ COMPLETE
+
+**Completed:** 2026-02-02
+
+EIDOS = **E**xplicit **I**ntelligence with **D**urable **O**utcomes & **S**emantics
+
+**The Core Problem (Solved):**
+Intelligence wasn't compounding because: thrashing without learning, forgetting to write, not reading retrieved memories, no enforcement of rules.
+
+**The Solution:**
+> "Intelligence = compression + reuse + behavior change. Not storage. Not retrieval. **Enforcement.**"
+
+**Full Documentation:** [EIDOS_GUIDE.md](./EIDOS_GUIDE.md)
+
+---
+
+## EIDOS Principles (CRITICAL)
+
+### The Vertical Loop
+
+Every action MUST go through:
+
+```
+Action → Prediction → Outcome → Evaluation → Policy Update → Distillation → Mandatory Reuse
+```
+
+### Six Layers
+
+| Layer | Purpose |
+|-------|---------|
+| **0. Evidence** | Ephemeral audit trail (72h-90d retention) |
+| **1. Canonical** | SQLite - source of truth |
+| **2. Semantic** | Embeddings for retrieval (never authoritative) |
+| **3. Control** | Watchers, budgets, phases (enforcement) |
+| **4. Reasoning** | LLM, constrained by Control Plane |
+| **5. Distillation** | Post-episode rule extraction |
+
+### Guardrails (HARD GATES - Non-negotiable)
+
+| Guardrail | What It Enforces |
+|-----------|------------------|
+| **Progress Contract** | Every action must advance toward goal |
+| **Memory Binding** | Retrieved memories MUST be cited |
+| **Outcome Enforcement** | Predictions MUST be compared to outcomes |
+| **Loop Watchers** | Same error 2x = diagnostic phase |
+| **Phase Control** | Actions restricted by phase |
+| **Evidence Before Modification** | 2 failed edits = forced diagnostic |
+
+### Decision Packets (Not Logs)
+
+Every action is a decision packet with:
+- **BEFORE**: Intent, decision, alternatives, assumptions, prediction, confidence
+- **ACTION**: Tool, parameters
+- **AFTER**: Result, evaluation, surprise level, lesson, new confidence
+
+### Memory Gate
+
+Steps must **earn** persistence:
+
+| Signal | Weight |
+|--------|--------|
+| Impact (unblocked progress) | +0.3 |
+| Novelty (new pattern) | +0.2 |
+| Surprise (prediction ≠ outcome) | +0.3 |
+| Recurrence (3+ times) | +0.2 |
+| Irreversible (security/prod) | +0.4 |
+
+**Score > 0.5 = durable memory**
+
+### CLI Commands
+
+```bash
+spark eidos              # Overview
+spark eidos --stats      # Statistics
+spark eidos --metrics    # Compounding rate
+spark eidos --episodes   # List episodes
+spark eidos --steps      # List decision packets
+spark eidos --distillations  # Extracted rules
+```
+
+### Quick Checklist
+
+Before action:
+- [ ] Prediction made with confidence?
+- [ ] Memory retrieved and cited?
+- [ ] Phase appropriate for action?
+
+After action:
+- [ ] Outcome recorded?
+- [ ] Prediction evaluated?
+- [ ] Lesson extracted?
+
+---
+
+### Phase 2 - Importance Scoring ✅ COMPLETE
 
 **Completed:** 2026-02-02
 

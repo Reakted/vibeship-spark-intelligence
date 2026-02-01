@@ -4,6 +4,60 @@ All notable changes to Spark Intelligence are documented here.
 
 ---
 
+## [Phase 3.2 Complete] - 2026-02-02
+
+### Theme: EIDOS Hook Integration & Documentation
+
+Connected EIDOS to the live Claude Code hooks system.
+
+### Integration Complete
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| **hooks/observe.py** | ✅ Updated | Now calls EIDOS integration |
+| **lib/eidos/integration.py** | ✅ Created | Bridge between hooks and EIDOS |
+| **EIDOS_GUIDE.md** | ✅ Created | Comprehensive documentation with flow charts |
+| **CLAUDE.md** | ✅ Updated | EIDOS principles reference |
+
+### Hook Flow (Now EIDOS-Enabled)
+
+```
+PreToolUse
+  ├── make_prediction()         # Old Spark
+  └── create_step_before_action()  # EIDOS (NEW)
+        ├── Check guardrails
+        ├── Check control plane
+        └── Create Step record
+
+PostToolUse / PostToolUseFailure
+  ├── check_for_surprise()      # Old Spark
+  └── complete_step_after_action()  # EIDOS (NEW)
+        ├── Evaluate prediction
+        ├── Calculate surprise
+        ├── Extract lesson
+        ├── Score for memory
+        └── Capture evidence
+
+SessionEnd
+  └── complete_episode()        # EIDOS (NEW)
+        └── Trigger distillation
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SPARK_EIDOS_ENABLED` | `1` | Enable EIDOS integration |
+
+### Files Changed
+
+- `hooks/observe.py` - Added EIDOS integration calls
+- `EIDOS_GUIDE.md` - Created comprehensive documentation
+- `CLAUDE.md` - Added EIDOS principles section
+- `CHANGELOG.md` - Updated with this entry
+
+---
+
 ## [Phase 3 Complete] - 2026-02-02
 
 ### Theme: EIDOS - Self-Evolving Intelligence System
