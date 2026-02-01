@@ -69,3 +69,4 @@ benchmarks/logs/
 # Sandbox artifacts
 sandbox/spark_sandbox/
 sandbox/spark_sandbox_diff.json
+node_modules/

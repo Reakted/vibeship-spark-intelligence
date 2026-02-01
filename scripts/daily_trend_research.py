@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""
+Spark Daily Trend Research - Automated X/Twitter Intelligence Gathering
+
+This script:
+1. Searches X for trends in AI agents, vibe coding, ecosystems
+2. Extracts insights and stores them in Spark cognitive learner
+3. Generates content recommendations based on what's trending
+4. Updates the dashboard data
+
+Run daily via cron/scheduler or manually:
+    python scripts/daily_trend_research.py
+"""
+
+import sys
+import json
+import asyncio
+from pathlib import Path
+from datetime import datetime
+from typing import List, Dict, Any
+
+# Add lib to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from lib.cognitive_learner import get_cognitive_learner, CognitiveCategory
+
+
+# ============================================
+# RESEARCH TOPICS - What to track daily
+# ============================================
+
+RESEARCH_TOPICS = {
+    "vibe_coding": {
+        "queries": [
+            "vibe coding Claude AI",
+            "Claude Code ship fast",
+            "AI coding productivity",
+        ],
+        "category": CognitiveCategory.CONTEXT,
+        "priority": "high"
+    },
+    "openclaw_moltbook": {
+        "queries": [
+            "OpenClaw Claude ecosystem",
+            "Moltbook AI agent",
+            "agent social network",
+        ],
+        "category": CognitiveCategory.CONTEXT,
+        "priority": "high"
+    },
+    "base_ecosystem": {
+        "queries": [
+            "BASE chain AI agent token",
+            "CLAWNCH agent launchpad",
+        ],
+        "category": CognitiveCategory.CONTEXT,
+        "priority": "medium"
+    },
+    "solana_ai": {
+        "queries": [
+            "Solana AI agent meme token",
+            "AI memecoin Solana launch",
+        ],
+        "category": CognitiveCategory.CONTEXT,
+        "priority": "medium"
+    },
+    "bittensor": {
+        "queries": [
+            "Bittensor TAO subnet AI",
+            "decentralized AI compute",
+        ],
+        "category": CognitiveCategory.CONTEXT,
+        "priority": "medium"
+    },
+    "viral_patterns": {
+        "queries": [
+            "AI viral tweet engagement",
+            "Claude tweet viral",
+        ],
+        "category": CognitiveCategory.REASONING,
+        "priority": "high"
+    },
+}
+
+# Content recommendation prompts based on trends
+CONTENT_ANGLES = {
+    "educational": "How-to guides and tutorials get high bookmarks",
+    "holy_shit_moment": "AI doing unexpected things drives massive engagement",
+    "tool_comparison": "Stack comparisons and tool lists get saved",
+    "ecosystem_update": "Ecosystem news with specific numbers performs well",
+    "contrarian": "Challenging conventional wisdom sparks discussion",
+    "builder_story": "First-person building narratives resonate",
+}
+
+
+def extract_insights_from_search(search_results: List[Dict], topic: str) -> List[Dict]:
+    """Extract actionable insights from search results."""
+    insights = []
+
+    for tweet in search_results:
+        text = tweet.get('text', '')
+        likes = tweet.get('likes', 0)
+        retweets = tweet.get('retweets', 0)
+
+        # Only process tweets with some engagement
+        if likes < 5 and retweets < 2:
+            continue
+
+        # Extract key patterns
+        insight = {
+            'topic': topic,
+            'text': text[:500],
+            'engagement': likes + retweets * 2,
+            'timestamp': tweet.get('created_at'),
+        }
+
+        # Detect content type
+        if any(word in text.lower() for word in ['how to', 'guide', 'tutorial', 'thread']):
+            insight['content_type'] = 'educational'
+        elif any(word in text.lower() for word in ['holy shit', 'insane', 'wtf', 'crazy']):
+            insight['content_type'] = 'holy_shit_moment'
+        elif any(word in text.lower() for word in ['vs', 'compared', 'better than', 'stack']):
+            insight['content_type'] = 'comparison'
+        elif any(word in text.lower() for word in ['launched', 'announced', 'new', 'just']):
+            insight['content_type'] = 'news'
+        else:
+            insight['content_type'] = 'general'
+
+        insights.append(insight)
+
+    return insights
+
+
+def generate_content_recommendations(insights: List[Dict]) -> List[Dict]:
+    """Generate content recommendations based on trending insights."""
+    recommendations = []
+
+    # Group by topic
+    by_topic = {}
+    for insight in insights:
+        topic = insight['topic']
+        if topic not in by_topic:
+            by_topic[topic] = []
+        by_topic[topic].append(insight)
+
+    # Generate recommendations
+    for topic, topic_insights in by_topic.items():
+        if not topic_insights:
+            continue
+
+        # Sort by engagement
+        sorted_insights = sorted(topic_insights, key=lambda x: x['engagement'], reverse=True)
+        top_insight = sorted_insights[0]
+
+        # Determine best angle
+        content_types = [i['content_type'] for i in sorted_insights[:5]]
+        most_common = max(set(content_types), key=content_types.count)
+
+        recommendations.append({
+            'topic': topic,
+            'suggested_angle': CONTENT_ANGLES.get(most_common, CONTENT_ANGLES['educational']),
+            'trending_example': top_insight['text'][:200],
+            'engagement_signal': top_insight['engagement'],
+            'content_type': most_common,
+            'priority': 'high' if top_insight['engagement'] > 100 else 'medium',
+        })
+
+    return sorted(recommendations, key=lambda x: x['engagement_signal'], reverse=True)
+
+
+def store_daily_report(insights: List[Dict], recommendations: List[Dict]):
+    """Store daily research report for dashboard."""
+    report_dir = Path.home() / '.spark' / 'research_reports'
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    report = {
+        'date': today,
+        'generated_at': datetime.now().isoformat(),
+        'insights_count': len(insights),
+        'topics_covered': list(set(i['topic'] for i in insights)),
+        'top_recommendations': recommendations[:5],
+        'all_insights': insights,
+        'content_ideas': [
+            {
+                'idea': r['suggested_angle'],
+                'topic': r['topic'],
+                'example': r['trending_example'],
+                'priority': r['priority'],
+            }
+            for r in recommendations[:10]
+        ]
+    }
+
+    # Save daily report
+    report_file = report_dir / f'report_{today}.json'
+    report_file.write_text(json.dumps(report, indent=2))
+
+    # Update latest report symlink
+    latest_file = report_dir / 'latest.json'
+    latest_file.write_text(json.dumps(report, indent=2))
+
+    print(f"Report saved to: {report_file}")
+    return report
+
+
+def inject_to_spark(insights: List[Dict]):
+    """Inject top insights into Spark cognitive learner."""
+    learner = get_cognitive_learner()
+
+    # Only inject high-engagement insights
+    top_insights = sorted(insights, key=lambda x: x['engagement'], reverse=True)[:20]
+
+    for insight in top_insights:
+        topic_config = RESEARCH_TOPICS.get(insight['topic'], {})
+        category = topic_config.get('category', CognitiveCategory.CONTEXT)
+
+        learner.add_insight(
+            category=category,
+            insight=f"[{insight['topic']}] {insight['text'][:200]}",
+            context=f"X research {datetime.now().strftime('%Y-%m-%d')} - engagement: {insight['engagement']}",
+            confidence=min(0.95, 0.6 + (insight['engagement'] / 500))
+        )
+
+    print(f"Injected {len(top_insights)} insights into Spark")
+    return len(top_insights)
+
+
+def run_research_with_mcp():
+    """
+    This function would be called when MCP tools are available.
+    For now, we provide the structure - actual X searches happen via Claude.
+    """
+    print("""
+    =====================================================
+    DAILY TREND RESEARCH SYSTEM
+    =====================================================
+
+    This script is designed to be run in two ways:
+
+    1. VIA CLAUDE (Recommended):
+       Ask Claude to run daily research with:
+       "Run daily trend research and update Spark"
+
+       Claude will:
+       - Search X using MCP tools
+       - Extract insights
+       - Call this script to store them
+
+    2. MANUAL MODE:
+       Edit the MOCK_RESULTS below with actual search data
+       Then run: python scripts/daily_trend_research.py --manual
+
+    =====================================================
+    """)
+
+    # Structure for manual mode
+    return {
+        'status': 'ready',
+        'topics': list(RESEARCH_TOPICS.keys()),
+        'queries': [q for t in RESEARCH_TOPICS.values() for q in t['queries']],
+    }
+
+
+def manual_mode_with_data(search_data: Dict[str, List[Dict]]):
+    """Process manually provided search data."""
+    all_insights = []
+
+    for topic, results in search_data.items():
+        insights = extract_insights_from_search(results, topic)
+        all_insights.extend(insights)
+        print(f"Extracted {len(insights)} insights from {topic}")
+
+    # Generate recommendations
+    recommendations = generate_content_recommendations(all_insights)
+    print(f"\nGenerated {len(recommendations)} content recommendations")
+
+    # Store report
+    report = store_daily_report(all_insights, recommendations)
+
+    # Inject to Spark
+    injected = inject_to_spark(all_insights)
+
+    return {
+        'insights_extracted': len(all_insights),
+        'recommendations': len(recommendations),
+        'injected_to_spark': injected,
+        'report': report,
+    }
+
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Spark Daily Trend Research')
+    parser.add_argument('--manual', action='store_true', help='Run in manual mode')
+    parser.add_argument('--show-topics', action='store_true', help='Show research topics')
+    args = parser.parse_args()
+
+    if args.show_topics:
+        print("Research Topics:")
+        for topic, config in RESEARCH_TOPICS.items():
+            print(f"\n{topic} (priority: {config['priority']})")
+            for q in config['queries']:
+                print(f"  - {q}")
+    else:
+        result = run_research_with_mcp()
+        print(json.dumps(result, indent=2))

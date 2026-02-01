@@ -21,6 +21,7 @@ from .sentiment import SentimentDetector
 from .repetition import RepetitionDetector
 from .semantic import SemanticIntentDetector
 from .why import WhyDetector
+from ..primitive_filter import is_primitive_text
 
 
 # Confidence threshold to trigger learning
@@ -108,6 +109,15 @@ class PatternAggregator:
         # De-dupe patterns within a TTL window to avoid spammy insights.
         all_patterns = self._dedupe_patterns(session_id, all_patterns)
 
+        # Drop primitive/operational suggestions early.
+        filtered: List[DetectedPattern] = []
+        for pattern in all_patterns:
+            suggested = pattern.suggested_insight or ""
+            if suggested and is_primitive_text(suggested):
+                continue
+            filtered.append(pattern)
+        all_patterns = filtered
+
         for pattern in all_patterns:
             self._patterns_count += 1
             self._session_patterns[session_id].append(pattern)
@@ -189,6 +199,8 @@ class PatternAggregator:
                 continue
 
             if not pattern.suggested_insight:
+                continue
+            if is_primitive_text(pattern.suggested_insight):
                 continue
             if _is_operational_insight(pattern.suggested_insight):
                 continue

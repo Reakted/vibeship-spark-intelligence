@@ -22,6 +22,7 @@ from lib.exposure_tracker import read_recent_exposures
 from lib.embeddings import embed_texts
 from lib.outcome_log import OUTCOMES_FILE, append_outcomes, make_outcome_id
 from lib.project_profile import list_profiles
+from lib.primitive_filter import is_primitive_text
 
 
 PREDICTIONS_FILE = Path.home() / ".spark" / "predictions.jsonl"
@@ -124,6 +125,8 @@ def build_predictions(max_age_s: float = 6 * 3600) -> int:
         source = ex.get("source") or "exposure"
         session_id = ex.get("session_id")
         if not text:
+            continue
+        if is_primitive_text(text):
             continue
         pred_id = _hash_id(key or "", text, source)
         if pred_id in existing:

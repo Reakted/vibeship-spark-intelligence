@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+from .primitive_filter import is_primitive_text
+
 
 EXPOSURES_FILE = Path.home() / ".spark" / "exposures.jsonl"
 LAST_EXPOSURE_FILE = Path.home() / ".spark" / "last_exposure.json"
@@ -19,12 +21,15 @@ def record_exposures(source: str, items: Iterable[Dict], *, session_id: Optional
     for item in items:
         if not item:
             continue
+        text = item.get("text")
+        if isinstance(text, str) and is_primitive_text(text):
+            continue
         rows.append({
             "ts": now,
             "source": source,
             "insight_key": item.get("insight_key"),
             "category": item.get("category"),
-            "text": item.get("text"),
+            "text": text,
             "session_id": session_id,
         })
 
