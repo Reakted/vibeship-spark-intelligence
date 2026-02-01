@@ -1,0 +1,536 @@
+"""
+EIDOS Integration: Connect EIDOS to Claude Code Hooks
+
+This module bridges the EIDOS intelligence system with the Claude Code
+hook system. It provides functions to:
+
+1. Create Episodes when sessions start
+2. Create Steps for each tool call (with prediction/result/evaluation)
+3. Run Control Plane checks before tools execute
+4. Capture Evidence from tool outputs
+5. Run Distillation when sessions end
+
+The Vertical Loop:
+Action → Prediction → Outcome → Evaluation → Policy Update → Distillation → Mandatory Reuse
+"""
+
+import json
+import os
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from .models import (
+    Episode, Step, Distillation, Policy,
+    Budget, Phase, Outcome, Evaluation, ActionType
+)
+from .control_plane import get_control_plane, ControlDecision
+from .memory_gate import MemoryGate, score_step_importance
+from .distillation_engine import get_distillation_engine
+from .store import get_store
+from .evidence_store import get_evidence_store, Evidence, EvidenceType, create_evidence_from_tool
+from .guardrails import GuardrailEngine
+from .escalation import build_escalation, EscalationType
+from .validation import validate_step, get_deferred_tracker
+
+# Elevated Control Layer
+from .elevated_control import (
+    get_elevated_control_plane,
+    WatcherAlert, EscapeProtocolResult,
+    validate_step_envelope
+)
+
+
+# ===== Session/Episode Tracking =====
+
+ACTIVE_EPISODES_FILE = Path.home() / ".spark" / "eidos_active_episodes.json"
+ACTIVE_STEPS_FILE = Path.home() / ".spark" / "eidos_active_steps.json"
+
+
+def _load_active_episodes() -> Dict[str, str]:
+    """Load session_id -> episode_id mapping."""
+    try:
+        if ACTIVE_EPISODES_FILE.exists():
+            return json.loads(ACTIVE_EPISODES_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _save_active_episodes(mapping: Dict[str, str]):
+    """Save session_id -> episode_id mapping."""
+    try:
+        ACTIVE_EPISODES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        ACTIVE_EPISODES_FILE.write_text(json.dumps(mapping))
+    except Exception:
+        pass
+
+
+def _load_active_step(session_id: str) -> Optional[Dict]:
+    """Load the active step for a session (used between pre and post tool)."""
+    try:
+        if ACTIVE_STEPS_FILE.exists():
+            steps = json.loads(ACTIVE_STEPS_FILE.read_text())
+            return steps.get(session_id)
+    except Exception:
+        pass
+    return None
+
+
+def _save_active_step(session_id: str, step_data: Optional[Dict]):
+    """Save the active step for a session."""
+    try:
+        ACTIVE_STEPS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        steps = {}
+        if ACTIVE_STEPS_FILE.exists():
+            steps = json.loads(ACTIVE_STEPS_FILE.read_text())
+
+        if step_data:
+            steps[session_id] = step_data
+        elif session_id in steps:
+            del steps[session_id]
+
+        # Clean old entries (> 10 min)
+        cutoff = time.time() - 600
+        steps = {k: v for k, v in steps.items() if v.get("timestamp", 0) > cutoff}
+
+        ACTIVE_STEPS_FILE.write_text(json.dumps(steps))
+    except Exception:
+        pass
+
+
+# ===== Episode Management =====
+
+def get_or_create_episode(
+    session_id: str,
+    goal: str = "Claude Code session",
+    cwd: str = ""
+) -> Episode:
+    """Get existing episode for session or create new one."""
+    store = get_store()
+    mapping = _load_active_episodes()
+
+    if session_id in mapping:
+        episode = store.get_episode(mapping[session_id])
+        if episode and episode.outcome == Outcome.IN_PROGRESS:
+            return episode
+
+    # Create new episode
+    episode = Episode(
+        episode_id="",
+        goal=goal,
+        success_criteria="Complete user request successfully",
+        constraints=[f"Working directory: {cwd}"] if cwd else [],
+        budget=Budget(max_steps=50, max_time_seconds=1800)  # 30 min default
+    )
+    store.save_episode(episode)
+
+    # Save mapping
+    mapping[session_id] = episode.episode_id
+
+    # Clean old mappings (keep last 100)
+    if len(mapping) > 100:
+        mapping = dict(list(mapping.items())[-100:])
+
+    _save_active_episodes(mapping)
+
+    return episode
+
+
+def complete_episode(
+    session_id: str,
+    outcome: Outcome = Outcome.SUCCESS,
+    final_evaluation: str = ""
+) -> Optional[Episode]:
+    """
+    Complete an episode and run distillation.
+
+    Called when session ends or user explicitly completes a task.
+    """
+    store = get_store()
+    mapping = _load_active_episodes()
+
+    if session_id not in mapping:
+        return None
+
+    episode = store.get_episode(mapping[session_id])
+    if not episode:
+        return None
+
+    # Update episode
+    episode.outcome = outcome
+    episode.phase = Phase.CONSOLIDATE
+    episode.end_ts = time.time()
+    episode.final_evaluation = final_evaluation
+    store.save_episode(episode)
+
+    # Run distillation
+    steps = store.get_episode_steps(episode.episode_id)
+    if steps:
+        engine = get_distillation_engine()
+        reflection = engine.reflect_on_episode(episode, steps)
+        candidates = engine.generate_distillations(episode, steps, reflection)
+
+        for candidate in candidates:
+            distillation = engine.finalize_distillation(candidate)
+            store.save_distillation(distillation)
+
+    # Remove from active
+    del mapping[session_id]
+    _save_active_episodes(mapping)
+
+    return episode
+
+
+# ===== Step Management =====
+
+def create_step_before_action(
+    session_id: str,
+    tool_name: str,
+    tool_input: Dict[str, Any],
+    prediction: Dict[str, Any]
+) -> Tuple[Optional[Step], Optional[ControlDecision]]:
+    """
+    Create a step BEFORE the tool executes.
+
+    This implements the EIDOS vertical loop with Elevated Control:
+    1. State intent and decision
+    2. Make prediction (with hypothesis and stop condition)
+    3. Check elevated control plane (watchers, escape protocol)
+    4. Return step and control decision
+
+    Returns:
+        (Step, ControlDecision) - Step to complete later, control decision
+    """
+    episode = get_or_create_episode(session_id, cwd=tool_input.get("cwd", ""))
+    store = get_store()
+    elevated = get_elevated_control_plane()
+    guardrails = GuardrailEngine()
+
+    # Create step with FULL Step Envelope
+    step = Step(
+        step_id="",
+        episode_id=episode.episode_id,
+        intent=f"Execute {tool_name}",
+        decision=f"Use {tool_name} tool",
+        hypothesis=prediction.get("reason", ""),  # Falsifiable hypothesis
+        alternatives=[],
+        assumptions=_extract_assumptions(tool_name, tool_input),
+        prediction=prediction.get("reason", "Tool will succeed"),
+        stop_condition=f"If {tool_name} fails twice, diagnose before retry",  # Required
+        confidence_before=prediction.get("confidence", 0.5),
+        budget_snapshot={
+            "step_count": episode.step_count,
+            "max_steps": episode.budget.max_steps,
+            "percentage_used": episode.budget_percentage_used(),
+        },
+        action_type=ActionType.TOOL_CALL,
+        action_details={
+            "tool": tool_name,
+            **{k: str(v)[:200] for k, v in tool_input.items() if k != "content"}
+        },
+        retrieved_memories=[],  # TODO: Populate from memory retrieval
+        memory_cited=False,
+        memory_absent_declared=True,  # Declare no memories found for now
+    )
+
+    # Get recent steps for context
+    recent_steps = store.get_episode_steps(episode.episode_id)[-10:]
+
+    # Check legacy guardrails first
+    guard_result = guardrails.is_blocked(episode, step, recent_steps)
+    if guard_result:
+        return step, ControlDecision(
+            allowed=False,
+            message=guard_result.message,
+            required_action="; ".join(guard_result.required_actions)
+        )
+
+    # Check elevated control plane (includes watchers and escape protocol)
+    allowed, alerts, escape_result = elevated.check_before_action(
+        episode, step, recent_steps, memories_exist=False
+    )
+
+    if not allowed:
+        # Build message from alerts or escape result
+        if escape_result:
+            message = f"ESCAPE PROTOCOL: {escape_result.reason}\n{escape_result.summary}"
+            required = escape_result.discriminating_test
+        elif alerts:
+            message = "; ".join([a.message for a in alerts])
+            required = alerts[0].required_output if alerts else ""
+        else:
+            message = "Action blocked by control plane"
+            required = ""
+
+        return step, ControlDecision(
+            allowed=False,
+            message=message,
+            required_action=required
+        )
+
+    # Save step data for post-action completion
+    _save_active_step(session_id, {
+        "step_id": step.step_id,
+        "episode_id": episode.episode_id,
+        "tool_name": tool_name,
+        "prediction": prediction,
+        "timestamp": time.time(),
+    })
+
+    # Update episode step count
+    episode.step_count += 1
+    store.save_episode(episode)
+
+    return step, ControlDecision(allowed=True, message="")
+
+
+def complete_step_after_action(
+    session_id: str,
+    tool_name: str,
+    success: bool,
+    result: str = "",
+    error: str = ""
+) -> Optional[Step]:
+    """
+    Complete a step AFTER the tool executes.
+
+    This implements the EIDOS vertical loop with Elevated Control:
+    1. Record result with validation evidence
+    2. Evaluate against prediction
+    3. Calculate surprise and confidence delta
+    4. Extract lesson
+    5. Process through elevated control plane
+    6. Score for memory persistence
+    """
+    step_data = _load_active_step(session_id)
+    if not step_data or step_data.get("tool_name") != tool_name:
+        return None
+
+    episode = get_or_create_episode(session_id)
+    store = get_store()
+    elevated = get_elevated_control_plane()
+    gate = MemoryGate()
+
+    prediction = step_data.get("prediction", {})
+    predicted_success = prediction.get("outcome", "success") == "success"
+    confidence_before = prediction.get("confidence", 0.5)
+
+    # Calculate evaluation
+    if success:
+        evaluation = Evaluation.PASS
+    else:
+        evaluation = Evaluation.FAIL
+
+    # Calculate surprise
+    surprise = 0.0
+    if predicted_success and not success:
+        surprise = confidence_before  # High confidence + failure = surprise
+    elif not predicted_success and success:
+        surprise = 1 - confidence_before  # Low confidence + success = surprise
+
+    # Extract lesson
+    lesson = _extract_lesson(tool_name, success, error, prediction)
+
+    # Update confidence
+    confidence_after = confidence_before
+    if success:
+        confidence_after = min(1.0, confidence_before + 0.1)
+    else:
+        confidence_after = max(0.1, confidence_before - 0.2)
+
+    confidence_delta = confidence_after - confidence_before
+
+    # Create completed step with FULL envelope
+    step = Step(
+        step_id=step_data.get("step_id", ""),
+        episode_id=episode.episode_id,
+        intent=f"Execute {tool_name}",
+        decision=f"Use {tool_name} tool",
+        hypothesis=prediction.get("reason", ""),
+        prediction=prediction.get("reason", ""),
+        stop_condition=f"If {tool_name} fails twice, diagnose",
+        confidence_before=confidence_before,
+        action_type=ActionType.TOOL_CALL,
+        action_details={"tool": tool_name},
+        result=result[:500] if result else (error[:500] if error else ""),
+        validation_evidence=f"exit_code={'0' if success else '1'}; output_length={len(result or error or '')}",
+        evaluation=evaluation,
+        surprise_level=surprise,
+        lesson=lesson,
+        confidence_after=confidence_after,
+        confidence_delta=confidence_delta,
+        validated=True,
+        validation_method="test:passed" if success else "test:failed",
+        is_valid=True,
+        evidence_gathered=bool(result or error),
+        progress_made=success,
+        memory_absent_declared=True,  # For now
+    )
+
+    # Save step
+    store.save_step(step)
+
+    # Process through elevated control plane
+    new_phase, messages = elevated.process_after_action(episode, step)
+
+    # Score for memory persistence
+    score = gate.score_step(step, context={"domain": "general"})
+    if not score.is_durable:
+        gate.set_cache_expiry(step.step_id, hours=24)
+
+    # Capture evidence
+    if result or error:
+        ev_store = get_evidence_store()
+        evidence = create_evidence_from_tool(
+            step_id=step.step_id,
+            tool_name=tool_name,
+            output=error if error else result,
+            exit_code=0 if success else 1
+        )
+        ev_store.save(evidence)
+
+    # Update episode phase if needed
+    if new_phase != episode.phase:
+        episode.phase = new_phase
+        store.save_episode(episode)
+
+    # Clear active step
+    _save_active_step(session_id, None)
+
+    return step
+
+
+# ===== Helper Functions =====
+
+def _extract_assumptions(tool_name: str, tool_input: Dict) -> List[str]:
+    """Extract assumptions for a tool call."""
+    assumptions = []
+
+    if tool_name == "Edit":
+        assumptions.append("File exists at specified path")
+        assumptions.append("old_string exists in file content")
+    elif tool_name == "Read":
+        assumptions.append("File exists and is readable")
+    elif tool_name == "Write":
+        assumptions.append("Parent directory exists")
+        assumptions.append("Have write permissions")
+    elif tool_name == "Bash":
+        assumptions.append("Command is valid")
+        assumptions.append("Required tools are installed")
+    elif tool_name == "Glob":
+        assumptions.append("Pattern will match files")
+    elif tool_name == "Grep":
+        assumptions.append("Pattern exists in searched files")
+
+    return assumptions
+
+
+def _extract_lesson(
+    tool_name: str,
+    success: bool,
+    error: str,
+    prediction: Dict
+) -> str:
+    """Extract a lesson from the tool execution result."""
+    if success:
+        if prediction.get("confidence", 0.5) < 0.5:
+            return f"{tool_name} succeeded despite low confidence - pattern works better than expected"
+        return ""
+
+    # Failure lessons
+    error_lower = error.lower() if error else ""
+
+    if "not found in file" in error_lower:
+        return "Always Read file before Edit to verify content matches"
+    elif "no such file" in error_lower:
+        return "Verify file exists with Glob before operating on it"
+    elif "permission denied" in error_lower:
+        return "Check file permissions before write operations"
+    elif "timeout" in error_lower:
+        return "Consider breaking into smaller operations or increasing timeout"
+    elif "syntax error" in error_lower:
+        return "Validate syntax before execution"
+
+    if prediction.get("confidence", 0.5) > 0.7:
+        return f"{tool_name} failed despite high confidence - reassess assumptions"
+
+    return f"{tool_name} failed: {error[:100]}" if error else ""
+
+
+# ===== Convenience Functions =====
+
+def should_block_action(session_id: str, tool_name: str, tool_input: Dict) -> Optional[str]:
+    """
+    Quick check if action should be blocked.
+
+    Returns blocking message or None if allowed.
+    """
+    episode = get_or_create_episode(session_id)
+    store = get_store()
+    control = get_control_plane()
+    guardrails = GuardrailEngine()
+
+    # Create minimal step for checking
+    step = Step(
+        step_id="",
+        episode_id=episode.episode_id,
+        intent=f"Execute {tool_name}",
+        decision=f"Use {tool_name}",
+        action_type=ActionType.TOOL_CALL,
+        action_details={"tool": tool_name, **tool_input}
+    )
+
+    recent_steps = store.get_episode_steps(episode.episode_id)[-10:]
+
+    # Check guardrails
+    guard_result = guardrails.is_blocked(episode, step, recent_steps)
+    if guard_result:
+        return guard_result.message
+
+    # Check control plane
+    decision = control.check_before_action(episode, step, recent_steps)
+    if not decision.allowed:
+        return decision.message
+
+    return None
+
+
+def get_active_episode_stats(session_id: str) -> Dict[str, Any]:
+    """Get stats for the active episode."""
+    episode = get_or_create_episode(session_id)
+    store = get_store()
+    steps = store.get_episode_steps(episode.episode_id)
+
+    passed = len([s for s in steps if s.evaluation == Evaluation.PASS])
+    failed = len([s for s in steps if s.evaluation == Evaluation.FAIL])
+
+    return {
+        "episode_id": episode.episode_id,
+        "goal": episode.goal,
+        "phase": episode.phase.value,
+        "outcome": episode.outcome.value,
+        "step_count": len(steps),
+        "passed": passed,
+        "failed": failed,
+        "budget_remaining": episode.budget.max_steps - len(steps),
+        "elapsed_seconds": time.time() - episode.start_ts,
+    }
+
+
+def generate_escalation(session_id: str, blocker: str) -> str:
+    """Generate an escalation report for the current episode."""
+    episode = get_or_create_episode(session_id)
+    store = get_store()
+    steps = store.get_episode_steps(episode.episode_id)
+
+    # Determine escalation type
+    if episode.is_budget_exceeded():
+        esc_type = EscalationType.BUDGET
+    elif any(c >= 3 for c in episode.error_counts.values()):
+        esc_type = EscalationType.LOOP
+    else:
+        esc_type = EscalationType.BLOCKED
+
+    escalation = build_escalation(episode, steps, esc_type, blocker)
+    return escalation.to_yaml()

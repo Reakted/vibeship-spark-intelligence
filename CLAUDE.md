@@ -103,6 +103,59 @@ After action:
 
 ---
 
+## Elevated Control Layer (CRITICAL)
+
+**Full Documentation:** [STUCK_STATE_PLAYBOOK.md](./STUCK_STATE_PLAYBOOK.md)
+
+### The Mantra
+
+> **"If progress is unclear, stop acting and change the question."**
+
+### Invariant Rules (Never Break)
+
+1. **No action without falsifiable hypothesis**
+2. **Two failures = STOP modifying reality** (only observe)
+3. **Progress must be observable** (every step changes something)
+4. **Budgets are capped** (25 steps, 12 min, 2 retries per error)
+5. **Memory must be consulted** (cite or declare absent)
+
+### Watchers (Automatic Rabbit-Hole Detection)
+
+| Watcher | Trigger | Action |
+|---------|---------|--------|
+| **Repeat Failure** | Same error 2x | → DIAGNOSE |
+| **No New Evidence** | 5 steps without | → DIAGNOSE |
+| **Diff Thrash** | Same file 3x | → SIMPLIFY (freeze file) |
+| **Confidence Stagnation** | Delta < 0.05 × 3 | → PLAN |
+| **Memory Bypass** | No citation | BLOCK |
+| **Budget Half No Progress** | >50%, no progress | → SIMPLIFY |
+
+### Escape Protocol
+
+When stuck (watcher triggers 2x or budget > 80%):
+
+1. **FREEZE** - No more edits
+2. **SUMMARIZE** - What we know/tried/observed
+3. **ISOLATE** - Smallest failing unit
+4. **FLIP** - "What must be true for this to be impossible?"
+5. **HYPOTHESES** - Generate 3 max
+6. **TEST** - Pick 1 discriminating test
+7. **ARTIFACT** - Produce learning (rabbit holes pay rent)
+
+### Operating States
+
+```
+EXPLORE → PLAN → EXECUTE → VALIDATE → CONSOLIDATE
+   ↑                     ↓
+   └────── DIAGNOSE ←────┘
+            ↓
+         SIMPLIFY
+            ↓
+         ESCALATE/HALT
+```
+
+---
+
 ### Phase 2 - Importance Scoring ✅ COMPLETE
 
 **Completed:** 2026-02-02

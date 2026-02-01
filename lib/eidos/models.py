@@ -18,12 +18,44 @@ from typing import Any, Dict, List, Optional
 
 
 class Phase(Enum):
-    """Episode phases - transitions are rule-driven, not LLM-decided."""
-    EXPLORE = "explore"         # Gathering information
-    DIAGNOSE = "diagnose"       # Understanding the problem
-    EXECUTE = "execute"         # Taking action
-    CONSOLIDATE = "consolidate" # Extracting lessons
-    ESCALATE = "escalate"       # Giving up / asking for help
+    """
+    Episode phases - transitions are rule-driven, not LLM-decided.
+
+    The LLM cannot "decide" to skip states. The control plane enforces.
+
+    Allowed transitions:
+    - EXPLORE → PLAN
+    - PLAN → EXECUTE
+    - EXECUTE → VALIDATE
+    - VALIDATE → (EXECUTE | CONSOLIDATE | DIAGNOSE)
+    - DIAGNOSE → (SIMPLIFY | PLAN | ESCALATE)
+    - SIMPLIFY → (DIAGNOSE | PLAN | ESCALATE)
+    - Any → HALT (budget or safety)
+    - Any → ESCALATE (missing info / blocked)
+    """
+    EXPLORE = "explore"         # Gather context, clarify, retrieve memory
+    PLAN = "plan"               # Generate hypotheses/tests (bounded)
+    EXECUTE = "execute"         # One action per step + prediction
+    VALIDATE = "validate"       # Prove outcome, record evidence
+    CONSOLIDATE = "consolidate" # Distill learnings into reusable rules
+    DIAGNOSE = "diagnose"       # Debugging mode, evidence-only
+    SIMPLIFY = "simplify"       # Reduce scope / minimal reproduction
+    ESCALATE = "escalate"       # Ask user / stop and request info
+    HALT = "halt"               # Budget exceeded or unsafe; produce report
+
+
+# Valid phase transitions (control plane enforces these)
+VALID_TRANSITIONS = {
+    Phase.EXPLORE: [Phase.PLAN, Phase.ESCALATE, Phase.HALT],
+    Phase.PLAN: [Phase.EXECUTE, Phase.ESCALATE, Phase.HALT],
+    Phase.EXECUTE: [Phase.VALIDATE, Phase.ESCALATE, Phase.HALT],
+    Phase.VALIDATE: [Phase.EXECUTE, Phase.CONSOLIDATE, Phase.DIAGNOSE, Phase.ESCALATE, Phase.HALT],
+    Phase.CONSOLIDATE: [Phase.EXPLORE, Phase.HALT],  # Start new cycle or end
+    Phase.DIAGNOSE: [Phase.SIMPLIFY, Phase.PLAN, Phase.ESCALATE, Phase.HALT],
+    Phase.SIMPLIFY: [Phase.DIAGNOSE, Phase.PLAN, Phase.ESCALATE, Phase.HALT],
+    Phase.ESCALATE: [Phase.HALT],  # Can only halt after escalation
+    Phase.HALT: [],  # Terminal state
+}
 
 
 class Outcome(Enum):
@@ -62,16 +94,27 @@ class ActionType(Enum):
 
 @dataclass
 class Budget:
-    """Resource constraints for an episode."""
+    """
+    Resource constraints for an episode.
+
+    Budget exhaustion triggers:
+    - auto transition → HALT
+    - produce "Stuck Report" + "Next best experiment"
+    - create at least one distillation (anti-pattern/sharp edge)
+    """
     max_steps: int = 25
     max_time_seconds: int = 720  # 12 minutes
-    max_retries_per_error: int = 3
+    max_retries_per_error: int = 2  # After 2 failures, stop modifying
+    max_file_touches: int = 2  # Max times to modify same file per episode
+    no_evidence_limit: int = 5  # Force DIAGNOSE after N steps without evidence
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "max_steps": self.max_steps,
             "max_time_seconds": self.max_time_seconds,
             "max_retries_per_error": self.max_retries_per_error,
+            "max_file_touches": self.max_file_touches,
+            "no_evidence_limit": self.no_evidence_limit,
         }
 
     @classmethod
@@ -79,7 +122,9 @@ class Budget:
         return cls(
             max_steps=data.get("max_steps", 25),
             max_time_seconds=data.get("max_time_seconds", 720),
-            max_retries_per_error=data.get("max_retries_per_error", 3),
+            max_retries_per_error=data.get("max_retries_per_error", 2),
+            max_file_touches=data.get("max_file_touches", 2),
+            no_evidence_limit=data.get("no_evidence_limit", 5),
         )
 
 
@@ -108,6 +153,11 @@ class Episode:
     # Tracking
     step_count: int = 0
     error_counts: Dict[str, int] = field(default_factory=dict)  # error_signature -> count
+    file_touch_counts: Dict[str, int] = field(default_factory=dict)  # file_path -> touch count
+    no_evidence_streak: int = 0  # Steps without new evidence
+    confidence_history: List[float] = field(default_factory=list)  # Track confidence over time
+    stuck_count: int = 0  # Times we've entered DIAGNOSE/SIMPLIFY
+    escape_protocol_triggered: bool = False
 
     def __post_init__(self):
         if not self.episode_id:
@@ -135,6 +185,47 @@ class Episode:
         """Record an error occurrence."""
         self.error_counts[error_signature] = self.error_counts.get(error_signature, 0) + 1
 
+    def record_file_touch(self, file_path: str):
+        """Record that a file was modified."""
+        self.file_touch_counts[file_path] = self.file_touch_counts.get(file_path, 0) + 1
+
+    def is_file_frozen(self, file_path: str) -> bool:
+        """Check if file has been touched too many times."""
+        return self.file_touch_counts.get(file_path, 0) >= self.budget.max_file_touches
+
+    def get_frozen_files(self) -> List[str]:
+        """Get list of files that can no longer be modified."""
+        return [f for f, c in self.file_touch_counts.items() if c >= self.budget.max_file_touches]
+
+    def record_evidence(self, has_evidence: bool):
+        """Track evidence streak."""
+        if has_evidence:
+            self.no_evidence_streak = 0
+        else:
+            self.no_evidence_streak += 1
+
+    def is_no_evidence_limit_exceeded(self) -> bool:
+        """Check if we've gone too long without new evidence."""
+        return self.no_evidence_streak >= self.budget.no_evidence_limit
+
+    def record_confidence(self, confidence: float):
+        """Track confidence over time for stagnation detection."""
+        self.confidence_history.append(confidence)
+        # Keep only last 10
+        if len(self.confidence_history) > 10:
+            self.confidence_history = self.confidence_history[-10:]
+
+    def is_confidence_stagnant(self, threshold: float = 0.05, steps: int = 3) -> bool:
+        """Check if confidence hasn't improved significantly."""
+        if len(self.confidence_history) < steps:
+            return False
+        recent = self.confidence_history[-steps:]
+        return max(recent) - min(recent) < threshold
+
+    def budget_percentage_used(self) -> float:
+        """Get percentage of budget used."""
+        return self.step_count / self.budget.max_steps
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "episode_id": self.episode_id,
@@ -149,6 +240,11 @@ class Episode:
             "end_ts": self.end_ts,
             "step_count": self.step_count,
             "error_counts": self.error_counts,
+            "file_touch_counts": self.file_touch_counts,
+            "no_evidence_streak": self.no_evidence_streak,
+            "confidence_history": self.confidence_history,
+            "stuck_count": self.stuck_count,
+            "escape_protocol_triggered": self.escape_protocol_triggered,
         }
 
     @classmethod
@@ -166,13 +262,18 @@ class Episode:
             end_ts=data.get("end_ts"),
             step_count=data.get("step_count", 0),
             error_counts=data.get("error_counts", {}),
+            file_touch_counts=data.get("file_touch_counts", {}),
+            no_evidence_streak=data.get("no_evidence_streak", 0),
+            confidence_history=data.get("confidence_history", []),
+            stuck_count=data.get("stuck_count", 0),
+            escape_protocol_triggered=data.get("escape_protocol_triggered", False),
         )
 
 
 @dataclass
 class Step:
     """
-    The atomic intelligence unit - a decision packet.
+    The atomic intelligence unit - a decision packet (Step Envelope).
 
     This is the core substrate for learning because it captures:
     - What was decided (and what wasn't)
@@ -181,43 +282,60 @@ class Step:
     - What actually happened
     - What we learned
 
-    MANDATORY FIELDS (must be filled for step to be valid):
-    - intent
-    - decision
-    - prediction
-    - result (after action)
-    - evaluation (after action)
+    THE STEP ENVELOPE (non-negotiable contract):
+
+    BEFORE ACTION (required):
+    - intent, hypothesis, prediction, stop_condition
+    - budget_snapshot, memory_citations
+
+    AFTER ACTION (required):
+    - result, validation_evidence, evaluation
+    - lesson, confidence_delta
+
+    HARD GATE: If validation is missing, step marked INVALID
+    and cannot produce distillations.
     """
     step_id: str
     episode_id: str
 
-    # BEFORE ACTION (mandatory)
+    # ===== BEFORE ACTION (mandatory) =====
     intent: str                           # What I'm trying to accomplish
     decision: str                         # What I chose to do
+    hypothesis: str = ""                  # Falsifiable claim being tested
     alternatives: List[str] = field(default_factory=list)  # What I considered but didn't do
     assumptions: List[str] = field(default_factory=list)   # What must be true for this to work
     prediction: str = ""                  # What I expect to happen
+    stop_condition: str = ""              # "If X, change approach" - when to abort
     confidence_before: float = 0.5        # 0-1, how sure I am
+    budget_snapshot: Dict[str, Any] = field(default_factory=dict)  # Budget state at step start
 
-    # THE ACTION
+    # ===== THE ACTION =====
     action_type: ActionType = ActionType.REASONING
     action_details: Dict[str, Any] = field(default_factory=dict)  # Minimal provenance
 
-    # AFTER ACTION (mandatory)
+    # ===== AFTER ACTION (mandatory) =====
     result: str = ""                      # What actually happened
+    validation_evidence: str = ""         # Concrete evidence (test output, metric, file hash)
     evaluation: Evaluation = Evaluation.UNKNOWN
     surprise_level: float = 0.0           # 0-1, how different from prediction
     lesson: str = ""                      # 1-3 bullets, what we learned
     confidence_after: float = 0.5         # Updated confidence
+    confidence_delta: float = 0.0         # Change in confidence
 
-    # MEMORY BINDING (mandatory)
+    # ===== MEMORY BINDING (mandatory) =====
     retrieved_memories: List[str] = field(default_factory=list)  # Memory IDs retrieved
     memory_cited: bool = False            # Did we actually use retrieved memory?
     memory_useful: Optional[bool] = None  # Was the memory helpful?
+    memory_absent_declared: bool = False  # Explicitly declared "none found"
 
-    # VALIDATION (mandatory)
+    # ===== VALIDATION (mandatory) =====
     validated: bool = False               # Did we check the result?
     validation_method: str = ""           # How we validated
+    is_valid: bool = True                 # False if missing required fields
+
+    # ===== PROGRESS TRACKING =====
+    evidence_gathered: bool = False       # Did this step produce new evidence?
+    progress_made: bool = False           # Did this step advance toward goal?
 
     # Metadata
     created_at: float = field(default_factory=time.time)
@@ -278,22 +396,31 @@ class Step:
             "episode_id": self.episode_id,
             "intent": self.intent,
             "decision": self.decision,
+            "hypothesis": self.hypothesis,
             "alternatives": self.alternatives,
             "assumptions": self.assumptions,
             "prediction": self.prediction,
+            "stop_condition": self.stop_condition,
             "confidence_before": self.confidence_before,
+            "budget_snapshot": self.budget_snapshot,
             "action_type": self.action_type.value,
             "action_details": self.action_details,
             "result": self.result,
+            "validation_evidence": self.validation_evidence,
             "evaluation": self.evaluation.value,
             "surprise_level": self.surprise_level,
             "lesson": self.lesson,
             "confidence_after": self.confidence_after,
+            "confidence_delta": self.confidence_delta,
             "retrieved_memories": self.retrieved_memories,
             "memory_cited": self.memory_cited,
             "memory_useful": self.memory_useful,
+            "memory_absent_declared": self.memory_absent_declared,
             "validated": self.validated,
             "validation_method": self.validation_method,
+            "is_valid": self.is_valid,
+            "evidence_gathered": self.evidence_gathered,
+            "progress_made": self.progress_made,
             "created_at": self.created_at,
         }
 
@@ -304,22 +431,31 @@ class Step:
             episode_id=data["episode_id"],
             intent=data.get("intent", ""),
             decision=data.get("decision", ""),
+            hypothesis=data.get("hypothesis", ""),
             alternatives=data.get("alternatives", []),
             assumptions=data.get("assumptions", []),
             prediction=data.get("prediction", ""),
+            stop_condition=data.get("stop_condition", ""),
             confidence_before=data.get("confidence_before", 0.5),
+            budget_snapshot=data.get("budget_snapshot", {}),
             action_type=ActionType(data.get("action_type", "reasoning")),
             action_details=data.get("action_details", {}),
             result=data.get("result", ""),
+            validation_evidence=data.get("validation_evidence", ""),
             evaluation=Evaluation(data.get("evaluation", "unknown")),
             surprise_level=data.get("surprise_level", 0.0),
             lesson=data.get("lesson", ""),
             confidence_after=data.get("confidence_after", 0.5),
+            confidence_delta=data.get("confidence_delta", 0.0),
             retrieved_memories=data.get("retrieved_memories", []),
             memory_cited=data.get("memory_cited", False),
             memory_useful=data.get("memory_useful"),
+            memory_absent_declared=data.get("memory_absent_declared", False),
             validated=data.get("validated", False),
             validation_method=data.get("validation_method", ""),
+            is_valid=data.get("is_valid", True),
+            evidence_gathered=data.get("evidence_gathered", False),
+            progress_made=data.get("progress_made", False),
             created_at=data.get("created_at", time.time()),
         )
 

@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """
-Spark Observation Hook: Ultra-fast event capture + Surprise Detection
+Spark Observation Hook: Ultra-fast event capture + Surprise Detection + EIDOS Integration
 
 This hook is called by Claude Code to capture tool usage events.
 It MUST complete quickly to avoid slowdown.
 
-NEW: Also detects surprising outcomes (unexpected success/failure).
+EIDOS Integration:
+- PreToolUse: Create Episode/Step, make prediction, check control plane
+- PostToolUse: Complete Step, evaluate prediction, capture evidence
+- PostToolUseFailure: Complete Step with error, learn from failure
+
+The Vertical Loop:
+Action → Prediction → Outcome → Evaluation → Policy Update → Distillation → Mandatory Reuse
 
 Usage in .claude/settings.json:
 {
@@ -31,6 +37,27 @@ from lib.cognitive_learner import get_cognitive_learner
 from lib.feedback import update_skill_effectiveness, update_self_awareness_reliability
 from lib.diagnostics import log_debug
 from lib.outcome_checkin import record_checkin_request
+
+# EIDOS Integration
+EIDOS_ENABLED = os.environ.get("SPARK_EIDOS_ENABLED", "1") == "1"
+
+if EIDOS_ENABLED:
+    try:
+        from lib.eidos.integration import (
+            create_step_before_action,
+            complete_step_after_action,
+            should_block_action,
+            get_or_create_episode,
+            complete_episode,
+            generate_escalation,
+        )
+        from lib.eidos.models import Outcome
+        EIDOS_AVAILABLE = True
+    except ImportError as e:
+        log_debug("observe", "EIDOS import failed", e)
+        EIDOS_AVAILABLE = False
+else:
+    EIDOS_AVAILABLE = False
 
 # ===== Prediction Tracking =====
 # We track predictions made at PreToolUse to compare at PostToolUse
@@ -276,15 +303,53 @@ def main():
     
     event_type = get_event_type(hook_event)
     
-    # ===== PreToolUse: Make prediction =====
+    # ===== PreToolUse: Make prediction + EIDOS step creation =====
     if event_type == EventType.PRE_TOOL and tool_name:
         prediction = make_prediction(tool_name, tool_input)
         save_prediction(session_id, tool_name, prediction)
+
+        # EIDOS: Create step and check control plane
+        if EIDOS_AVAILABLE:
+            try:
+                step, decision = create_step_before_action(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    prediction=prediction
+                )
+
+                # If EIDOS blocks the action, output blocking message
+                if decision and not decision.allowed:
+                    # Write to stderr so Claude Code sees it
+                    sys.stderr.write(f"[EIDOS] BLOCKED: {decision.message}\n")
+                    if decision.required_action:
+                        sys.stderr.write(f"[EIDOS] Required: {decision.required_action}\n")
+            except Exception as e:
+                log_debug("observe", "EIDOS pre-action failed", e)
     
-    # ===== PostToolUse: Check for surprise =====
+    # ===== PostToolUse: Check for surprise + EIDOS step completion =====
     if event_type == EventType.POST_TOOL and tool_name:
         check_for_surprise(session_id, tool_name, success=True)
         learn_from_success(tool_name, tool_input, {})
+
+        # EIDOS: Complete step with success
+        if EIDOS_AVAILABLE:
+            try:
+                result = input_data.get("tool_result", "")
+                if isinstance(result, dict):
+                    result = json.dumps(result)[:500]
+                elif result:
+                    result = str(result)[:500]
+
+                complete_step_after_action(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    success=True,
+                    result=result
+                )
+            except Exception as e:
+                log_debug("observe", "EIDOS post-action failed", e)
+
         try:
             update_self_awareness_reliability(tool_name, success=True)
             query = tool_name
@@ -298,7 +363,7 @@ def main():
         except Exception:
             pass
     
-    # ===== PostToolUseFailure: Check for surprise + learn =====
+    # ===== PostToolUseFailure: Check for surprise + learn + EIDOS step completion =====
     if event_type == EventType.POST_TOOL_FAILURE and tool_name:
         error = (
             input_data.get("tool_error") or
@@ -308,6 +373,19 @@ def main():
         )
         check_for_surprise(session_id, tool_name, success=False, error=str(error))
         learn_from_failure(tool_name, error, tool_input)
+
+        # EIDOS: Complete step with failure
+        if EIDOS_AVAILABLE:
+            try:
+                complete_step_after_action(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    success=False,
+                    error=str(error)[:500] if error else ""
+                )
+            except Exception as e:
+                log_debug("observe", "EIDOS post-failure failed", e)
+
         try:
             update_self_awareness_reliability(tool_name, success=False)
             query = tool_name
@@ -369,6 +447,15 @@ def main():
         )
         if recorded and os.environ.get("SPARK_OUTCOME_CHECKIN_PROMPT") == "1":
             sys.stderr.write("[SPARK] Outcome check-in: run `spark outcome`\\n")
+
+    # EIDOS: Complete episode on session end (triggers distillation)
+    if hook_event in ("Stop", "SessionEnd") and EIDOS_AVAILABLE:
+        try:
+            episode = complete_episode(session_id, Outcome.SUCCESS)
+            if episode:
+                log_debug("observe", f"EIDOS episode {episode.episode_id} completed", None)
+        except Exception as e:
+            log_debug("observe", "EIDOS episode completion failed", e)
 
     sys.exit(0)
 

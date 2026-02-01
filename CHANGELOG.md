@@ -4,6 +4,89 @@ All notable changes to Spark Intelligence are documented here.
 
 ---
 
+## [Phase 3.3 Complete] - 2026-02-02
+
+### Theme: Elevated Control Layer - Self-Correcting Intelligence
+
+Built the complete control layer that keeps intelligence elevated and reacts when it falls.
+
+### The Core Principle
+
+> "If progress is unclear, stop acting and change the question."
+
+A rabbit hole is NOT lack of intelligence - it's **loss of progress signal**.
+
+### New Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| **ElevatedControlPlane** | `elevated_control.py` | Main control orchestrator |
+| **WatcherEngine** | `elevated_control.py` | 6 automatic rabbit-hole detectors |
+| **EscapeProtocol** | `elevated_control.py` | Universal recovery routine |
+| **StateMachine** | `elevated_control.py` | Phase transition enforcement |
+| **StepEnvelopeValidator** | `elevated_control.py` | Non-negotiable step contract |
+
+### Invariant Rules (Never Break)
+
+1. **No action without falsifiable hypothesis**
+2. **Two failures = stop modifying reality**
+3. **Progress must be observable**
+4. **Budgets are capped** (25 steps, 12 min, 2 retries)
+5. **Memory must be consulted**
+
+### Watchers Implemented
+
+| Watcher | Trigger | Action |
+|---------|---------|--------|
+| Repeat Failure | Same error 2x | → DIAGNOSE |
+| No New Evidence | 5 steps without | → DIAGNOSE |
+| Diff Thrash | Same file 3x | → SIMPLIFY |
+| Confidence Stagnation | Delta < 0.05 × 3 | → PLAN |
+| Memory Bypass | No citation | BLOCK |
+| Budget Half No Progress | >50%, no progress | → SIMPLIFY |
+
+### Escape Protocol
+
+When watchers trigger twice or budget > 80%:
+
+1. **FREEZE** - No more edits
+2. **SUMMARIZE** - What we know/tried/observed
+3. **ISOLATE** - Smallest failing unit
+4. **FLIP QUESTION** - "What must be true for this to be impossible?"
+5. **GENERATE** - 3 hypotheses max
+6. **PICK** - 1 discriminating test
+7. **ARTIFACT** - Produce learning (rabbit holes pay rent)
+
+### Operating States (Finite State Machine)
+
+```
+EXPLORE → PLAN → EXECUTE → VALIDATE → CONSOLIDATE
+   ↑                     ↓
+   └────── DIAGNOSE ←────┘
+            ↓
+         SIMPLIFY
+            ↓
+         ESCALATE/HALT
+```
+
+### Files Added
+
+- `lib/eidos/elevated_control.py` - Complete control layer
+- `STUCK_STATE_PLAYBOOK.md` - How to handle being stuck
+
+### Files Modified
+
+- `lib/eidos/models.py` - Enhanced Phase enum (9 states), Step envelope, Budget tracking
+- `lib/eidos/integration.py` - Uses elevated control plane
+- `lib/eidos/__init__.py` - Exports new components
+
+### Key Metric: Time to Escape
+
+Track how long it takes to recognize and exit a rabbit hole.
+This number should shrink over time.
+
+---
+
 ## [Phase 3.2 Complete] - 2026-02-02
 
 ### Theme: EIDOS Hook Integration & Documentation

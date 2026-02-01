@@ -81,6 +81,16 @@ from .migration import (
     validate_migration, MigrationStats
 )
 
+# Elevated Control Layer (v1)
+from .elevated_control import (
+    ElevatedControlPlane, get_elevated_control_plane,
+    WatcherEngine, WatcherAlert, WatcherType, WatcherSeverity,
+    EscapeProtocol, EscapeProtocolResult,
+    StateMachine, validate_step_envelope, StepEnvelopeValidation,
+    ControlMetrics, calculate_control_metrics,
+)
+from .models import VALID_TRANSITIONS
+
 __all__ = [
     # Core Models
     "Episode",
@@ -172,4 +182,20 @@ __all__ = [
     "run_full_migration",
     "validate_migration",
     "MigrationStats",
+
+    # Elevated Control Layer (v1)
+    "ElevatedControlPlane",
+    "get_elevated_control_plane",
+    "WatcherEngine",
+    "WatcherAlert",
+    "WatcherType",
+    "WatcherSeverity",
+    "EscapeProtocol",
+    "EscapeProtocolResult",
+    "StateMachine",
+    "validate_step_envelope",
+    "StepEnvelopeValidation",
+    "ControlMetrics",
+    "calculate_control_metrics",
+    "VALID_TRANSITIONS",
 ]
