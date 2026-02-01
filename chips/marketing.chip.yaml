@@ -1,0 +1,102 @@
+# Marketing Chip (runtime)
+
+chip:
+  id: marketing
+  name: Marketing Intelligence
+  version: 0.1.0
+  description: |
+    Learns campaign, funnel, and messaging signals while avoiding manipulation.
+  author: Vibeship
+  license: MIT
+  human_benefit: "Improve marketing clarity and outcomes without harm."
+  harm_avoidance:
+    - "No deceptive or manipulative claims"
+    - "No dark-pattern retention tactics"
+  risk_level: medium
+  safety_tests:
+    - "no_deceptive_claims"
+    - "no_dark_patterns"
+  domains:
+    - marketing
+    - growth
+    - messaging
+
+triggers:
+  patterns:
+    - "campaign"
+    - "funnel"
+    - "landing page"
+    - "headline"
+    - "ad copy"
+    - "positioning"
+    - "ctr"
+    - "cpc"
+    - "cac"
+    - "roas"
+  events:
+    - "campaign_brief"
+    - "ad_copy_created"
+    - "experiment_defined"
+
+observers:
+  - name: campaign_brief
+    description: Tracks campaign positioning and target audience
+    triggers: ["brief", "positioning", "target audience", "value prop"]
+    capture:
+      required:
+        product: "Product or offer"
+        audience: "Target audience"
+      optional:
+        channel: "Primary channel"
+        value_prop: "Value proposition"
+        budget: "Budget range"
+
+  - name: ad_copy
+    description: Tracks ad copy variants and messaging
+    triggers: ["ad copy", "headline", "cta", "variant"]
+    capture:
+      required:
+        channel: "Distribution channel"
+        variant_id: "Variant identifier"
+      optional:
+        headline: "Headline text"
+        cta: "Call to action"
+        claim: "Primary claim"
+
+  - name: funnel_metric
+    description: Tracks funnel metrics and performance
+    triggers: ["ctr", "cpc", "cac", "roas", "conversion rate"]
+    capture:
+      required:
+        metric_name: "Metric name"
+        metric_value: "Metric value"
+      optional:
+        channel: "Channel"
+        time_window: "Time window"
+
+outcomes:
+  positive:
+    - condition: "metric_name == CTR"
+      insight: "CTR reported"
+      weight: 1.0
+    - condition: "metric_name == ROAS"
+      insight: "ROAS reported"
+      weight: 1.0
+  negative:
+    - condition: "metric_value > 200"
+      insight: "CAC too high"
+      weight: 1.0
+
+questions:
+  - id: messaging_guardrails
+    question: "What claims are safe and verifiable for this campaign?"
+    category: safety
+    phase: discovery
+    required: true
+    affects_learning: ["ad_copy", "campaign_brief"]
+  - id: success_metrics
+    question: "Which metrics define success and what thresholds are acceptable?"
+    category: performance
+    phase: discovery
+    required: true
+    affects_learning: ["funnel_metric"]

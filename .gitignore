@@ -61,3 +61,7 @@ nul
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Benchmark artifacts
+benchmarks/out/
+benchmarks/logs/

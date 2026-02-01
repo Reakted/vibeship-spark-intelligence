@@ -1,0 +1,94 @@
+# Business Ops Chip (runtime)
+
+chip:
+  id: biz-ops
+  name: Business Ops Intelligence
+  version: 0.1.0
+  description: |
+    Learns operational and pricing signals with clear ethics and transparency.
+  author: Vibeship
+  license: MIT
+  human_benefit: "Improve operational clarity and sustainable decision-making."
+  harm_avoidance:
+    - "No deceptive pricing tactics"
+    - "No falsified reporting"
+  risk_level: medium
+  safety_tests:
+    - "no_deceptive_pricing"
+    - "no_false_reporting"
+  domains:
+    - business_ops
+    - strategy
+    - pricing
+
+triggers:
+  patterns:
+    - "pricing"
+    - "forecast"
+    - "runway"
+    - "ops brief"
+    - "operational risk"
+    - "budget"
+  events:
+    - "pricing_experiment"
+    - "forecast_created"
+    - "ops_plan"
+
+observers:
+  - name: ops_brief
+    description: Tracks operational brief and risks
+    triggers: ["ops brief", "operational risk", "dependencies"]
+    capture:
+      required:
+        owner: "Owner or team"
+        risk: "Key risk"
+      optional:
+        dependency: "Dependency"
+        mitigation: "Mitigation plan"
+
+  - name: pricing_experiment
+    description: Tracks pricing experiment setup
+    triggers: ["pricing", "experiment", "plan", "variant"]
+    capture:
+      required:
+        variant_id: "Pricing variant"
+        target_segment: "Target segment"
+      optional:
+        price_point: "Price point"
+        duration: "Experiment duration"
+        success_metric: "Success metric"
+
+  - name: forecast
+    description: Tracks forecast assumptions and outputs
+    triggers: ["forecast", "runway", "assumptions", "projection"]
+    capture:
+      required:
+        horizon: "Forecast horizon"
+        assumption: "Key assumption"
+      optional:
+        revenue: "Projected revenue"
+        burn: "Projected burn"
+
+outcomes:
+  positive:
+    - condition: "success_metric == retention"
+      insight: "Pricing experiment uses retention metric"
+      weight: 1.0
+  negative:
+    - condition: "assumption == ''"
+      insight: "Forecast missing assumptions"
+      weight: 1.0
+
+questions:
+  - id: pricing_ethics
+    question: "What pricing behaviors are off-limits for this business?"
+    category: safety
+    phase: discovery
+    required: true
+    affects_learning: ["pricing_experiment"]
+  - id: ops_success
+    question: "Which operational outcomes matter most for this sprint?"
+    category: operations
+    phase: discovery
+    required: true
+    affects_learning: ["ops_brief", "forecast"]

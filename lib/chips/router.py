@@ -1,172 +1,190 @@
 """
-ChipRouter: Routes events to matching chips based on triggers.
+Chip Router - Match events to chip triggers.
 
-Handles:
-- Pattern matching (text content)
-- Event type matching
-- Tool context matching
+This was the third missing piece: when an event comes in,
+which chips should process it?
 """
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+import logging
+from typing import Dict, List, Tuple, Any, Optional
+from dataclasses import dataclass
 
-from .loader import ChipSpec
-from .registry import get_registry
+from .loader import Chip, ChipObserver
+
+log = logging.getLogger("spark.chips")
+
+
+@dataclass
+class TriggerMatch:
+    """A matched trigger with context."""
+    chip: Chip
+    observer: Optional[ChipObserver]
+    trigger: str
+    confidence: float
+    content_snippet: str  # What content matched
 
 
 class ChipRouter:
     """
-    Routes events to chips that should process them.
+    Routes events to appropriate chips based on trigger matching.
 
-    Matching priority:
-    1. Event type triggers (exact match)
-    2. Tool triggers (tool name + context)
-    3. Pattern triggers (regex in content)
+    When we see an Edit to "lobster-royale/src/main.js" containing
+    "health", "damage", "physics", this routes to the game_dev chip.
     """
 
-    def __init__(self):
-        self._registry = get_registry()
-
-    def route(self, event: Dict) -> List[ChipSpec]:
+    def route_event(self, event: Dict[str, Any], chips: List[Chip]) -> List[TriggerMatch]:
         """
-        Find all chips that should process this event.
+        Route an event to matching chips.
 
-        Args:
-            event: The event dict to route
-
-        Returns:
-            List of ChipSpecs that matched
+        Returns all matches sorted by confidence.
         """
-        matched_chips = []
-        active_specs = self._registry.get_active_specs()
+        matches = []
 
-        for spec in active_specs:
-            if self._matches(spec, event):
-                matched_chips.append(spec)
+        # Extract searchable content from event
+        content = self._extract_content(event)
+        if not content:
+            return matches
 
-        return matched_chips
+        content_lower = content.lower()
 
-    def _matches(self, spec: ChipSpec, event: Dict) -> bool:
-        """Check if a chip's triggers match the event."""
-        triggers = spec.triggers
+        for chip in chips:
+            chip_matches = self._match_chip(chip, content_lower, content)
+            matches.extend(chip_matches)
 
-        # 1. Check event type triggers
-        event_type = event.get("type") or event.get("hook_event") or event.get("kind", "")
-        if event_type and event_type in triggers.events:
-            return True
+        # Sort by confidence
+        matches.sort(key=lambda m: m.confidence, reverse=True)
+        return matches
 
-        # 2. Check tool triggers
-        tool_name = event.get("tool_name") or event.get("tool", "")
-        if tool_name:
-            for tool_trigger in triggers.tools:
-                if tool_trigger.get("name", "").lower() == tool_name.lower():
-                    # Check context_contains if specified
-                    context_patterns = tool_trigger.get("context_contains", [])
-                    if not context_patterns or context_patterns == ["*"]:
-                        return True
-                    # Check if any context pattern matches
-                    event_content = self._get_event_content(event)
-                    for pattern in context_patterns:
-                        if pattern.lower() in event_content.lower():
-                            return True
+    def _extract_content(self, event: Dict[str, Any]) -> str:
+        """
+        Extract searchable content from an event.
 
-        # 3. Check pattern triggers
-        content = self._get_event_content(event)
-        if content and triggers.matches(content):
-            return True
-
-        return False
-
-    def _get_event_content(self, event: Dict) -> str:
-        """Extract searchable content from event."""
+        Combines: tool name, file path, input, output snippet
+        """
         parts = []
 
-        # Common content fields
-        for key in ("content", "text", "message", "prompt", "user_prompt", "description"):
-            if key in event:
-                parts.append(str(event[key]))
+        # Tool name
+        tool = event.get('tool_name') or event.get('tool')
+        if tool:
+            parts.append(str(tool))
 
-        # Payload content
-        payload = event.get("payload", {})
-        if isinstance(payload, dict):
-            for key in ("text", "content", "message", "prompt"):
-                if key in payload:
-                    parts.append(str(payload[key]))
-        elif isinstance(payload, str):
-            parts.append(payload)
+        # File path (very important for domain detection)
+        file_path = event.get('file_path')
+        if not file_path:
+            inp = event.get('input') or event.get('tool_input') or {}
+            if isinstance(inp, dict):
+                file_path = inp.get('file_path') or inp.get('path')
+        if file_path:
+            parts.append(str(file_path))
 
-        # Tool input/output
-        for key in ("tool_input", "tool_output", "result"):
-            if key in event:
-                val = event[key]
-                if isinstance(val, str):
-                    parts.append(val)
-                elif isinstance(val, dict):
-                    parts.append(str(val))
+        # Input content
+        inp = event.get('input') or event.get('tool_input')
+        if inp:
+            if isinstance(inp, dict):
+                for v in inp.values():
+                    if v and isinstance(v, str) and len(v) < 5000:
+                        parts.append(v)
+            elif isinstance(inp, str):
+                parts.append(inp[:2000])
 
-        return " ".join(parts)
+        # Output/result (limited)
+        output = event.get('output') or event.get('result')
+        if output and isinstance(output, str):
+            parts.append(output[:1000])
 
-    def get_matching_chips_with_scores(self, event: Dict) -> List[Tuple[ChipSpec, float]]:
+        # CWD (project context)
+        cwd = event.get('cwd') or event.get('data', {}).get('cwd')
+        if cwd:
+            parts.append(str(cwd))
+
+        return ' '.join(parts)
+
+    def _match_chip(self, chip: Chip, content_lower: str, content_raw: str) -> List[TriggerMatch]:
+        """Match content against a chip's triggers."""
+        matches = []
+        seen_triggers = set()
+
+        # Match chip-level triggers
+        for trigger in chip.triggers:
+            if trigger in seen_triggers:
+                continue
+
+            match_result = self._match_trigger(trigger, content_lower)
+            if match_result:
+                seen_triggers.add(trigger)
+                confidence, snippet = match_result
+                matches.append(TriggerMatch(
+                    chip=chip,
+                    observer=None,
+                    trigger=trigger,
+                    confidence=confidence,
+                    content_snippet=snippet
+                ))
+
+        # Match observer-level triggers (higher confidence if observer-specific)
+        for observer in chip.observers:
+            for trigger in observer.triggers:
+                if trigger in seen_triggers:
+                    continue
+
+                match_result = self._match_trigger(trigger, content_lower)
+                if match_result:
+                    seen_triggers.add(trigger)
+                    confidence, snippet = match_result
+                    # Boost confidence slightly for observer matches
+                    matches.append(TriggerMatch(
+                        chip=chip,
+                        observer=observer,
+                        trigger=trigger,
+                        confidence=min(1.0, confidence + 0.1),
+                        content_snippet=snippet
+                    ))
+
+        return matches
+
+    def _match_trigger(self, trigger: str, content: str) -> Optional[Tuple[float, str]]:
         """
-        Find matching chips with confidence scores.
+        Match a trigger against content.
 
-        Returns list of (ChipSpec, score) tuples, sorted by score.
+        Returns (confidence, snippet) or None.
         """
-        results = []
-        active_specs = self._registry.get_active_specs()
+        trigger_lower = trigger.lower()
 
-        for spec in active_specs:
-            score = self._match_score(spec, event)
-            if score > 0:
-                results.append((spec, score))
+        # Exact word boundary match (highest confidence)
+        pattern = r'\b' + re.escape(trigger_lower) + r'\b'
+        match = re.search(pattern, content)
+        if match:
+            start = max(0, match.start() - 20)
+            end = min(len(content), match.end() + 20)
+            snippet = content[start:end]
+            return (0.95, snippet)
 
-        # Sort by score descending
-        results.sort(key=lambda x: x[1], reverse=True)
-        return results
+        # Substring match (medium confidence)
+        if trigger_lower in content:
+            idx = content.find(trigger_lower)
+            start = max(0, idx - 20)
+            end = min(len(content), idx + len(trigger_lower) + 20)
+            snippet = content[start:end]
+            return (0.7, snippet)
 
-    def _match_score(self, spec: ChipSpec, event: Dict) -> float:
-        """Calculate match score for a chip/event pair."""
-        score = 0.0
-        triggers = spec.triggers
+        return None
 
-        # Event type match = 1.0
-        event_type = event.get("type") or event.get("hook_event") or event.get("kind", "")
-        if event_type and event_type in triggers.events:
-            score += 1.0
+    def get_best_match(self, event: Dict[str, Any], chips: List[Chip]) -> Optional[TriggerMatch]:
+        """Get the single best matching chip for an event."""
+        matches = self.route_event(event, chips)
+        return matches[0] if matches else None
 
-        # Tool match with context = 0.8
-        tool_name = event.get("tool_name") or event.get("tool", "")
-        if tool_name:
-            for tool_trigger in triggers.tools:
-                if tool_trigger.get("name", "").lower() == tool_name.lower():
-                    score += 0.8
-                    break
+    def get_matching_observers(self, event: Dict[str, Any], chips: List[Chip]) -> List[Tuple[Chip, ChipObserver, float]]:
+        """Get all matching observers for an event (deduplicated)."""
+        matches = self.route_event(event, chips)
 
-        # Pattern match = 0.5 per match (max 1.0)
-        content = self._get_event_content(event)
-        if content:
-            pattern_matches = 0
-            for pattern in triggers.patterns:
-                if pattern.lower() in content.lower():
-                    pattern_matches += 1
-            score += min(1.0, pattern_matches * 0.5)
+        # Group by observer, keep highest confidence per observer
+        observer_matches = {}
+        for match in matches:
+            if match.observer:
+                key = (match.chip.id, match.observer.name)
+                if key not in observer_matches or match.confidence > observer_matches[key][2]:
+                    observer_matches[key] = (match.chip, match.observer, match.confidence)
 
-        # Domain match = 0.3 per match
-        for domain in spec.domains:
-            if domain.lower() in content.lower():
-                score += 0.3
-                break
-
-        return score
-
-
-# Singleton instance
-_router: Optional[ChipRouter] = None
-
-
-def get_router() -> ChipRouter:
-    """Get the global chip router instance."""
-    global _router
-    if _router is None:
-        _router = ChipRouter()
-    return _router
+        return list(observer_matches.values())

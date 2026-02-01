@@ -19,6 +19,59 @@ These documents define the evolution from primitive telemetry to superintelligen
 
 ---
 
+## Spark Learning Guide (CRITICAL)
+
+**Full Documentation:** [SPARK_LEARNING_GUIDE.md](./SPARK_LEARNING_GUIDE.md)
+
+### The Core Distinction
+
+| Primitive (Operational) | Valuable (Cognitive) |
+|------------------------|---------------------|
+| "Bash → Edit sequence" | "Health=300 for better game balance" |
+| "Tool timeout rate: 41%" | "User prefers iterative small fixes" |
+| "File modified: main.js" | "baseY offset fixes ground collision" |
+| "Read before Edit pattern" | "Purple carpet = kid-friendly theme" |
+
+**The Test:** Would a human find this useful to know next time?
+
+### Project Onboarding Questions
+
+**Always ask at project start:**
+
+1. **Domain**: "What domain is this?" → Activates relevant chips
+2. **Success**: "What does success look like?" → Anchors learning to outcomes
+3. **Focus**: "What should I pay attention to?" → Weights observations
+4. **Avoid**: "What mistakes should I help avoid?" → Creates guardrails
+
+**Ask when relevant:**
+
+5. **Prior Art**: "Similar to anything you've built before?"
+6. **Constraints**: "What constraints am I working within?"
+7. **Tech Preferences**: "Any technology preferences?"
+
+### Memory Consolidation Tiers
+
+```
+Immediate (Session) → Working (Project) → Long-Term (Permanent)
+     ↓                      ↓                    ↓
+  High detail          Patterns &           Cross-project
+  Expires fast         principles           wisdom
+```
+
+**Promotion Rules:**
+- Immediate→Working: Referenced 2+ times, tied to outcome, or explicit "remember this"
+- Working→Long-term: Consistent across 3+ projects, validated by outcomes
+
+### Chip Integration
+
+When domain detected, chips should:
+1. Auto-activate based on triggers
+2. Capture domain-specific insights
+3. Suggest relevant questions
+4. Store structured knowledge
+
+---
+
 ## Spark Learnings
 
 *Auto-promoted insights from Spark*

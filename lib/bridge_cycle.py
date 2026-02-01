@@ -15,6 +15,7 @@ from lib.pattern_detection import process_pattern_events
 from lib.validation_loop import process_validation_events
 from lib.prediction_loop import process_prediction_cycle
 from lib.content_learner import learn_from_edit_event
+from lib.chips import process_chip_events
 from lib.diagnostics import log_debug
 
 
@@ -37,6 +38,7 @@ def run_bridge_cycle(
         "validation": {},
         "prediction": {},
         "content_learned": 0,
+        "chips": {},
         "errors": [],
     }
 
@@ -123,6 +125,30 @@ def run_bridge_cycle(
         stats["errors"].append("content_learning")
         log_debug("bridge_worker", "content learning failed", e)
 
+    # Chip processing - domain-specific insights
+    try:
+        # Convert events to dict format for chip processing
+        chip_events = []
+        for ev in events:
+            chip_events.append({
+                "event_type": ev.event_type.value if hasattr(ev.event_type, 'value') else str(ev.event_type),
+                "tool_name": ev.tool_name,
+                "tool_input": ev.tool_input or {},
+                "data": ev.data or {},
+                "cwd": (ev.data or {}).get("cwd"),
+            })
+        # Extract project path from events if available
+        project_path = None
+        for ev in events:
+            cwd = (ev.data or {}).get("cwd")
+            if cwd:
+                project_path = str(cwd)
+                break
+        stats["chips"] = process_chip_events(chip_events, project_path)
+    except Exception as e:
+        stats["errors"].append("chips")
+        log_debug("bridge_worker", "chip processing failed", e)
+
     return stats
 
 
@@ -138,6 +164,7 @@ def write_bridge_heartbeat(stats: Dict[str, Any]) -> bool:
                 "content_learned": int(stats.get("content_learned") or 0),
                 "memory": stats.get("memory") or {},
                 "validation": stats.get("validation") or {},
+                "chips": stats.get("chips") or {},
                 "errors": stats.get("errors") or [],
             },
         }

@@ -1,35 +1,29 @@
 """
 Spark Chips Runtime - Domain-Specific Intelligence
 
-Chips teach Spark how to learn about specific domains:
-- Marketing, Sales, Engineering, Operations, etc.
-- Each chip defines: triggers, observers, learners, outcomes
-- Chips are YAML specs that run without changing core code
+The missing piece: turns chip YAML specs into actual learning.
 
-Components:
-- loader.py: YAML parsing + schema validation
-- registry.py: Installed/active chip tracking
-- router.py: Event-to-chip trigger matching
-- runner.py: Observer execution and field extraction
-- store.py: Per-chip insight storage
+What didn't work before:
+- Chips were just YAML files sitting in a folder
+- No runtime to load, match triggers, or capture insights
+- Generic pattern detection only captured tool sequences
+- Domain knowledge (game dev, marketing, etc.) was never extracted
+
+What this fixes:
+- Loader: Parses chip YAML files into usable objects
+- Registry: Tracks which chips are active per project
+- Router: Matches events to chip triggers
+- Runtime: Executes observers and stores domain insights
 """
 
-from .loader import ChipLoader, ChipSpec, QuestionSpec, load_chip
-from .registry import ChipRegistry, get_registry
-from .router import ChipRouter, get_router
-from .runner import ChipRunner
-from .store import ChipStore, get_chip_store
+from .loader import ChipLoader, Chip, ChipObserver
+from .registry import ChipRegistry
+from .router import ChipRouter, TriggerMatch
+from .runtime import ChipRuntime, process_chip_events
 
 __all__ = [
-    "ChipLoader",
-    "ChipSpec",
-    "QuestionSpec",
-    "load_chip",
-    "ChipRegistry",
-    "get_registry",
-    "ChipRouter",
-    "get_router",
-    "ChipRunner",
-    "ChipStore",
-    "get_chip_store",
+    'ChipLoader', 'Chip', 'ChipObserver',
+    'ChipRegistry',
+    'ChipRouter', 'TriggerMatch',
+    'ChipRuntime', 'process_chip_events'
 ]

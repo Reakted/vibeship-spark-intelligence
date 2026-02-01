@@ -1,0 +1,326 @@
+"""
+Chip Runtime - Execute observers and store domain insights.
+
+This is the final missing piece: actually DOING something with
+the matched triggers and observers.
+
+What this captures that was missing before:
+- "GLB models need bounding box calculation for ground collision"
+- "Health values tripled from 100 to 300 for better balance"
+- "Kid's room environment with purple carpet and kiddie pools"
+
+Instead of just: "Edit tool used", "Bash -> Edit sequence"
+"""
+
+import json
+import logging
+import time
+import re
+from pathlib import Path
+from typing import Dict, List, Any, Optional
+from datetime import datetime
+from dataclasses import dataclass, asdict
+
+from .loader import Chip, ChipObserver, ChipLoader
+from .registry import ChipRegistry
+from .router import ChipRouter, TriggerMatch
+
+log = logging.getLogger("spark.chips")
+
+# Storage for chip insights
+CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
+
+
+@dataclass
+class ChipInsight:
+    """A domain-specific insight captured by a chip."""
+    chip_id: str
+    observer_name: str
+    trigger: str
+    content: str  # The actual insight
+    captured_data: Dict[str, Any]
+    confidence: float
+    timestamp: str
+    event_summary: str
+
+
+class ChipRuntime:
+    """
+    The runtime that ties everything together:
+    1. Load chips
+    2. Match events to triggers
+    3. Execute observers
+    4. Store domain insights
+    """
+
+    def __init__(self):
+        self.registry = ChipRegistry()
+        self.router = ChipRouter()
+        self._ensure_storage()
+
+    def _ensure_storage(self):
+        """Ensure chip insights directory exists."""
+        CHIP_INSIGHTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    def process_event(self, event: Dict[str, Any], project_path: str = None) -> List[ChipInsight]:
+        """
+        Process an event through all active chips.
+
+        This is the main entry point for the chip system.
+        """
+        insights = []
+
+        # Get active chips (auto-activates based on content)
+        content = self._extract_event_content(event)
+        if content:
+            self.registry.auto_activate_for_content(content, project_path)
+
+        active_chips = self.registry.get_active_chips(project_path)
+        if not active_chips:
+            return insights
+
+        # Route event to matching chips/observers
+        matches = self.router.route_event(event, active_chips)
+        if not matches:
+            return insights
+
+        # Execute observers for matches
+        for match in matches:
+            insight = self._execute_observer(match, event)
+            if insight:
+                insights.append(insight)
+                self._store_insight(insight)
+                log.info(f"Captured insight from {match.chip.id}/{match.observer.name if match.observer else 'chip'}: {insight.content[:100]}")
+
+        return insights
+
+    def _extract_event_content(self, event: Dict[str, Any]) -> str:
+        """Extract content from event for trigger matching."""
+        parts = []
+
+        for key in ['tool_name', 'tool', 'file_path', 'cwd']:
+            if key in event and event[key]:
+                parts.append(str(event[key]))
+
+        inp = event.get('input') or event.get('tool_input') or {}
+        if isinstance(inp, dict):
+            for v in inp.values():
+                if v and isinstance(v, str):
+                    parts.append(v[:2000])
+        elif isinstance(inp, str):
+            parts.append(inp[:2000])
+
+        output = event.get('output') or event.get('result') or ''
+        if isinstance(output, str):
+            parts.append(output[:1000])
+
+        return ' '.join(parts)
+
+    def _execute_observer(self, match: TriggerMatch, event: Dict[str, Any]) -> Optional[ChipInsight]:
+        """
+        Execute an observer and capture domain-specific data.
+
+        This extracts MEANING, not just metadata.
+        """
+        try:
+            # Build context from event
+            captured = self._capture_data(match, event)
+
+            # Generate insight content
+            content = self._generate_insight_content(match, captured, event)
+            if not content:
+                return None
+
+            return ChipInsight(
+                chip_id=match.chip.id,
+                observer_name=match.observer.name if match.observer else "chip_level",
+                trigger=match.trigger,
+                content=content,
+                captured_data=captured,
+                confidence=match.confidence,
+                timestamp=datetime.now().isoformat(),
+                event_summary=self._summarize_event(event)
+            )
+        except Exception as e:
+            log.warning(f"Failed to execute observer: {e}")
+            return None
+
+    def _capture_data(self, match: TriggerMatch, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Capture relevant data based on observer definition."""
+        captured = {
+            'trigger': match.trigger,
+            'chip': match.chip.id,
+        }
+
+        # Add file path context
+        file_path = event.get('file_path')
+        if not file_path:
+            inp = event.get('input') or event.get('tool_input') or {}
+            if isinstance(inp, dict):
+                file_path = inp.get('file_path') or inp.get('path')
+        if file_path:
+            captured['file_path'] = str(file_path)
+
+        # Add tool context
+        tool = event.get('tool_name') or event.get('tool')
+        if tool:
+            captured['tool'] = tool
+
+        # Add CWD (project context)
+        cwd = event.get('cwd') or event.get('data', {}).get('cwd')
+        if cwd:
+            captured['project'] = str(cwd)
+
+        # Try to extract meaningful changes from Edit/Write
+        inp = event.get('input') or event.get('tool_input') or {}
+        if isinstance(inp, dict):
+            if 'old_string' in inp and 'new_string' in inp:
+                captured['change_type'] = 'edit'
+                captured['change_summary'] = self._summarize_change(
+                    inp.get('old_string', ''),
+                    inp.get('new_string', '')
+                )
+            elif 'content' in inp:
+                captured['change_type'] = 'write'
+                captured['content_summary'] = self._summarize_content(inp['content'])
+
+        return captured
+
+    def _summarize_change(self, old: str, new: str) -> str:
+        """Summarize what changed between old and new."""
+        old_lines = len(old.split('\n'))
+        new_lines = len(new.split('\n'))
+
+        # Look for key patterns
+        patterns = []
+
+        # Numbers that changed (like health values)
+        old_nums = set(re.findall(r'\b\d+\b', old))
+        new_nums = set(re.findall(r'\b\d+\b', new))
+        changed_nums = new_nums - old_nums
+        if changed_nums:
+            patterns.append(f"numbers: {list(changed_nums)[:5]}")
+
+        # Key terms that appeared
+        keywords = ['health', 'damage', 'speed', 'position', 'collision', 'animation',
+                    'physics', 'balance', 'baseY', 'bounding', 'scale']
+        for kw in keywords:
+            if kw.lower() in new.lower() and kw.lower() not in old.lower():
+                patterns.append(f"added: {kw}")
+
+        if patterns:
+            return f"{old_lines}->{new_lines} lines, " + ", ".join(patterns[:3])
+        return f"{old_lines}->{new_lines} lines"
+
+    def _summarize_content(self, content: str) -> str:
+        """Summarize content for new file writes."""
+        lines = content.split('\n')
+        return f"{len(lines)} lines"
+
+    def _generate_insight_content(self, match: TriggerMatch, captured: Dict, event: Dict) -> str:
+        """Generate human-readable insight content."""
+        parts = []
+
+        # Domain context
+        parts.append(f"[{match.chip.name}]")
+
+        # Observer context if available
+        if match.observer:
+            parts.append(f"({match.observer.name})")
+
+        # What triggered
+        parts.append(f"Triggered by '{match.trigger}'")
+
+        # File context
+        if 'file_path' in captured:
+            parts.append(f"in {Path(captured['file_path']).name}")
+
+        # Change context
+        if 'change_summary' in captured:
+            parts.append(f"- {captured['change_summary']}")
+
+        return " ".join(parts)
+
+    def _summarize_event(self, event: Dict[str, Any]) -> str:
+        """Create a short summary of the event."""
+        tool = event.get('tool_name') or event.get('tool') or 'unknown'
+        file_path = event.get('file_path')
+        if not file_path:
+            inp = event.get('input') or event.get('tool_input') or {}
+            if isinstance(inp, dict):
+                file_path = inp.get('file_path') or inp.get('path')
+
+        if file_path:
+            return f"{tool} on {Path(file_path).name}"
+        return tool
+
+    def _store_insight(self, insight: ChipInsight):
+        """Store an insight to disk."""
+        try:
+            chip_file = CHIP_INSIGHTS_DIR / f"{insight.chip_id}.jsonl"
+            with open(chip_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(asdict(insight)) + '\n')
+        except Exception as e:
+            log.error(f"Failed to store insight: {e}")
+
+    def get_insights(self, chip_id: str = None, limit: int = 50) -> List[ChipInsight]:
+        """Get recent insights, optionally filtered by chip."""
+        insights = []
+
+        if chip_id:
+            files = [CHIP_INSIGHTS_DIR / f"{chip_id}.jsonl"]
+        else:
+            files = list(CHIP_INSIGHTS_DIR.glob("*.jsonl"))
+
+        for file_path in files:
+            if not file_path.exists():
+                continue
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            data = json.loads(line)
+                            insights.append(ChipInsight(**data))
+            except Exception as e:
+                log.warning(f"Failed to read {file_path}: {e}")
+
+        # Sort by timestamp descending
+        insights.sort(key=lambda i: i.timestamp, reverse=True)
+        return insights[:limit]
+
+
+# Singleton runtime
+_runtime: Optional[ChipRuntime] = None
+
+
+def get_runtime() -> ChipRuntime:
+    """Get the singleton chip runtime."""
+    global _runtime
+    if _runtime is None:
+        _runtime = ChipRuntime()
+    return _runtime
+
+
+def process_chip_events(events: List[Dict[str, Any]], project_path: str = None) -> Dict[str, Any]:
+    """
+    Process events through the chip system.
+
+    This is the function to call from bridge_cycle.py.
+    """
+    runtime = get_runtime()
+    stats = {
+        'events_processed': 0,
+        'insights_captured': 0,
+        'chips_activated': [],
+    }
+
+    for event in events:
+        insights = runtime.process_event(event, project_path)
+        stats['events_processed'] += 1
+        stats['insights_captured'] += len(insights)
+
+    # Track which chips are active
+    active = runtime.registry.get_active_chips(project_path)
+    stats['chips_activated'] = [c.id for c in active]
+
+    return stats

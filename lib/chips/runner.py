@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .loader import ChipSpec, ObserverSpec
+from .policy import SafetyPolicy
 from .store import get_chip_store
 
 
@@ -44,6 +45,7 @@ class ChipRunner:
     def __init__(self, spec: ChipSpec):
         self.spec = spec
         self.store = get_chip_store(spec.id)
+        self.policy = SafetyPolicy.from_chip_spec(spec.raw_yaml)
 
     def process_event(self, event: Dict) -> List[Dict]:
         """
@@ -180,11 +182,16 @@ class ChipRunner:
         # Build insight
         field_summary = ", ".join(f"{k}={v}" for k, v in list(captured.fields.items())[:5])
 
+        insight_text = f"{observer.description}: {field_summary}"
+        decision = self.policy.check_text(insight_text)
+        if not decision.allowed:
+            return None
+
         return {
             "chip_id": self.spec.id,
             "chip_name": self.spec.name,
             "observer": observer.name,
-            "insight": f"{observer.description}: {field_summary}",
+            "insight": insight_text,
             "confidence": captured.confidence,
             "context": f"Captured by {self.spec.name} chip",
             "timestamp": captured.timestamp,
@@ -237,6 +244,14 @@ class ChipRunner:
         """
         if not condition:
             return False
+
+        condition = condition.strip()
+        if " and " in condition:
+            parts = [p.strip() for p in condition.split(" and ") if p.strip()]
+            return all(self._evaluate_condition(part, data) for part in parts)
+        if " or " in condition:
+            parts = [p.strip() for p in condition.split(" or ") if p.strip()]
+            return any(self._evaluate_condition(part, data) for part in parts)
 
         # Simple pattern: field op value
         match = re.match(r"(\w+)\s*(>|<|>=|<=|==|!=)\s*(.+)", condition)
