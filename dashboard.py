@@ -32,8 +32,51 @@ from lib.dashboard_project import get_active_project, get_project_memory_preview
 from lib.taste_api import add_from_dashboard
 from lib.diagnostics import setup_component_logging
 
+# EIDOS integration
+try:
+    from lib.eidos import (
+        get_store, get_elevated_control_plane,
+        get_truth_ledger, get_policy_patch_engine,
+        get_minimal_mode_controller
+    )
+    HAS_EIDOS = True
+except ImportError:
+    HAS_EIDOS = False
+
 PORT = 8585
 SPARK_DIR = Path.home() / ".spark"
+
+
+def get_eidos_status():
+    """Get EIDOS system status for dashboard footer."""
+    if not HAS_EIDOS:
+        return {"available": False, "reason": "not installed"}
+
+    try:
+        store = get_store()
+        ecp = get_elevated_control_plane()
+        ledger = get_truth_ledger()
+        patches = get_policy_patch_engine()
+        minimal = get_minimal_mode_controller()
+
+        stats = store.get_stats()
+        mm_stats = minimal.get_stats()
+        patch_stats = patches.get_stats()
+        tl_stats = ledger.get_stats()
+
+        return {
+            "available": True,
+            "episodes": stats["episodes"],
+            "steps": stats["steps"],
+            "success_rate": stats["success_rate"],
+            "alerts": len(ecp.watcher_engine.alert_history),
+            "minimal_mode": mm_stats["currently_active"],
+            "active_patches": patch_stats["enabled"],
+            "truths": tl_stats["total"],
+            "facts": tl_stats["facts"],
+        }
+    except Exception as e:
+        return {"available": False, "reason": str(e)}
 SKILLS_INDEX_FILE = SPARK_DIR / "skills_index.json"
 SKILLS_EFFECTIVENESS_FILE = SPARK_DIR / "skills_effectiveness.json"
 ORCH_DIR = SPARK_DIR / "orchestration"
@@ -182,6 +225,14 @@ def get_dashboard_data():
         "taste": {
             "stats": __import__("lib.tastebank", fromlist=["stats"]).stats(),
             "recent": __import__("lib.tastebank", fromlist=["recent"]).recent(limit=5),
+        },
+        "eidos": get_eidos_status(),
+        "systems": {
+            "mind": {"ok": mind_stats["mind_available"], "label": "Mind API"},
+            "cognitive": {"ok": cognitive_stats["total_insights"] > 0, "label": "Cognitive Learner"},
+            "eidos": {"ok": HAS_EIDOS and get_eidos_status().get("available", False), "label": "EIDOS Control"},
+            "queue": {"ok": True, "label": "Event Queue"},
+            "voice": {"ok": voice_stats["age_days"] >= 0, "label": "Spark Voice"},
         }
     }
 
@@ -193,6 +244,43 @@ def _load_json(path: Path) -> Dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+
+
+def generate_system_badges(data: Dict) -> str:
+    """Generate HTML for system status badges in footer."""
+    badges = []
+    systems = data.get("systems", {})
+    eidos = data.get("eidos", {})
+
+    # Core systems
+    for key, info in systems.items():
+        status_class = "ok" if info.get("ok") else "error"
+        label = info.get("label", key)
+        badges.append(
+            f'<span class="system-badge {status_class}">'
+            f'<span class="system-dot"></span>{label}</span>'
+        )
+
+    # EIDOS details if available
+    if eidos.get("available"):
+        sr = eidos.get("success_rate", 0)
+        sr_class = "ok" if sr >= 0.5 else "error"
+        badges.append(
+            f'<span class="system-badge {sr_class}">'
+            f'<span class="system-dot"></span>EIDOS {sr:.0%}</span>'
+        )
+        if eidos.get("minimal_mode"):
+            badges.append(
+                '<span class="system-badge error">'
+                '<span class="system-dot"></span>MINIMAL MODE</span>'
+            )
+        if eidos.get("alerts", 0) > 0:
+            badges.append(
+                f'<span class="system-badge error">'
+                f'<span class="system-dot"></span>{eidos["alerts"]} Alerts</span>'
+            )
+
+    return " ".join(badges)
 
 
 def _read_jsonl(path: Path, limit: 'Optional[int]' = None) -> list:
@@ -540,7 +628,7 @@ def generate_html():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- live updates via JS (no full-page refresh) -->
-    <title>Spark — Vibeship</title>
+    <title>Spark Lab — Vibeship</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -1029,12 +1117,51 @@ def generate_html():
             border-top: 1px solid var(--border);
             margin-top: 2rem;
         }}
-        
+
+        .footer-systems {{
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.75rem;
+        }}
+
+        .system-badge {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.65rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 3px;
+            background: var(--bg-tertiary);
+        }}
+
+        .system-badge.ok {{
+            color: var(--green-dim);
+            border: 1px solid rgba(0, 196, 154, 0.3);
+        }}
+
+        .system-badge.error {{
+            color: var(--red);
+            border: 1px solid rgba(255, 82, 82, 0.3);
+        }}
+
+        .system-dot {{
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }}
+
+        .system-badge.ok .system-dot {{
+            animation: pulse 2s infinite;
+        }}
+
         .footer-text {{
             font-size: 0.7rem;
             color: var(--text-tertiary);
         }}
-        
+
         .footer-text span {{
             color: var(--green-dim);
         }}
@@ -1346,7 +1473,7 @@ def generate_html():
         <div class="navbar-logo">
             <img src="/logo.png" alt="vibeship" class="navbar-icon" />
             <span class="navbar-text">vibeship</span>
-            <span class="navbar-product">spark</span>
+            <span class="navbar-product">spark lab</span>
         </div>
         <div class="navbar-links">
             <a class="nav-link active" href="/">Overview</a>
@@ -1356,8 +1483,8 @@ def generate_html():
     
     <main>
         <div class="hero">
-            <h1>Self-Evolving <span>Intelligence</span></h1>
-            <p class="hero-sub">Learn. Remember. Improve.</p>
+            <h1>Spark <span>Lab</span></h1>
+            <p class="hero-sub">Data. Diagnostics. Deep Dive.</p>
         </div>
         
         <div class="stats-grid">
@@ -1516,7 +1643,10 @@ def generate_html():
     </main>
     
     <div class="footer">
-        <p class="footer-text">Updated <span id="updated-at">{data["timestamp"]}</span> · Live · Project: <span id="active-project">{data.get("project", {}).get("active") or "—"}</span> · <span>vibeship</span> ecosystem</p>
+        <div class="footer-systems" id="footer-systems">
+            {generate_system_badges(data)}
+        </div>
+        <p class="footer-text">Updated <span id="updated-at">{data["timestamp"]}</span> · Project: <span id="active-project">{data.get("project", {}).get("active") or "—"}</span> · <span>vibeship</span> ecosystem</p>
     </div>
 
     <script>
@@ -1613,6 +1743,29 @@ def generate_html():
         // Update surprises with pagination
         surprisesData = data.surprises?.recent || [];
         renderSurprisesPage();
+
+        // Update footer systems status
+        const footerSys = $('footer-systems');
+        if (footerSys && data.systems) {{
+          let badges = '';
+          for (const [key, info] of Object.entries(data.systems)) {{
+            const cls = info.ok ? 'ok' : 'error';
+            badges += `<span class="system-badge ${{cls}}"><span class="system-dot"></span>${{esc(info.label || key)}}</span> `;
+          }}
+          // EIDOS details
+          if (data.eidos?.available) {{
+            const sr = data.eidos.success_rate || 0;
+            const srCls = sr >= 0.5 ? 'ok' : 'error';
+            badges += `<span class="system-badge ${{srCls}}"><span class="system-dot"></span>EIDOS ${{Math.round(sr * 100)}}%</span> `;
+            if (data.eidos.minimal_mode) {{
+              badges += `<span class="system-badge error"><span class="system-dot"></span>MINIMAL MODE</span> `;
+            }}
+            if (data.eidos.alerts > 0) {{
+              badges += `<span class="system-badge error"><span class="system-dot"></span>${{data.eidos.alerts}} Alerts</span> `;
+            }}
+          }}
+          footerSys.innerHTML = badges;
+        }}
       }}
 
       async function tick() {{
@@ -2316,7 +2469,7 @@ def generate_ops_html():
         <div class="navbar-logo">
             <img src="/logo.png" alt="vibeship" class="navbar-icon" />
             <span class="navbar-text">vibeship</span>
-            <span class="navbar-product">spark</span>
+            <span class="navbar-product">spark lab</span>
         </div>
         <div class="navbar-links">
             <a class="nav-link" href="/">Overview</a>
@@ -2327,7 +2480,7 @@ def generate_ops_html():
     <main>
         <div class="hero">
             <h1>Orchestration <span>& Skills</span></h1>
-            <p class="hero-sub">Utility-first signals for team coordination and skill health.</p>
+            <p class="hero-sub">Skills effectiveness. Agent coordination. Operational signals.</p>
         </div>
 
         <div class="stats-grid">
