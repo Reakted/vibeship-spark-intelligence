@@ -229,6 +229,139 @@ USER_UNDERSTANDING_HALF_LIFE = 90 # lib/cognitive_learner.py
 
 ---
 
+---
+
+## 11. Advisor (Action Guidance)
+
+**File:** `lib/advisor.py`
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `MIN_RELIABILITY_FOR_ADVICE` | **0.6** | Minimum reliability to include advice |
+| `MIN_VALIDATIONS_FOR_STRONG_ADVICE` | **2** | Validations for strong advice |
+| `MAX_ADVICE_ITEMS` | **5** | Maximum advice items per query |
+| `ADVICE_CACHE_TTL_SECONDS` | **300** | Cache TTL (5 minutes) |
+
+**Tuning guidance:**
+- Lower `MIN_RELIABILITY_FOR_ADVICE` → more advice, lower quality
+- Higher `MAX_ADVICE_ITEMS` → more context but slower
+
+---
+
+## 12. Memory Capture
+
+**File:** `lib/memory_capture.py`
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `AUTO_SAVE_THRESHOLD` | **0.82** | Score to auto-save (no confirmation) |
+| `SUGGEST_THRESHOLD` | **0.55** | Score to suggest saving |
+| `MAX_CAPTURE_CHARS` | **2000** | Maximum characters to capture |
+
+### Hard Triggers (Score 0.85-1.0)
+
+| Trigger | Score |
+|---------|-------|
+| "remember this" | 1.0 |
+| "don't forget" | 0.95 |
+| "lock this in" | 0.95 |
+| "non-negotiable" | 0.95 |
+| "hard rule" | 0.95 |
+| "from now on" | 0.85 |
+
+**Tuning guidance:**
+- Lower `AUTO_SAVE_THRESHOLD` → more auto-saves, risk noise
+- Lower `SUGGEST_THRESHOLD` → more suggestions to review
+
+---
+
+## 13. Event Queue
+
+**File:** `lib/queue.py`
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `MAX_EVENTS` | **10000** | Max events before rotation |
+| `TAIL_CHUNK_BYTES` | **64KB** | Read chunk size for tail |
+
+**Tuning guidance:**
+- Lower `MAX_EVENTS` → more frequent rotation, less history
+- Higher `MAX_EVENTS` → more history, larger files
+
+---
+
+## 14. Promoter (Insight → CLAUDE.md)
+
+**File:** `lib/promoter.py`
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `DEFAULT_PROMOTION_THRESHOLD` | **0.7** | Minimum reliability to promote |
+| `DEFAULT_MIN_VALIDATIONS` | **3** | Minimum validations to promote |
+
+**Safety Filters:**
+- Operational patterns filtered (tool sequences, telemetry)
+- Safety-blocked patterns (deception, manipulation, etc.)
+
+**Tuning guidance:**
+- Lower thresholds → more promotions, more noise in CLAUDE.md
+- Higher thresholds → fewer promotions, only high-confidence
+
+---
+
+## 15. Importance Scorer
+
+**File:** `lib/importance_scorer.py`
+
+### Importance Tiers
+
+| Tier | Score Range | Action |
+|------|-------------|--------|
+| CRITICAL | 0.9+ | Must learn immediately |
+| HIGH | 0.7-0.9 | Should learn |
+| MEDIUM | 0.5-0.7 | Consider learning |
+| LOW | 0.3-0.5 | Store but don't promote |
+| IGNORE | <0.3 | Don't store |
+
+### Default Keyword Weights
+
+```python
+DEFAULT_WEIGHTS = {
+    "user": 1.3,
+    "preference": 1.4,
+    "decision": 1.3,
+    "principle": 1.3,
+    "style": 1.2,
+}
+```
+
+### Domain-Specific Weights
+
+| Domain | High-Value Keywords (Weight) |
+|--------|------------------------------|
+| game_dev | balance (1.5), feel (1.5), gameplay (1.4), physics (1.3) |
+| fintech | compliance (1.5), security (1.5), transaction (1.4), risk (1.4) |
+| marketing | audience (1.5), conversion (1.5), messaging (1.4), roi (1.4) |
+| product | user (1.5), feature (1.4), feedback (1.4), priority (1.3) |
+
+**Tuning guidance:**
+- Adjust domain weights to prioritize domain-specific learning
+- Add new domains to `DOMAIN_WEIGHTS` dict
+
+---
+
+## 16. Environment Variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SPARK_NO_WATCHDOG` | false | Disable watchdog timers |
+| `SPARK_OUTCOME_AUTO_LINK` | true | Auto-link outcomes to steps |
+| `SPARK_AGENT_CONTEXT_LIMIT` | 8000 | Context token limit for agents |
+| `SPARK_DEBUG` | false | Enable debug logging |
+| `SPARK_MIND_URL` | localhost:8080 | Mind API endpoint |
+
+---
+
 ## Monitoring Commands
 
 ```bash
@@ -246,4 +379,58 @@ python -c "from lib.pattern_detection import get_aggregator; print(get_aggregato
 
 # View EIDOS store stats
 python -c "from lib.eidos import get_store; print(get_store().get_stats())"
+
+# Check importance scorer stats
+python -c "from lib.importance_scorer import get_importance_scorer; print(get_importance_scorer().get_feedback_stats())"
+
+# Check advisor effectiveness
+python -c "from lib.advisor import get_advisor; print(get_advisor().get_effectiveness_report())"
+
+# Check promoter status
+python -c "from lib.promoter import get_promotion_status; print(get_promotion_status())"
+
+# Check queue stats
+python -c "from lib.queue import get_queue_stats; print(get_queue_stats())"
 ```
+
+---
+
+## Quick Parameter Index
+
+### Learning Quality Tuneables
+
+| Parameter | File | Default | Impact |
+|-----------|------|---------|--------|
+| CONFIDENCE_THRESHOLD | aggregator.py | 0.7 | Patterns → learning |
+| min_occurrences | distiller.py | 3 | Required evidence |
+| gate threshold | memory_gate.py | 0.5 | Steps → persistence |
+| AUTO_SAVE_THRESHOLD | memory_capture.py | 0.82 | User input → learning |
+| PROMOTION_THRESHOLD | promoter.py | 0.7 | Learning → CLAUDE.md |
+
+### Stuck Detection Tuneables
+
+| Parameter | File | Default | Impact |
+|-----------|------|---------|--------|
+| max_steps | models.py | 25 | Episode length |
+| max_retries_per_error | models.py | 2 | Error tolerance |
+| no_evidence_limit | models.py | 5 | Evidence requirement |
+| repeat_error_threshold | control_plane.py | 2 | Repeat detection |
+| diff_thrash_threshold | control_plane.py | 3 | File edit detection |
+
+### Memory Retention Tuneables
+
+| Parameter | File | Default | Impact |
+|-----------|------|---------|--------|
+| WISDOM_HALF_LIFE | cognitive_learner.py | 180 days | Principle decay |
+| USER_UNDERSTANDING_HALF_LIFE | cognitive_learner.py | 90 days | Preference decay |
+| CONTEXT_HALF_LIFE | cognitive_learner.py | 45 days | Context decay |
+| max_age_days | cognitive_learner.py | 365 | Prune threshold |
+
+### System Limits
+
+| Parameter | File | Default | Impact |
+|-----------|------|---------|--------|
+| MAX_EVENTS | queue.py | 10000 | Queue rotation |
+| MAX_ADVICE_ITEMS | advisor.py | 5 | Advice per query |
+| max_results | retriever.py | 10 | Retrieval limit |
+| MAX_CAPTURE_CHARS | memory_capture.py | 2000 | Input truncation |
