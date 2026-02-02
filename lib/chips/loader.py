@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
+from .schema import validate_chip_spec
+
 log = logging.getLogger("spark.chips")
 
 # Default chips directory (relative to this package)
@@ -85,6 +87,12 @@ class ChipLoader:
 
             if not data:
                 return None
+
+            # Validate spec (warn-only)
+            spec_for_validation = data if isinstance(data, dict) and "chip" in data else {"chip": data}
+            errors = validate_chip_spec(spec_for_validation)
+            if errors:
+                log.warning(f"Chip spec validation failed for {path}: {errors}")
 
             # Handle nested 'chip' key
             chip_data = data.get('chip', data)

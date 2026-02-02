@@ -18,6 +18,7 @@ Status legend: TODO | DOING | BLOCKED | DONE
 - DONE: Relaxed `vibecoding` required fields to match queue/tool event reality. (2026-02-02)
 - DONE: Updated `marketing` metric extraction + outcomes to avoid CAC false positives. (2026-02-02)
 - DONE: Tightened `spark-core` preference triggers to reduce generic matches. (2026-02-02)
+- DONE: Added warn-only chip schema validation on load. (2026-02-02)
 - DONE: Normalize `spark-core` triggers to include `post_tool`, `post_tool_failure`, `user_prompt` and add safety metadata. (2026-02-02)
 - DONE: Precision pass on noisy triggers in `vibecoding`, `marketing`, `game-dev`, `market-intel`. (2026-02-02)
 - DONE: Audit required chip identity fields across runtime chips (no missing fields found). (2026-02-02)
@@ -29,7 +30,12 @@ Status legend: TODO | DOING | BLOCKED | DONE
 - (none)
 
 ## Next Up (priority order)
-- (none)
+1) Decide default activation policy (which chips are auto/opt-in).
+   - Why: controls noise and performance; aligns with product expectations.
+2) Add a config switch for schema validation (warn vs block).
+   - Why: production installs may want strict validation.
+3) Run benchmark replay to quantify trigger precision/recall drift.
+   - Why: verify recent trigger changes didn't harm signal quality.
 
 ## Step-by-Step Build
 Status legend: TODO | DOING | DONE
@@ -48,6 +54,11 @@ Step 3 (DONE): Tighten observer triggers and extraction regex for high-signal ch
 - Scope: `moltbook`, `biz-ops`.
 - Goal: remove generic triggers and add word boundaries to reduce false positives.
 - Exit criteria: observer triggers updated + regex boundaries added.
+
+Step 4 (DONE): Wire chip schema validation (warn-only).
+- Scope: chip loading.
+- Goal: surface missing required identity/safety fields without breaking loads.
+- Exit criteria: loader logs validation errors but still loads chips.
 
 ## Chip-by-Chip Checklist
 
