@@ -442,6 +442,86 @@ class EidosStore:
 
             return [self._row_to_distillation(row) for row in rows]
 
+    def get_distillations_by_trigger(
+        self,
+        trigger: str,
+        limit: int = 20
+    ) -> List[Distillation]:
+        """Get distillations that match a trigger pattern."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            # Search in JSON triggers array
+            rows = conn.execute(
+                """SELECT * FROM distillations
+                   WHERE triggers LIKE ?
+                   ORDER BY confidence DESC, times_used DESC LIMIT ?""",
+                (f'%{trigger}%', limit)
+            ).fetchall()
+
+            return [self._row_to_distillation(row) for row in rows]
+
+    def get_distillations_by_domain(
+        self,
+        domain: str,
+        limit: int = 20
+    ) -> List[Distillation]:
+        """Get distillations for a specific domain."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT * FROM distillations
+                   WHERE domains LIKE ?
+                   ORDER BY confidence DESC, times_used DESC LIMIT ?""",
+                (f'%{domain}%', limit)
+            ).fetchall()
+
+            return [self._row_to_distillation(row) for row in rows]
+
+    def get_all_distillations(self, limit: int = 100) -> List[Distillation]:
+        """Get all distillations ordered by confidence."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT * FROM distillations
+                   ORDER BY confidence DESC, times_used DESC LIMIT ?""",
+                (limit,)
+            ).fetchall()
+
+            return [self._row_to_distillation(row) for row in rows]
+
+    def record_distillation_retrieval(self, distillation_id: str):
+        """Record that a distillation was retrieved."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """UPDATE distillations
+                   SET times_retrieved = times_retrieved + 1
+                   WHERE distillation_id = ?""",
+                (distillation_id,)
+            )
+            conn.commit()
+
+    def record_distillation_usage(self, distillation_id: str, helped: bool):
+        """Record that a distillation was used and whether it helped."""
+        with sqlite3.connect(self.db_path) as conn:
+            if helped:
+                conn.execute(
+                    """UPDATE distillations
+                       SET times_used = times_used + 1,
+                           times_helped = times_helped + 1,
+                           validation_count = validation_count + 1
+                       WHERE distillation_id = ?""",
+                    (distillation_id,)
+                )
+            else:
+                conn.execute(
+                    """UPDATE distillations
+                       SET times_used = times_used + 1,
+                           contradiction_count = contradiction_count + 1
+                       WHERE distillation_id = ?""",
+                    (distillation_id,)
+                )
+            conn.commit()
+
     def _row_to_distillation(self, row: sqlite3.Row) -> Distillation:
         """Convert a database row to Distillation object."""
         return Distillation(

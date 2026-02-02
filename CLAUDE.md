@@ -19,6 +19,16 @@ Use this when starting any new project to properly activate:
 - Chips (domain-specific knowledge)
 - Proper learning protocols
 
+### 📋 Next Phase: Pattern → EIDOS Integration
+
+**[PATTERN_TO_EIDOS_PLAN.md](./PATTERN_TO_EIDOS_PLAN.md)** - Connect pattern detection to EIDOS
+
+The plan to make learning mandatory by:
+- Wrapping user requests in EIDOS Step envelopes
+- Converting patterns to Distillations (not cognitive insights)
+- Adding Memory Gate scoring
+- Structural retrieval (not text similarity)
+
 ### Current Phase: Phase 3 - EIDOS ✅ COMPLETE
 
 **Completed:** 2026-02-02

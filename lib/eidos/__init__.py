@@ -116,6 +116,11 @@ from .minimal_mode import (
     MINIMAL_MODE_ALLOWED_TOOLS, MINIMAL_MODE_BASH_PATTERNS,
 )
 
+# Structural Retriever (Pattern → EIDOS Integration)
+from .retriever import (
+    StructuralRetriever, get_retriever,
+)
+
 __all__ = [
     # Core Models
     "Episode",
@@ -255,4 +260,8 @@ __all__ = [
     "MinimalModeReason",
     "MINIMAL_MODE_ALLOWED_TOOLS",
     "MINIMAL_MODE_BASH_PATTERNS",
+
+    # Structural Retriever (Pattern → EIDOS Integration)
+    "StructuralRetriever",
+    "get_retriever",
 ]

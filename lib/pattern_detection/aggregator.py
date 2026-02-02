@@ -1,11 +1,18 @@
 """
-PatternAggregator: Combines all detectors and routes to CognitiveLearner.
+PatternAggregator: Combines all detectors and routes to EIDOS.
 
 Responsibilities:
 1. Run all detectors on each event
-2. Aggregate patterns when multiple detectors corroborate
-3. Trigger inference when confidence >= threshold
-4. Route patterns to appropriate CognitiveLearner methods
+2. Wrap user requests in EIDOS Step envelopes (RequestTracker)
+3. Aggregate patterns when multiple detectors corroborate
+4. Trigger distillation when patterns accumulate (PatternDistiller)
+5. Apply memory gate to filter low-value items
+6. Route high-value patterns to EIDOS store
+
+The key shift (Pattern → EIDOS Integration):
+- User requests become trackable decision packets (Steps)
+- Patterns become distilled rules (Distillations)
+- Memory gate filters noise before storage
 """
 
 import json
@@ -21,6 +28,9 @@ from .sentiment import SentimentDetector
 from .repetition import RepetitionDetector
 from .semantic import SemanticIntentDetector
 from .why import WhyDetector
+from .request_tracker import RequestTracker, get_request_tracker
+from .distiller import PatternDistiller, get_pattern_distiller
+from .memory_gate import MemoryGate, get_memory_gate
 from ..primitive_filter import is_primitive_text
 from ..importance_scorer import get_importance_scorer, ImportanceTier
 
@@ -62,14 +72,20 @@ def _is_operational_insight(text: str) -> bool:
 
 class PatternAggregator:
     """
-    Aggregates patterns from all detectors.
+    Aggregates patterns from all detectors and routes to EIDOS.
 
-    Flow:
+    Flow (Updated for Pattern → EIDOS Integration):
     1. Event comes in
-    2. Each detector processes it
-    3. Patterns above threshold trigger learning
-    4. Corroborated patterns (multiple detectors) get boosted
+    2. If user message: wrap in EIDOS Step envelope (RequestTracker)
+    3. Each detector processes the event
+    4. Patterns above threshold trigger learning
+    5. Corroborated patterns get boosted
+    6. Periodically distill completed Steps into Distillations
+    7. Memory gate filters before persistence
     """
+
+    # How often to run distillation (in events processed)
+    DISTILLATION_INTERVAL = 20
 
     def __init__(self):
         self.detectors = [
@@ -82,6 +98,13 @@ class PatternAggregator:
         self._patterns_count = 0
         self._session_patterns: Dict[str, List[DetectedPattern]] = {}
         self._recent_pattern_keys: Dict[str, Dict[str, float]] = {}
+
+        # EIDOS Integration components
+        self._request_tracker = get_request_tracker()
+        self._distiller = get_pattern_distiller()
+        self._memory_gate = get_memory_gate()
+        self._events_since_distillation = 0
+
         # Importance scoring stats
         self._importance_stats = {
             "critical": 0,
@@ -91,14 +114,69 @@ class PatternAggregator:
             "ignored": 0,
         }
 
+        # EIDOS integration stats
+        self._eidos_stats = {
+            "steps_created": 0,
+            "steps_completed": 0,
+            "distillations_created": 0,
+            "gate_rejections": 0,
+        }
+
     def process_event(self, event: Dict) -> List[DetectedPattern]:
         """
         Process event through all detectors.
+
+        Enhanced with EIDOS integration:
+        - User messages become Step envelopes
+        - Actions update pending Steps
+        - Outcomes complete Steps
+        - Periodic distillation of completed Steps
 
         Returns list of detected patterns.
         """
         all_patterns: List[DetectedPattern] = []
 
+        # === EIDOS INTEGRATION: Handle user requests ===
+        event_type = event.get("type", "")
+        step_id = event.get("step_id")
+
+        # If user message, wrap in Step envelope
+        if event_type == "user_message" and event.get("content"):
+            step = self._request_tracker.on_user_message(
+                message=event["content"],
+                episode_id=event.get("episode_id", "default"),
+                context={
+                    "project": event.get("project"),
+                    "phase": event.get("phase"),
+                    "prior_actions": event.get("prior_actions", []),
+                    "session_id": event.get("session_id"),
+                }
+            )
+            event["step_id"] = step.step_id
+            self._eidos_stats["steps_created"] += 1
+
+        # If action completed, update pending Step
+        elif event_type == "action_complete" and step_id:
+            self._request_tracker.on_action_taken(
+                step_id=step_id,
+                decision=event.get("action", ""),
+                tool_used=event.get("tool", ""),
+                alternatives_considered=event.get("alternatives"),
+            )
+
+        # If outcome observed, complete the Step
+        elif event_type in ("success", "failure", "user_feedback") and step_id:
+            completed = self._request_tracker.on_outcome(
+                step_id=step_id,
+                result=event.get("result", ""),
+                success=event_type != "failure",
+                validation_evidence=event.get("evidence", ""),
+                user_feedback=event.get("feedback"),
+            )
+            if completed:
+                self._eidos_stats["steps_completed"] += 1
+
+        # === Run all pattern detectors ===
         for detector in self.detectors:
             try:
                 patterns = detector.process_event(event)
@@ -136,7 +214,39 @@ class PatternAggregator:
         if len(self._session_patterns[session_id]) > 100:
             self._session_patterns[session_id] = self._session_patterns[session_id][-100:]
 
+        # === EIDOS INTEGRATION: Periodic distillation ===
+        self._events_since_distillation += 1
+        if self._events_since_distillation >= self.DISTILLATION_INTERVAL:
+            self._run_distillation()
+            self._events_since_distillation = 0
+
         return all_patterns
+
+    def _run_distillation(self):
+        """Run distillation on completed Steps to create Distillations."""
+        completed_steps = self._request_tracker.get_completed_steps(limit=50)
+        if len(completed_steps) < 3:
+            return
+
+        try:
+            distillations = self._distiller.distill_from_steps(completed_steps)
+            self._eidos_stats["distillations_created"] += len(distillations)
+        except Exception as e:
+            # Log but don't fail
+            pass
+
+    def force_distillation(self) -> int:
+        """Force immediate distillation. Returns count of distillations created."""
+        completed_steps = self._request_tracker.get_completed_steps(limit=100)
+        if len(completed_steps) < 3:
+            return 0
+
+        try:
+            distillations = self._distiller.distill_from_steps(completed_steps)
+            self._eidos_stats["distillations_created"] += len(distillations)
+            return len(distillations)
+        except Exception:
+            return 0
 
     def _pattern_key(self, pattern: DetectedPattern) -> str:
         base = pattern.suggested_insight or " ".join(pattern.evidence[:1]) or ""
@@ -337,6 +447,13 @@ class PatternAggregator:
             "active_sessions": len(self._session_patterns),
             "detectors": [d.get_stats() for d in self.detectors],
             "importance_distribution": self._importance_stats,
+            # EIDOS integration stats
+            "eidos": {
+                **self._eidos_stats,
+                "request_tracker": self._request_tracker.get_stats(),
+                "distiller": self._distiller.get_stats(),
+                "memory_gate": self._memory_gate.get_stats(),
+            },
         }
 
 

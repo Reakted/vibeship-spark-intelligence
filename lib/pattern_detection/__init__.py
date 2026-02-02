@@ -8,7 +8,13 @@ Detects meaningful patterns from raw events:
 - SemanticIntentDetector: polite redirects and implicit preferences
 - WhyDetector: reasoning, causality, and principles (HIGH VALUE)
 
-These feed into CognitiveLearner for insight synthesis.
+EIDOS Integration (Pattern → EIDOS):
+- RequestTracker: Wraps user requests in EIDOS Step envelopes
+- PatternDistiller: Converts patterns to EIDOS Distillations
+- MemoryGate: Filters low-value items before persistence
+
+The key shift: Patterns become structured decision packets,
+not shallow keyword tracking.
 """
 
 from .base import PatternDetector, DetectedPattern, PatternType
@@ -20,7 +26,13 @@ from .why import WhyDetector
 from .aggregator import PatternAggregator, get_aggregator
 from .worker import process_pattern_events, get_pattern_backlog
 
+# EIDOS Integration components
+from .request_tracker import RequestTracker, get_request_tracker
+from .distiller import PatternDistiller, get_pattern_distiller
+from .memory_gate import MemoryGate, get_memory_gate, GateScore
+
 __all__ = [
+    # Pattern detectors
     "PatternDetector",
     "DetectedPattern",
     "PatternType",
@@ -33,4 +45,12 @@ __all__ = [
     "get_aggregator",
     "process_pattern_events",
     "get_pattern_backlog",
+    # EIDOS Integration
+    "RequestTracker",
+    "get_request_tracker",
+    "PatternDistiller",
+    "get_pattern_distiller",
+    "MemoryGate",
+    "get_memory_gate",
+    "GateScore",
 ]
