@@ -9,6 +9,16 @@ These documents define the evolution from primitive telemetry to superintelligen
 3. **CORE_GAPS_PLAN.md** - How to fill each gap (workflows, architecture, code targets)
 4. **CORE_IMPLEMENTATION_PLAN.md** - Buildable execution plan with sequencing
 
+### 🚀 New Project Activation
+
+**[SPARK_ACTIVATION_PROMPT.md](./SPARK_ACTIVATION_PROMPT.md)** - Copy-paste prompt for new projects
+
+Use this when starting any new project to properly activate:
+- Spark Intelligence (learning layer)
+- EIDOS (enforcement layer)
+- Chips (domain-specific knowledge)
+- Proper learning protocols
+
 ### Current Phase: Phase 3 - EIDOS ✅ COMPLETE
 
 **Completed:** 2026-02-02

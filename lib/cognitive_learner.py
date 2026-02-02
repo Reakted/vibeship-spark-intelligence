@@ -604,6 +604,60 @@ class CognitiveLearner:
             return self.insights[key]
 
     # =========================================================================
+    # NOISE FILTERING (Final Gate)
+    # =========================================================================
+
+    def _is_noise_insight(self, text: str) -> bool:
+        """Final gate filter - block noise patterns at point of storage.
+
+        This catches anything that bypassed earlier filters.
+        Returns True if the insight is noise and should NOT be stored.
+        """
+        if not text:
+            return True
+
+        t = text.strip()
+        tl = t.lower()
+
+        # 1. Tool sequences: "Sequence 'X -> Y -> Z' worked well"
+        if t.startswith("Sequence '") or t.startswith('Sequence "'):
+            return True
+        if "sequence" in tl and "worked" in tl:
+            return True
+
+        # 2. Tool chains with arrows: multiple -> indicates tool sequence
+        arrow_count = t.count("->") + t.count("→")
+        if arrow_count >= 2:
+            return True
+
+        # 3. Pattern telemetry: "Pattern 'X -> Y' risky" (unless it has actionable content)
+        if t.startswith("Pattern '") and "->" in t and "risky" not in tl:
+            return True
+
+        # 4. User wanted without context (short, no explanation)
+        if t.startswith("User wanted:") and len(t) < 60:
+            return True
+
+        # 5. User persistently asking (just word tracking)
+        if t.startswith("User persistently asking about:"):
+            return True
+
+        # 6. Generic success factors
+        if t.startswith("Success factor:") and len(t) < 50:
+            return True
+
+        # 7. Tool-heavy text (>40% tool names)
+        tool_names = ["bash", "read", "edit", "write", "grep", "glob",
+                      "todowrite", "taskoutput", "webfetch", "task"]
+        words = tl.split()
+        if words:
+            tool_mentions = sum(1 for w in words if any(tn in w for tn in tool_names))
+            if tool_mentions / len(words) > 0.4:
+                return True
+
+        return False
+
+    # =========================================================================
     # RETRIEVAL AND QUERY
     # =========================================================================
 
@@ -642,13 +696,19 @@ class CognitiveLearner:
 
     def add_insight(self, category: CognitiveCategory, insight: str,
                     context: str = "", confidence: float = 0.7,
-                    record_exposure: bool = True) -> CognitiveInsight:
+                    record_exposure: bool = True) -> Optional[CognitiveInsight]:
         """Add a generic insight directly.
 
         Boosts confidence on repeated validations.
         If record_exposure=True, also creates an exposure record so predictions
         can be generated and validated.
+
+        Returns None if insight is filtered as noise.
         """
+        # FINAL GATE: Block noise patterns that somehow bypassed earlier filters
+        if self._is_noise_insight(insight):
+            return None
+
         # Generate key from first few words of insight
         key_part = insight[:40].replace(" ", "_").lower()
         key = self._generate_key(category, key_part)
