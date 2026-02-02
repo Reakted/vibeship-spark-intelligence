@@ -19,15 +19,68 @@ Use this when starting any new project to properly activate:
 - Chips (domain-specific knowledge)
 - Proper learning protocols
 
-### 📋 Next Phase: Pattern → EIDOS Integration
+### 📋 Pattern → EIDOS Integration ✅ IMPLEMENTED
 
 **[PATTERN_TO_EIDOS_PLAN.md](./PATTERN_TO_EIDOS_PLAN.md)** - Connect pattern detection to EIDOS
 
-The plan to make learning mandatory by:
-- Wrapping user requests in EIDOS Step envelopes
-- Converting patterns to Distillations (not cognitive insights)
-- Adding Memory Gate scoring
-- Structural retrieval (not text similarity)
+**Status:** Implemented 2026-02-02
+
+Components:
+- **RequestTracker** (`lib/pattern_detection/request_tracker.py`) - Wraps user requests in Step envelopes
+- **PatternDistiller** (`lib/pattern_detection/distiller.py`) - Converts patterns to Distillations
+- **MemoryGate** (`lib/pattern_detection/memory_gate.py`) - Scores items before persistence
+- **StructuralRetriever** (`lib/eidos/retriever.py`) - Retrieves by structure, not text
+
+### 🔧 Tuneable Parameters
+
+**[TUNEABLES.md](./TUNEABLES.md)** - All configurable thresholds and weights
+
+Key tuneables to test:
+- `memory_gate.threshold` = 0.5 (persistence threshold)
+- `distiller.min_occurrences` = 3 (pattern frequency)
+- `distiller.min_confidence` = 0.6 (success rate threshold)
+- `aggregator.DISTILLATION_INTERVAL` = 20 (events between distillation)
+
+### 📊 MONITORING: Distillation Quality (ACTIVE WATCHER)
+
+**CRITICAL:** Monitor distillation quality in real sessions.
+
+#### Quick Checks (Run Periodically)
+
+```bash
+# Check EIDOS store stats
+python -c "from lib.eidos import get_store; import json; print(json.dumps(get_store().get_stats(), indent=2))"
+
+# Check memory gate pass rate
+python -c "from lib.pattern_detection import get_memory_gate; print(get_memory_gate().get_stats())"
+
+# Check aggregator + distillation stats
+python -c "from lib.pattern_detection import get_aggregator; import json; print(json.dumps(get_aggregator().get_stats(), indent=2))"
+
+# View recent distillations
+python -c "
+from lib.eidos import get_store
+for d in get_store().get_all_distillations(limit=10):
+    print(f'[{d.type.value}] {d.statement[:80]}... (conf: {d.confidence:.2f})')
+"
+```
+
+#### What to Watch For
+
+| Signal | Good | Bad | Action |
+|--------|------|-----|--------|
+| Distillation count | Growing over sessions | Stagnant | Lower min_occurrences |
+| Gate pass rate | 30-70% | <10% or >90% | Adjust threshold |
+| Distillation quality | Actionable rules | Generic statements | Improve lesson extraction |
+| Statement length | 30-200 chars | Too short/long | Tune synthesis |
+
+#### Session End Checklist
+
+Before ending a session, check:
+- [ ] How many new distillations were created?
+- [ ] What's the gate pass rate?
+- [ ] Are distillation statements actionable?
+- [ ] Any unexpected patterns in the data?
 
 ### Current Phase: Phase 3 - EIDOS ✅ COMPLETE
 
