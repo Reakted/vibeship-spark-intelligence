@@ -163,6 +163,103 @@ def make_prediction(tool_name: str, tool_input: dict) -> dict:
     }
 
 
+# ===== Cognitive Signal Extraction =====
+
+# Patterns that indicate high-value cognitive content
+COGNITIVE_PATTERNS = {
+    "remember": [
+        r"remember (this|that)",
+        r"don't forget",
+        r"important:",
+        r"note:",
+        r"always remember",
+        r"keep in mind",
+    ],
+    "preference": [
+        r"i (prefer|like|want|love|hate)",
+        r"(prefer|like|want) (to |the )?",
+        r"my preference",
+        r"i'd rather",
+    ],
+    "decision": [
+        r"(i |we |let's )(decided?|chose?|choosing|went with)",
+        r"instead of",
+        r"rather than",
+        r"switched to",
+        r"going with",
+    ],
+    "correction": [
+        r"(no|not|wrong|incorrect|actually)",
+        r"i meant",
+        r"that's not",
+        r"should be",
+        r"fix that",
+    ],
+    "reasoning": [
+        r"because",
+        r"the reason",
+        r"since",
+        r"so that",
+        r"in order to",
+    ],
+}
+
+import re
+
+def extract_cognitive_signals(text: str, session_id: str):
+    """
+    Extract cognitive signals from user messages and route to Meta-Ralph.
+
+    This is where we capture the GOOD stuff:
+    - User preferences
+    - Explicit decisions
+    - Corrections/feedback
+    - Reasoned statements
+    """
+    if not text or len(text) < 10:
+        return
+
+    text_lower = text.lower()
+    signals_found = []
+
+    # Check each pattern category
+    for category, patterns in COGNITIVE_PATTERNS.items():
+        for pattern in patterns:
+            if re.search(pattern, text_lower):
+                signals_found.append(category)
+                break
+
+    # If any cognitive signals found, extract and roast
+    if signals_found:
+        try:
+            # Get Meta-Ralph to evaluate
+            spark_path = Path.home() / "Desktop" / "vibeship-spark"
+            sys.path.insert(0, str(spark_path))
+            from lib.meta_ralph import get_meta_ralph
+
+            ralph = get_meta_ralph()
+
+            # Extract the learning (use the full text if it's short, otherwise summarize)
+            learning = text[:500] if len(text) <= 500 else text[:500] + "..."
+
+            # Roast it
+            result = ralph.roast(
+                learning,
+                source="user_prompt",
+                context={
+                    "signals": signals_found,
+                    "session_id": session_id,
+                }
+            )
+
+            # Log what we found
+            if result.verdict.value == "quality":
+                log_debug("observe", f"COGNITIVE CAPTURED: [{signals_found}] {text[:50]}...", None)
+
+        except Exception as e:
+            log_debug("observe", "cognitive extraction failed", e)
+
+
 # ===== Event Type Mapping =====
 
 def get_event_type(hook_event_name: str) -> EventType:
@@ -424,6 +521,10 @@ def main():
             data["payload"] = {"role": "user", "text": txt}
             data["source"] = "claude_code"
             data["kind"] = "message"
+
+            # COGNITIVE SIGNAL EXTRACTION
+            # Look for high-value cognitive signals in user messages
+            extract_cognitive_signals(txt, session_id)
     
     kwargs = {}
     if tool_name:
