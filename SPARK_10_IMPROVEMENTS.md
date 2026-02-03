@@ -1,21 +1,39 @@
 # Spark Intelligence: 10 High-Impact Improvements
 
 Generated: 2026-02-03
+Updated: 2026-02-03 (Session 2)
 Based on: Meta-Ralph analysis, tuneable review, architecture gaps
+
+---
+
+## Progress Summary
+
+| # | Improvement | Status | Commit |
+|---|-------------|--------|--------|
+| 1 | Outcome Tracking | **DONE** | ea43727 |
+| 2 | Persistence Pipeline | **DONE** | 546c965 |
+| 3 | Auto-Refinement | **DONE** | db56747 |
+| 4 | Lower Promotion Threshold | **DONE** | 2b830c3 |
+| 5 | Aggregator Integration | **DONE** | 8b3993d |
+| 6 | Skill Domain Coverage | Pending | - |
+| 7 | Distillation Quality | Pending | - |
+| 8 | Advisor Integration | Pending | - |
+| 9 | Importance Scorer Domains | Pending | - |
+| 10 | Chips Auto-Activation | Pending | - |
 
 ---
 
 ## Current State Summary
 
-| Metric | Value | Status |
-|--------|-------|--------|
-| Quality Rate | 39.4% | Good |
-| Filter Accuracy | 100% | Optimal |
-| Outcome Tracking | **0%** | CRITICAL GAP |
-| Learnings Stored | **0** | CRITICAL GAP |
-| Refinements Made | **0** | Gap |
-| Skill Domains Active | 3/9 | Gap |
-| Needs Work Items | 70 | Limbo |
+| Metric | Before | After | Status |
+|--------|--------|-------|--------|
+| Quality Rate | 39.4% | 39.4% | Good |
+| Filter Accuracy | 100% | 100% | Optimal |
+| Outcome Tracking | 0% | **Working** | FIXED |
+| Learnings Stored | 0 | **1511+** | FIXED |
+| Refinements Made | 0 | **Working** | FIXED |
+| Promotion Threshold | 0.7/3 | 0.65/2 | Lowered |
+| Aggregator Events | 0 | **Working** | FIXED |
 
 ---
 
