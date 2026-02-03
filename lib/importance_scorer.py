@@ -198,6 +198,10 @@ DOMAIN_WEIGHTS = {
         "coordination": 1.4,
         "handoff": 1.3,
         "trigger": 1.3,
+        "batch": 1.3,  # Added for Improvement #9
+        "job": 1.3,
+        "queue": 1.3,
+        "scheduler": 1.4,
     },
     "ui_ux": {
         "layout": 1.5,
@@ -240,9 +244,12 @@ DOMAIN_WEIGHTS = {
         "tradeoff": 1.5,
         "scalability": 1.4,
         "coupling": 1.4,
+        "decouple": 1.4,  # Added for Improvement #9
         "interface": 1.3,
         "abstraction": 1.3,
         "modularity": 1.4,
+        "layer": 1.3,
+        "microservice": 1.4,
     },
 }
 
