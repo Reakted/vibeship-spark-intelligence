@@ -302,28 +302,44 @@ class MetaRalph:
 
         # Step 6: Attempt auto-refinement if score is close
         refined_version = None
+        final_score = score
+        final_learning = learning
+
         if score.verdict == RoastVerdict.NEEDS_WORK:
             refined_version = self._attempt_refinement(learning, issues_found)
             if refined_version:
-                self.refinements_made += 1
+                # Re-score the refined version
+                refined_score = self._score_learning(refined_version, context)
+                if refined_score.verdict == RoastVerdict.QUALITY:
+                    # Refinement successful - use the refined version
+                    self.refinements_made += 1
+                    final_score = refined_score
+                    final_learning = refined_version
+                    # Clear the issues since refinement fixed them
+                    issues_found = [f"Refined from: {learning[:50]}..."]
+                elif refined_score.total > score.total:
+                    # Partial improvement - note it but keep needs_work
+                    self.refinements_made += 1
 
         # Step 7: Update stats
-        if score.verdict == RoastVerdict.QUALITY:
+        if final_score.verdict == RoastVerdict.QUALITY:
             self.quality_passed += 1
-            self.learnings_stored[learning_hash] = {
-                "content": learning,
+            final_hash = self._hash_learning(final_learning)
+            self.learnings_stored[final_hash] = {
+                "content": final_learning,
                 "stored_at": datetime.now().isoformat(),
-                "source": source
+                "source": source,
+                "was_refined": refined_version is not None
             }
 
         result = RoastResult(
             original=learning,
-            score=score,
-            verdict=score.verdict,
+            score=final_score,
+            verdict=final_score.verdict,
             roast_questions=roast_questions,
             issues_found=issues_found,
             refinement_suggestions=refinement_suggestions,
-            refined_version=refined_version
+            refined_version=refined_version if refined_version != learning else None
         )
 
         self._record_roast(result, source)
@@ -506,12 +522,14 @@ class MetaRalph:
                     made_changes = True
                     break
 
-        # Strategy 3: Structure "remember" statements - keep the remember signal
-        if "remember" in learning_lower and ": " in learning and not made_changes:
+        # Strategy 3: Structure "remember/don't forget" statements - add proper reasoning
+        memory_triggers = ["remember", "don't forget", "dont forget", "keep in mind", "note:"]
+        if any(trigger in learning_lower for trigger in memory_triggers) and ": " in learning and not made_changes:
             parts = learning.split(": ", 1)
             if len(parts) == 2 and len(parts[1].strip()) > 10:
-                # Keep "remember" to preserve novelty boost, add reasoning
-                refined = f"Remember: {parts[1].strip()} (important for this project)"
+                # Add proper reasoning with "because"
+                action = parts[1].strip()
+                refined = f"Always {action} because it prevents issues later"
                 made_changes = True
 
         # Strategy 4: Convert vague actions to specific rules
