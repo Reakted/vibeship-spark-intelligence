@@ -1,0 +1,177 @@
+"""
+Meta-Ralph Test Suite
+
+Tests the quality gate for Spark's self-evolution.
+Verifies cognitive vs operational classification and scoring accuracy.
+
+Usage:
+    python tests/test_meta_ralph.py
+    pytest tests/test_meta_ralph.py -v
+"""
+
+import sys
+from pathlib import Path
+
+# Add lib to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from lib.meta_ralph import MetaRalph, RoastVerdict, QualityScore
+
+
+def test_primitive_detection():
+    """Test that primitive patterns are correctly rejected."""
+    ralph = MetaRalph()
+
+    primitives = [
+        "Read task succeeded with Read tool",
+        "Success rate: 95% over 1000 uses",
+        "Pattern using Write.",
+        "Bash → Edit sequence detected",
+        "For shell tasks, use standard approach",
+    ]
+
+    passed = 0
+    for text in primitives:
+        result = ralph.roast(text, source="test")
+        if result.verdict == RoastVerdict.PRIMITIVE:
+            passed += 1
+        else:
+            print(f"FAIL: Expected PRIMITIVE for: {text[:50]}")
+            print(f"  Got: {result.verdict.value} (score {result.score.total})")
+
+    print(f"Primitive detection: {passed}/{len(primitives)} correct")
+    return passed == len(primitives)
+
+
+def test_quality_detection():
+    """Test that quality patterns are correctly passed."""
+    ralph = MetaRalph()
+
+    quality = [
+        "User prefers dark theme because it reduces eye strain during late night sessions",
+        "Remember this: always validate input before database operations",
+        "I decided to use TypeScript instead of JavaScript for better type safety",
+        "For authentication, use OAuth with PKCE because it prevents token interception",
+        "The user corrected me - they want PostgreSQL, not MySQL",
+    ]
+
+    passed = 0
+    for text in quality:
+        result = ralph.roast(text, source="test")
+        if result.verdict == RoastVerdict.QUALITY:
+            passed += 1
+        else:
+            print(f"FAIL: Expected QUALITY for: {text[:50]}")
+            print(f"  Got: {result.verdict.value} (score {result.score.total})")
+
+    print(f"Quality detection: {passed}/{len(quality)} correct")
+    return passed == len(quality)
+
+
+def test_scoring_dimensions():
+    """Test individual scoring dimensions."""
+    ralph = MetaRalph()
+
+    # Test reasoning detection
+    result = ralph.roast("Use X because Y", source="test")
+    assert result.score.reasoning >= 1, f"Expected reasoning >= 1, got {result.score.reasoning}"
+
+    # Test actionability
+    result = ralph.roast("Always validate input", source="test")
+    assert result.score.actionability >= 1, f"Expected actionability >= 1, got {result.score.actionability}"
+
+    # Test novelty with priority boost
+    result = ralph.roast("Remember this: important insight", source="test")
+    assert result.score.novelty >= 2, f"Expected novelty >= 2 for priority, got {result.score.novelty}"
+
+    print("Scoring dimensions: PASSED")
+    return True
+
+
+def test_duplicate_detection():
+    """Test that duplicates are caught."""
+    ralph = MetaRalph()
+
+    text = "User prefers dark theme for better focus"
+    result1 = ralph.roast(text, source="test")
+    result2 = ralph.roast(text, source="test")
+
+    assert result2.verdict == RoastVerdict.DUPLICATE, f"Expected DUPLICATE, got {result2.verdict.value}"
+    print("Duplicate detection: PASSED")
+    return True
+
+
+def test_context_boost():
+    """Test that context (importance_score, is_priority) boosts scoring."""
+    ralph = MetaRalph()
+
+    text = "Use this approach for the project"
+
+    # Without context
+    result1 = ralph.roast(text, source="test", context={})
+
+    # With priority context
+    result2 = ralph.roast(text + " v2", source="test", context={"is_priority": True, "importance_score": 0.9})
+
+    assert result2.score.total > result1.score.total, "Priority context should boost score"
+    print("Context boost: PASSED")
+    return True
+
+
+def test_stats():
+    """Test that stats are tracked correctly."""
+    ralph = MetaRalph()
+
+    # Roast a few items
+    ralph.roast("Primitive: Bash → Edit", source="test")
+    ralph.roast("Quality because reasoning here", source="test")
+
+    stats = ralph.get_stats()
+    assert stats["total_roasted"] >= 2, f"Expected total_roasted >= 2, got {stats['total_roasted']}"
+    assert "pass_rate" in stats, "Missing pass_rate in stats"
+
+    print("Stats tracking: PASSED")
+    return True
+
+
+def run_all_tests():
+    """Run all tests and report results."""
+    print("=" * 60)
+    print(" META-RALPH TEST SUITE")
+    print("=" * 60)
+    print()
+
+    tests = [
+        ("Primitive Detection", test_primitive_detection),
+        ("Quality Detection", test_quality_detection),
+        ("Scoring Dimensions", test_scoring_dimensions),
+        ("Duplicate Detection", test_duplicate_detection),
+        ("Context Boost", test_context_boost),
+        ("Stats Tracking", test_stats),
+    ]
+
+    passed = 0
+    failed = 0
+
+    for name, test_fn in tests:
+        print(f"\n--- {name} ---")
+        try:
+            if test_fn():
+                passed += 1
+            else:
+                failed += 1
+        except Exception as e:
+            print(f"ERROR: {e}")
+            failed += 1
+
+    print()
+    print("=" * 60)
+    print(f" RESULTS: {passed} passed, {failed} failed")
+    print("=" * 60)
+
+    return failed == 0
+
+
+if __name__ == "__main__":
+    success = run_all_tests()
+    sys.exit(0 if success else 1)

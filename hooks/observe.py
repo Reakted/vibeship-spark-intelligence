@@ -249,9 +249,7 @@ def extract_cognitive_signals(text: str, session_id: str):
     # If any cognitive signals found, extract and roast
     if signals_found:
         try:
-            # Get Meta-Ralph to evaluate
-            spark_path = Path.home() / "Desktop" / "vibeship-spark"
-            sys.path.insert(0, str(spark_path))
+            # Get Meta-Ralph to evaluate (local import)
             from lib.meta_ralph import get_meta_ralph
 
             ralph = get_meta_ralph()
