@@ -698,6 +698,8 @@ curl http://localhost:8788/api/stats
 
 | Date | Change | Reason | Outcome |
 |------|--------|--------|---------|
+| 2026-02-03 | Added trace links across dashboards (Rabbit/Learning/Acceptance) | Enforce trace-first drilldown from every metric | All major boards link into trace timelines |
+| 2026-02-03 | Propagated trace_id into exposure records | Improve prediction linkage and trace context continuity | Exposures now carry trace_id when available |
 | 2026-02-03 | Added trace drilldown UI + trace query script | Make trace-first debugging fast and concrete | Operators can fetch run timelines by trace_id |
 | 2026-02-03 | Added trace_id propagation (queue -> EIDOS steps -> outcomes) | Enable trace-first drilldowns and unified run timelines | Steps and outcomes now linkable by trace_id |
 | 2026-02-03 | Added dashboard playbook + flow updates | Make control-layer usage explicit and map trace context | Operators have a clear usage loop and updated flow map |

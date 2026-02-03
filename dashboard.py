@@ -716,6 +716,7 @@ def _derive_watcher_alerts(store, episodes: List) -> List[Dict[str, Any]]:
 
 def _extract_repeat_failures(store, limit: int = 10) -> List[Dict[str, Any]]:
     counts: Dict[str, int] = {}
+    trace_by_sig: Dict[str, Optional[str]] = {}
     steps = store.get_recent_steps(limit=300)
     for step in steps:
         try:
@@ -729,12 +730,15 @@ def _extract_repeat_failures(store, limit: int = 10) -> List[Dict[str, Any]]:
             sig = "failure"
         sig = sig[:80]
         counts[sig] = counts.get(sig, 0) + 1
+        if sig not in trace_by_sig and getattr(step, "trace_id", None):
+            trace_by_sig[sig] = step.trace_id
     ranked = sorted(counts.items(), key=lambda x: -x[1])
-    return [{"signature": k, "count": v} for k, v in ranked[:limit]]
+    return [{"signature": k, "count": v, "trace_id": trace_by_sig.get(k)} for k, v in ranked[:limit]]
 
 
 def _extract_diff_thrash(store, limit: int = 10) -> List[Dict[str, Any]]:
     counts: Dict[str, int] = {}
+    trace_by_file: Dict[str, Optional[str]] = {}
     steps = store.get_recent_steps(limit=500)
     for step in steps:
         tool = str(step.action_details.get("tool") or "").lower()
@@ -745,8 +749,10 @@ def _extract_diff_thrash(store, limit: int = 10) -> List[Dict[str, Any]]:
         if not file_path:
             continue
         counts[file_path] = counts.get(file_path, 0) + 1
+        if file_path not in trace_by_file and getattr(step, "trace_id", None):
+            trace_by_file[file_path] = step.trace_id
     ranked = sorted(counts.items(), key=lambda x: -x[1])
-    return [{"file": k, "count": v} for k, v in ranked[:limit]]
+    return [{"file": k, "count": v, "trace_id": trace_by_file.get(k)} for k, v in ranked[:limit]]
 
 
 def _extract_validation_gaps(store, limit: int = 10) -> List[Dict[str, Any]]:
@@ -758,11 +764,17 @@ def _extract_validation_gaps(store, limit: int = 10) -> List[Dict[str, Any]]:
             continue
         recent = steps[-3:]
         if all((not s.validated and not s.validation_method) for s in recent):
+            trace_id = None
+            for s in reversed(recent):
+                if getattr(s, "trace_id", None):
+                    trace_id = s.trace_id
+                    break
             gaps.append({
                 "episode_id": ep.episode_id,
                 "goal": ep.goal[:60],
                 "missing_count": len(recent),
                 "phase": ep.phase.value,
+                "trace_id": trace_id,
             })
     return gaps[:limit]
 
@@ -775,16 +787,20 @@ def _extract_no_evidence_streaks(store, limit: int = 10) -> List[Dict[str, Any]]
         if not steps:
             continue
         streak = 0
+        trace_id = None
         for step in reversed(steps):
             if step.validated or step.validation_method:
                 break
             streak += 1
+            if trace_id is None and getattr(step, "trace_id", None):
+                trace_id = step.trace_id
         if streak > 0:
             streaks.append({
                 "episode_id": ep.episode_id,
                 "goal": ep.goal[:60],
                 "streak": streak,
                 "phase": ep.phase.value,
+                "trace_id": trace_id,
             })
     streaks.sort(key=lambda x: -x["streak"])
     return streaks[:limit]
@@ -942,6 +958,16 @@ def get_learning_factory_data() -> Dict[str, Any]:
         key=lambda d: -d.times_retrieved
     )[:5]
 
+    def _trace_for_distillation(dist) -> Optional[str]:
+        for sid in dist.source_steps or []:
+            try:
+                step = store.get_step(sid)
+            except Exception:
+                step = None
+            if step and getattr(step, "trace_id", None):
+                return step.trace_id
+        return None
+
     ledger = get_truth_ledger()
     ledger_stats = ledger.get_stats()
     evidence_levels = {"none": 0, "weak": 0, "strong": 0}
@@ -983,11 +1009,21 @@ def get_learning_factory_data() -> Dict[str, Any]:
         },
         "utilization": {
             "top_helped": [
-                {"id": d.distillation_id, "statement": d.statement[:80], "helped": d.times_helped}
+                {
+                    "id": d.distillation_id,
+                    "statement": d.statement[:80],
+                    "helped": d.times_helped,
+                    "trace_id": _trace_for_distillation(d),
+                }
                 for d in top_helped
             ],
             "top_ignored": [
-                {"id": d.distillation_id, "statement": d.statement[:80], "retrieved": d.times_retrieved}
+                {
+                    "id": d.distillation_id,
+                    "statement": d.statement[:80],
+                    "retrieved": d.times_retrieved,
+                    "trace_id": _trace_for_distillation(d),
+                }
                 for d in top_ignored
             ],
         },
@@ -998,7 +1034,12 @@ def get_learning_factory_data() -> Dict[str, Any]:
         "revalidation": {
             "due": len(revalidation),
             "items": [
-                {"id": d.distillation_id, "statement": d.statement[:80], "due": d.revalidate_by}
+                {
+                    "id": d.distillation_id,
+                    "statement": d.statement[:80],
+                    "due": d.revalidate_by,
+                    "trace_id": _trace_for_distillation(d),
+                }
                 for d in revalidation[:6]
             ],
         },
@@ -1107,6 +1148,15 @@ def get_acceptance_data() -> Dict[str, Any]:
     evidence = get_evidence_store()
     evidence_stats = evidence.get_stats()
 
+    def _trace_for_step(step_id: Optional[str]) -> Optional[str]:
+        if not step_id:
+            return None
+        try:
+            step = store.get_step(step_id)
+        except Exception:
+            step = None
+        return step.trace_id if step and getattr(step, "trace_id", None) else None
+
     return {
         "funnel": funnel,
         "available": True,
@@ -1120,6 +1170,7 @@ def get_acceptance_data() -> Dict[str, Any]:
                     "reason": d.reason,
                     "age_s": time.time() - d.deferred_at,
                     "max_wait_s": d.max_wait_seconds,
+                    "trace_id": _trace_for_step(d.step_id),
                 }
                 for d in pending[:6]
             ],
@@ -3875,6 +3926,13 @@ def generate_mission_html() -> str:
           loadTrace(input ? input.value : "");
         };
       }
+      const qp = new URLSearchParams(window.location.search);
+      const qpTrace = qp.get("trace_id");
+      if (qpTrace) {
+        const input = document.getElementById("trace-input");
+        if (input) input.value = qpTrace;
+        loadTrace(qpTrace);
+      }
     """
     return _base_page("Mission Control", "mission", body, data, "/api/mission", page_js)
 
@@ -3912,6 +3970,10 @@ def generate_learning_html() -> str:
     </section>
     """
     page_js = """
+      const traceLink = (tid) => {
+        if (!tid) return "";
+        return `<a class="btn" href="/mission?trace_id=${encodeURIComponent(tid)}">trace</a>`;
+      };
       const dist = data.distillations || {};
       setText("distill-total", dist.total ?? 0);
       const distList = [
@@ -3947,10 +4009,10 @@ def generate_learning_html() -> str:
       ], (x) => x);
 
       renderList("top-helped", util.top_helped || [], (d) => `
-        <div class="row"><span>${d.statement}</span><span class="mono">${d.helped}</span></div>
+        <div class="row"><span>${d.statement}</span><span class="mono">${d.helped}</span>${traceLink(d.trace_id)}</div>
       `);
       renderList("top-ignored", util.top_ignored || [], (d) => `
-        <div class="row"><span>${d.statement}</span><span class="mono">${d.retrieved}</span></div>
+        <div class="row"><span>${d.statement}</span><span class="mono">${d.retrieved}</span>${traceLink(d.trace_id)}</div>
       `);
 
       const promo = data.promotion || {};
@@ -4001,15 +4063,19 @@ def generate_rabbit_html() -> str:
     </section>
     """
     page_js = """
+      const traceLink = (tid) => {
+        if (!tid) return "";
+        return `<a class="btn" href="/mission?trace_id=${encodeURIComponent(tid)}">trace</a>`;
+      };
       const sb = data.scoreboard || {};
       renderList("scoreboard-repeat", sb.repeat_failures || [], (r) => `
-        <div class="row"><span>${r.signature}</span><span class="mono">${r.count}</span></div>
+        <div class="row"><span>${r.signature}</span><span class="mono">${r.count}</span>${traceLink(r.trace_id)}</div>
       `);
       renderList("scoreboard-evidence", sb.no_evidence || [], (r) => `
-        <div class="row"><span>${r.goal}</span><span class="mono">${r.streak}</span></div>
+        <div class="row"><span>${r.goal}</span><span class="mono">${r.streak}</span>${traceLink(r.trace_id)}</div>
       `);
       renderList("scoreboard-diff", sb.diff_thrash || [], (r) => `
-        <div class="row"><span>${r.file}</span><span class="mono">${r.count}</span></div>
+        <div class="row"><span>${r.file}</span><span class="mono">${r.count}</span>${traceLink(r.trace_id)}</div>
       `);
 
       const esc = data.escapes || {};
@@ -4077,6 +4143,10 @@ def generate_acceptance_html() -> str:
     </section>
     """
     page_js = """
+      const traceLink = (tid) => {
+        if (!tid) return "";
+        return `<a class="btn" href="/mission?trace_id=${encodeURIComponent(tid)}">trace</a>`;
+      };
       renderList("plans-list", data.plans || [], (p) => `
         <div class="row">
           <span>${p.goal}</span>
@@ -4087,10 +4157,10 @@ def generate_acceptance_html() -> str:
       const def = data.deferrals || {};
       setText("deferral-count", `${def.pending ?? 0} pending / ${def.overdue ?? 0} overdue`);
       renderList("deferral-list", def.items || [], (d) => `
-        <div class="row"><span>${d.reason}</span><span class="mono">${Math.round(d.age_s/60)}m</span></div>
+        <div class="row"><span>${d.reason}</span><span class="mono">${Math.round(d.age_s/60)}m</span>${traceLink(d.trace_id)}</div>
       `);
       renderList("gap-list", data.validation_gaps || [], (g) => `
-        <div class="row"><span>${g.goal}</span><span class="mono">${g.missing_count} steps</span></div>
+        <div class="row"><span>${g.goal}</span><span class="mono">${g.missing_count} steps</span>${traceLink(g.trace_id)}</div>
       `);
       const ev = data.evidence || {};
       renderList("evidence-list", [
