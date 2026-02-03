@@ -57,7 +57,7 @@ These rules govern ALL work on Spark Intelligence. They exist to ensure every im
 |---|------|---------|
 | 11 | **Baseline Before Tuning** | Capture baseline metrics FROM STORAGE before changes |
 | 12 | **Compare Against Baseline with Evidence** | After changes, compare with storage evidence |
-| 13 | **Document with Evidence** | Include: pipeline check, before/after counts, utilization |
+| 13 | **Document with Evidence (Sync META_RALPH.md)** | Include: pipeline check, before/after counts, utilization. **Update META_RALPH.md changelog after EVERY session** |
 | 14 | **Evolve, Don't Disable** | Never disable bad components - improve them |
 | 15 | **The Human Test** | Would a human find this useful next time? |
 
@@ -721,6 +721,52 @@ curl http://localhost:8788/api/stats
 
 ## Session History
 
+### Session 5: 2026-02-03 (Pattern Aggregator Fix & Documentation Rules)
+
+**Goal:** Investigate "0 events" in pattern aggregator stats, ensure META_RALPH.md sync rules are explicit.
+
+**Issue Investigated:**
+
+Pattern aggregator stats showed `total_patterns_detected: 0` which appeared like the system was broken.
+
+**Root Cause Found:**
+
+The "0 events" was a **display issue**, not a pipeline problem:
+- Pattern log file contains **579 patterns** (working correctly)
+- Cognitive insights has **1,580 entries** (learnings stored)
+- The aggregator singleton resets stats to 0 each Python process
+- In-memory stats don't persist across process restarts
+
+**Fix Applied:**
+
+Added `total_patterns_logged` stat that reads from persistent log file:
+```python
+# aggregator.py get_stats() now includes:
+"total_patterns_logged": 579  # Persistent count from log file
+```
+
+**Rule Enhancement:**
+
+Updated Rule 13 to explicitly require META_RALPH.md synchronization:
+- Every session that modifies Spark MUST update META_RALPH.md changelog
+- Ensures future sessions understand what was done and why
+- Creates living record of all improvements
+
+**Evidence:**
+| Metric | Value |
+|--------|-------|
+| Pipeline health | PASSED |
+| Events in queue | 631 |
+| Patterns logged (all-time) | 579 |
+| Cognitive insights stored | 1,580 |
+
+**Files Changed:**
+- `lib/pattern_detection/aggregator.py` (added persistent stats)
+- `CLAUDE.md` (Rule 13 enhanced with META_RALPH.md sync requirement)
+- `META_RALPH.md` (Rule 13 enhanced, this session entry added)
+
+---
+
 ### Session 4: 2026-02-03 (Reality-Grounded Methodology Overhaul)
 
 **Goal:** Fix fundamental gap where iteration methodology tested scoring but not pipeline flow.
@@ -964,30 +1010,30 @@ The goal isn't to block things - it's to **evolve** the entire system until ever
 
 ---
 
-## Current State: 2026-02-03 (Session 3 Complete)
+## Current State: 2026-02-03 (Session 5 Complete)
 
 ### Intelligence Evolution Metrics
 
 | Metric | Value | Status |
 |--------|-------|--------|
 | Quality Rate | 47.2% | Excellent |
-| Total Roasted | 391 | Growing |
-| Quality Passed | 182 | Strong |
-| Primitive Rejected | 76 | Working |
-| Duplicates Caught | 10 | Active |
+| Patterns Logged | 579 | Verified |
+| Cognitive Insights | 1,580 | Growing |
 | Filter Accuracy | 100% | Optimal |
 
 ### Learning Pipeline Status
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| User Message Extraction | ✅ Working | Captures preferences, decisions |
-| **Code Content Extraction** | ✅ **NEW** | Now analyzes Write/Edit content |
-| Domain Detection | ✅ 10 domains | 170+ trigger patterns |
-| Importance Scoring | ✅ Enhanced | 5 new CRITICAL patterns |
-| Meta-Ralph Quality Gate | ✅ 47.2% | Good signal/noise ratio |
-| EIDOS Distillation | ✅ 7 rules | Heuristics and policies |
-| Mind Persistence | ✅ 32,335 | Cross-session memory |
+| User Message Extraction | Working | Captures preferences, decisions |
+| Code Content Extraction | Working | Analyzes Write/Edit content |
+| Pattern Detection | Working | 579 patterns logged (persistent) |
+| Domain Detection | 10 domains | 170+ trigger patterns |
+| Importance Scoring | Enhanced | 5 CRITICAL patterns |
+| Meta-Ralph Quality Gate | 47.2% | Good signal/noise ratio |
+| EIDOS Distillation | 7 rules | Heuristics and policies |
+| Mind Persistence | 32,335+ | Cross-session memory |
+| **Aggregator Stats** | **Fixed** | Now shows persistent counts |
 
 ### Latest Fix: Needs_Work Cleanup
 

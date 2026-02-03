@@ -441,10 +441,23 @@ class PatternAggregator:
         """Get all patterns detected for a session."""
         return self._session_patterns.get(session_id, [])
 
+    def _get_logged_patterns_count(self) -> int:
+        """Get count of patterns from persistent log file."""
+        if not PATTERNS_LOG.exists():
+            return 0
+        try:
+            lines = PATTERNS_LOG.read_text(encoding="utf-8").strip().split("\n")
+            return len([l for l in lines if l.strip()])
+        except Exception:
+            return 0
+
     def get_stats(self) -> Dict[str, Any]:
         """Get aggregator statistics."""
+        # Include both in-memory (session) and persistent (all-time) counts
+        logged_count = self._get_logged_patterns_count()
         return {
             "total_patterns_detected": self._patterns_count,
+            "total_patterns_logged": logged_count,  # Persistent count from log file
             "active_sessions": len(self._session_patterns),
             "detectors": [d.get_stats() for d in self.detectors],
             "importance_distribution": self._importance_stats,

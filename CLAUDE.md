@@ -157,7 +157,7 @@ python tests/test_cognitive_capture.py compare
 
 Show: Before count → After count, with file paths.
 
-#### Rule 13: Document with Evidence
+#### Rule 13: Document with Evidence (Sync META_RALPH.md)
 
 > **Every improvement claim must include:**
 
@@ -166,6 +166,15 @@ Show: Before count → After count, with file paths.
 - Storage after: Y insights
 - Delta: +Z insights
 - Utilization: N retrievals, M outcomes
+
+> **CRITICAL: Update META_RALPH.md changelog after EVERY session that modifies Spark.**
+
+META_RALPH.md is the living record of all Spark improvements. After any fix, tune, or enhancement:
+1. Add entry to Session History section
+2. Document what was changed and why
+3. Include evidence (metrics, file paths, counts)
+
+This ensures future sessions understand what was done and why.
 
 #### Rule 14: Evolve, Don't Disable
 
