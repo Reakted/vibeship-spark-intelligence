@@ -284,6 +284,79 @@ curl http://localhost:8788/api/stats
 | 2026-02-03 | Fixed decision detection | "use/using" matched primitives like "use standard approach" | Now only matches "decided/chose/went with/switched to" |
 | 2026-02-03 | Validated quality items | Need to verify learnings are genuinely useful | 100% of passed items are human-valuable |
 | 2026-02-03 | Fixed primitive patterns | 65 items stuck in needs_work (score 2-3) were operational | Added patterns for "Recurring X errors", "File modified:", fixed "use standard" regex |
+| 2026-02-03 | **SESSION 2 START** | --- | --- |
+| 2026-02-03 | Fixed persistence pipeline | Quality items passed Meta-Ralph but were never stored (learnings_stored=0) | Insights now stored in cognitive_learner (0→1511+) |
+| 2026-02-03 | Enabled auto-refinement | needs_work items (70) stuck in limbo, refinements_made=0 | Refined versions re-scored, ~75% convert to quality |
+| 2026-02-03 | Fixed remember/don't forget refinement | Refinement lost "remember" signal, score dropped | Now converts to "Always X because it prevents issues" |
+| 2026-02-03 | Integrated outcome tracking | outcome_stats all zeros, no feedback loop | Advisor now tracks retrievals + outcomes in Meta-Ralph |
+| 2026-02-03 | Connected Advisor to observe hook | Advisor never called during tool execution | PreToolUse gets advice, PostToolUse reports outcomes |
+| 2026-02-03 | Fixed track_outcome() | Outcomes tracked but acted_on never set True | Now properly sets acted_on=True |
+| 2026-02-03 | Lowered promotion thresholds | Insights not reaching CLAUDE.md fast enough | DEFAULT_PROMOTION_THRESHOLD 0.7→0.65, MIN_VALIDATIONS 3→2 |
+| 2026-02-03 | Connected pattern aggregator | Aggregator had 0 events, pattern detection not working | observe.py now calls aggregator.process_event() |
+
+---
+
+## Session History
+
+### Session 2: 2026-02-03 (10 Improvements Initiative)
+
+**Goal:** Identify and fix the 10 highest-impact improvements for Spark learning.
+
+**Starting State:**
+- Quality Rate: 39.4% (good)
+- Filter Accuracy: 100% (optimal)
+- Outcome Tracking: 0% (broken)
+- Learnings Stored: 0 (broken)
+- Refinements Made: 0 (broken)
+- Aggregator Events: 0 (broken)
+
+**Improvements Completed:**
+
+#### 1. Persistence Pipeline Fix (Critical)
+- **Problem:** `observe.py` line 273-274 only logged quality items, never stored them
+- **Root Cause:** After Meta-Ralph approved an item, nothing called `cognitive.add_insight()`
+- **Fix:** Added storage call with category detection based on signals
+- **Commit:** 546c965
+- **Result:** Insights now persist (tested: 1509 → 1511 after test)
+
+#### 2. Auto-Refinement Activation
+- **Problem:** 70 items stuck in needs_work, refinements_made=0
+- **Root Cause:** `_attempt_refinement()` was called but refined version never re-scored
+- **Fix:** Re-score refined version, use refined verdict if QUALITY
+- **Commit:** db56747
+- **Result:** ~75% of needs_work items now refine to quality
+
+#### 3. Outcome Tracking Integration
+- **Problem:** outcome_stats showed all zeros, no feedback loop
+- **Root Cause:** `track_retrieval()` and `track_outcome()` never called
+- **Fix:**
+  - Advisor.advise() calls ralph.track_retrieval()
+  - Advisor.report_outcome() calls ralph.track_outcome()
+  - observe.py PreToolUse gets advice, PostToolUse reports outcomes
+- **Commit:** ea43727
+- **Result:** Outcomes now tracked (tested: total_tracked=5, good_outcomes=1)
+
+#### 4. Promotion Threshold Adjustment
+- **Problem:** Insights not reaching CLAUDE.md fast enough
+- **Fix:**
+  - DEFAULT_PROMOTION_THRESHOLD: 0.7 → 0.65
+  - DEFAULT_MIN_VALIDATIONS: 3 → 2
+- **Commit:** 2b830c3
+- **Result:** Faster path from insight → permanent documentation
+
+#### 5. Pattern Aggregator Connection
+- **Problem:** Aggregator had 0 events, pattern detection not working
+- **Root Cause:** observe.py never called the aggregator
+- **Fix:** Added aggregator.process_event() call after quick_capture()
+- **Commit:** 8b3993d
+- **Result:** Events now flow to pattern detection system
+
+**Remaining (5 improvements):**
+- Skill Domain Coverage (7 domains at zero)
+- Distillation Quality
+- Advisor Integration verification
+- Importance Scorer domain testing
+- Chips Auto-Activation
 
 ---
 
