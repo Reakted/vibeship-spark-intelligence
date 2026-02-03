@@ -675,14 +675,22 @@ class MetaRalph:
 
     def track_outcome(self, learning_id: str, outcome: str, evidence: str = ""):
         """Track the outcome of acting on a learning."""
-        if learning_id in self.outcome_records:
-            rec = self.outcome_records[learning_id]
-            rec.acted_on = True
-            rec.outcome = outcome
-            rec.outcome_evidence = evidence
-            self._update_learning_outcomes(rec)
-            self._apply_outcome_to_cognitive(rec)
-            self._save_state()
+        # Create record if it doesn't exist (for tool-level outcomes)
+        if learning_id not in self.outcome_records:
+            self.outcome_records[learning_id] = OutcomeRecord(
+                learning_id=learning_id,
+                learning_content=learning_id,  # Use ID as content for tool-level
+                retrieved_at=datetime.now().isoformat(),
+                source="auto_created"
+            )
+
+        rec = self.outcome_records[learning_id]
+        rec.acted_on = True
+        rec.outcome = outcome
+        rec.outcome_evidence = evidence
+        self._update_learning_outcomes(rec)
+        self._apply_outcome_to_cognitive(rec)
+        self._save_state()
 
     def _normalize_outcome(self, outcome: Optional[str]) -> str:
         if not outcome:

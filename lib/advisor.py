@@ -567,23 +567,27 @@ class SparkAdvisor:
 
         self._save_effectiveness()
 
-        # If recent advice exists, report outcome to Meta-Ralph for feedback loop.
-        entry = self._get_recent_advice_entry(tool_name)
-        if entry:
-            advice_ids = entry.get("advice_ids") or []
-            if advice_ids:
-                if advice_was_relevant:
-                    outcome_str = "good" if success else "bad"
-                else:
-                    outcome_str = "neutral"
-                evidence = f"tool={tool_name} success={success}"
-                try:
-                    from .meta_ralph import get_meta_ralph
-                    ralph = get_meta_ralph()
-                    for aid in advice_ids:
-                        ralph.track_outcome(aid, outcome_str, evidence)
-                except Exception:
-                    pass
+        # Report outcome to Meta-Ralph for feedback loop.
+        # Track ALL outcomes, not just ones with prior advice.
+        outcome_str = "good" if success else "bad"
+        evidence = f"tool={tool_name} success={success}"
+
+        try:
+            from .meta_ralph import get_meta_ralph
+            ralph = get_meta_ralph()
+
+            # If there was prior advice, link outcomes to those advice IDs
+            entry = self._get_recent_advice_entry(tool_name)
+            if entry:
+                advice_ids = entry.get("advice_ids") or []
+                for aid in advice_ids:
+                    ralph.track_outcome(aid, outcome_str, evidence)
+
+            # Also track tool-level outcome (even without specific advice)
+            tool_outcome_id = f"tool:{tool_name}"
+            ralph.track_outcome(tool_outcome_id, outcome_str, evidence)
+        except Exception:
+            pass
 
     def record_advice_feedback(
         self,
