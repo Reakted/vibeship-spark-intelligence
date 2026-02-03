@@ -821,6 +821,13 @@ class SparkAdvisor:
                 advice_ids = entry.get("advice_ids") or []
                 for aid in advice_ids:
                     ralph.track_outcome(aid, outcome_str, evidence)
+                    # Also update total_followed - this was missing!
+                    self.report_outcome(
+                        aid,
+                        was_followed=True,  # Tool was executed, so advice was "followed"
+                        was_helpful=success,  # Success = helpful
+                        notes=f"Auto-linked from {tool_name}"
+                    )
 
             # Also track tool-level outcome (even without specific advice)
             tool_outcome_id = f"tool:{tool_name}"
