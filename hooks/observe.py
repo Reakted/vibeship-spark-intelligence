@@ -210,6 +210,10 @@ def extract_cognitive_signals(text: str, session_id: str):
     """
     Extract cognitive signals from user messages and route to Meta-Ralph.
 
+    Uses two scoring systems:
+    1. Pattern-based signal detection (fast)
+    2. Importance scorer (semantic, more accurate)
+
     This is where we capture the GOOD stuff:
     - User preferences
     - Explicit decisions
@@ -221,6 +225,19 @@ def extract_cognitive_signals(text: str, session_id: str):
 
     text_lower = text.lower()
     signals_found = []
+
+    # Also use importance scorer for semantic analysis
+    importance_score = None
+    try:
+        from lib.importance_scorer import score_importance
+        importance_result = score_importance(text)
+        importance_score = importance_result.score
+
+        # If importance scorer says it's valuable, add its signals
+        if importance_score >= 0.5:
+            signals_found.extend(importance_result.signals_detected)
+    except Exception as e:
+        log_debug("observe", "importance scorer failed", e)
 
     # Check each pattern category
     for category, patterns in COGNITIVE_PATTERNS.items():
@@ -242,13 +259,15 @@ def extract_cognitive_signals(text: str, session_id: str):
             # Extract the learning (use the full text if it's short, otherwise summarize)
             learning = text[:500] if len(text) <= 500 else text[:500] + "..."
 
-            # Roast it
+            # Roast it with importance score context
             result = ralph.roast(
                 learning,
                 source="user_prompt",
                 context={
                     "signals": signals_found,
                     "session_id": session_id,
+                    "importance_score": importance_score,
+                    "is_priority": importance_score and importance_score >= 0.7,
                 }
             )
 
