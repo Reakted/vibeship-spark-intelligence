@@ -15,11 +15,13 @@ Based on: Meta-Ralph analysis, tuneable review, architecture gaps
 | 3 | Auto-Refinement | **DONE** | db56747 |
 | 4 | Lower Promotion Threshold | **DONE** | 2b830c3 |
 | 5 | Aggregator Integration | **DONE** | 8b3993d |
-| 6 | Skill Domain Coverage | Pending | - |
-| 7 | Distillation Quality | Pending | - |
-| 8 | Advisor Integration | Pending | - |
-| 9 | Importance Scorer Domains | Pending | - |
-| 10 | Chips Auto-Activation | Pending | - |
+| 6 | Skill Domain Coverage | **DONE** | 8fc233a |
+| 7 | Distillation Quality | **DONE** | 42b175b |
+| 8 | Advisor Integration | **DONE** | 6710219 |
+| 9 | Importance Scorer Domains | **DONE** | fdc8694 |
+| 10 | Chips Auto-Activation | **DONE** | 3b824a2 |
+
+**ALL 10 IMPROVEMENTS COMPLETE** (Session 3)
 
 ---
 
@@ -34,6 +36,10 @@ Based on: Meta-Ralph analysis, tuneable review, architecture gaps
 | Refinements Made | 0 | **Working** | FIXED |
 | Promotion Threshold | 0.7/3 | 0.65/2 | Lowered |
 | Aggregator Events | 0 | **Working** | FIXED |
+| Domain Coverage | 3/10 | **10/10** | FIXED |
+| Distillation Quality | WEAK | **Reasoned** | FIXED |
+| Advisor Threshold | 0.6 | 0.5 | Lowered |
+| Chip Activation | 0.7 | 0.5 | Lowered |
 
 ---
 
