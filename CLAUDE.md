@@ -1,10 +1,28 @@
 # CLAUDE
 
-## 🚨 PRIMARY RULE: Test Data from Spark/Mind, Not Terminal
+## 🚨 PRIMARY RULES (Non-Negotiable)
+
+### Rule 1: Test Data from Spark/Mind, Not Terminal
 
 **CRITICAL:** When testing and validating Spark learning:
 
 > **Always retrieve test results directly from Mind memory and Spark Intelligence - NEVER rely on terminal output.**
+
+### Rule 2: Architecture-Grounded Changes
+
+**CRITICAL:** Before making improvements to Spark:
+
+> **Read Intelligence_Flow.md and Intelligence_Flow_Map.md to understand where your change applies in the actual data flow.**
+
+The real flow is:
+```
+observe.py → queue → bridge_worker → bridge_cycle → {cognitive_learner, eidos, chips} → persistence
+```
+
+If you change `observe.py` but `bridge_worker` isn't running, nothing will be learned.
+If you fix `cognitive_learner` but it's not being called by `bridge_cycle`, nothing changes.
+
+**Always verify:** Is bridge_worker running? Is the queue being processed?
 
 ### Quick Access Commands
 

@@ -6,11 +6,51 @@ Meta-Ralph is Spark's internal quality gate - a system that evaluates every prop
 
 ---
 
-## 🚨 PRIMARY RULE: Source of Truth for Testing
+## 🚨 PRIMARY RULES
+
+### Rule 1: Source of Truth for Testing
 
 **CRITICAL:** When testing and iterating on Spark learning quality:
 
 > **Always retrieve test data directly from Mind memory and Spark Intelligence (via MCP tools or Python imports) - NEVER rely on terminal output.**
+
+### Rule 2: Architecture-Grounded Improvements
+
+**CRITICAL:** Before making any improvement or fix:
+
+> **Consult Intelligence_Flow.md and Intelligence_Flow_Map.md to ensure changes align with actual data flow.**
+
+Without understanding the architecture, you will:
+- Fix code that isn't in the active data path
+- Add features that never get triggered
+- "Improve" components that aren't connected
+
+### The Real Data Flow (From Architecture Docs)
+
+```
+Sources (observe.py, sparkd.py)
+    → Queue (~/.spark/queue/events.jsonl)
+    → bridge_worker.py (every 60s)
+    → bridge_cycle.run_bridge_cycle
+    → {cognitive_learner, pattern_detection, eidos_store, chips}
+    → cognitive_insights.json, eidos.db, chip_insights/
+    → promoter → CLAUDE.md/AGENTS.md/etc.
+```
+
+**If learnings aren't persisting, check:**
+1. Is bridge_worker running? (check heartbeat)
+2. Are events reaching the queue?
+3. Is bridge_cycle processing events?
+4. Is cognitive_learner being called?
+
+### Architecture Files (MUST READ)
+
+| File | Purpose |
+|------|---------|
+| **Intelligence_Flow.md** | Exhaustive data flow, tuneables, file interactions |
+| **Intelligence_Flow_Map.md** | Visual mermaid diagram of component connections |
+
+Before ANY Spark improvement session, verify you understand WHERE in the flow your change applies.
 
 ### Why This Matters
 
