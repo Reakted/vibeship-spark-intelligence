@@ -139,6 +139,7 @@ class MetaRalph:
     """
 
     # Patterns that indicate primitive/operational learning (auto-reject)
+    # NOTE: All patterns are matched case-insensitively via re.IGNORECASE
     PRIMITIVE_PATTERNS = [
         r"tasks? succeed with",           # "read tasks succeed with Read"
         r"pattern using \w+\.",           # "Successful write pattern using Write"
@@ -150,7 +151,11 @@ class MetaRalph:
         r"accumulated \d+ learnings",     # Meta counts
         r"pattern distribution",          # Stats
         r"events processed",              # Processing stats
-        r"for \w+ tasks, use standard",   # Generic task patterns
+        r"for \w+ tasks,? use standard",  # "For read tasks, use standard approach"
+        r"recurring \w+ errors? \(\d+x\)",  # "Recurring other errors (2x)"
+        r"file modified:",                # "File modified: config.json"
+        r"tool timeout",                  # Tool timeout stats
+        r"validation count",              # Validation counts
     ]
 
     # Patterns that indicate quality learning (boost score)
