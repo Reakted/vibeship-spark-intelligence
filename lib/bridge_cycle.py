@@ -16,6 +16,7 @@ from lib.validation_loop import process_validation_events
 from lib.prediction_loop import process_prediction_cycle
 from lib.content_learner import learn_from_edit_event
 from lib.chips import process_chip_events
+from lib.chip_merger import merge_chip_insights
 from lib.context_sync import sync_context
 from lib.diagnostics import log_debug
 
@@ -150,6 +151,18 @@ def run_bridge_cycle(
         stats["errors"].append("chips")
         log_debug("bridge_worker", "chip processing failed", e)
 
+    # Chip merger - promote high-value chip insights to cognitive system
+    try:
+        merge_stats = merge_chip_insights(min_confidence=0.7, limit=20)
+        stats["chip_merge"] = {
+            "processed": merge_stats.get("processed", 0),
+            "merged": merge_stats.get("merged", 0),
+            "by_chip": merge_stats.get("by_chip", {}),
+        }
+    except Exception as e:
+        stats["errors"].append("chip_merge")
+        log_debug("bridge_worker", "chip merge failed", e)
+
     # Context sync - promote insights to CLAUDE.md and sync to Mind
     try:
         sync_result = sync_context()
@@ -179,6 +192,7 @@ def write_bridge_heartbeat(stats: Dict[str, Any]) -> bool:
                 "memory": stats.get("memory") or {},
                 "validation": stats.get("validation") or {},
                 "chips": stats.get("chips") or {},
+                "chip_merge": stats.get("chip_merge") or {},
                 "sync": stats.get("sync") or {},
                 "errors": stats.get("errors") or [],
             },
