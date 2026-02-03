@@ -768,6 +768,45 @@ Updated Rule 13 to explicitly require META_RALPH.md synchronization:
 
 ---
 
+### Session 8: 2026-02-03 (Advisor Actionability Enhancements)
+
+**Goal:** Make advice more actionable and cognitive, not just stored data.
+
+**6 Improvements Implemented:**
+
+| # | Task | What It Does |
+|---|------|--------------|
+| 8 | TTL 5→15 min | Longer tasks now link to outcomes |
+| 9 | Actionability scoring | Action verbs boost, vague text penalized |
+| 10 | Source quality boost | EIDOS (1.4x), self_awareness (1.3x) rank higher |
+| 11 | Insight-level outcomes | Individual advice tracks good/bad outcomes |
+| 12 | Stronger noise filter | Vague starts, metrics, short text blocked |
+| 13 | "Why" context | Advice now includes reason/evidence |
+
+**Actionability Scoring Example:**
+
+| Score | Advice |
+|-------|--------|
+| 1.0 | "Use git commit before pushing" |
+| 1.0 | "When editing files, always read first" |
+| 0.9 | "[EIDOS POLICY] Never skip tests" |
+| 0.3 | "User prefers dark theme" |
+| 0.3 | "It seems like something might be wrong" |
+
+**New Noise Filter Patterns:**
+
+- Vague starts: "user seems to", "it appears", "might be"
+- Pure metrics: "85% success rate"
+- Too short: < 20 characters
+- Simple preferences without reasoning
+
+**Files Changed:**
+- `lib/advisor.py` (all 6 improvements)
+- `lib/cognitive_learner.py` (noise filter)
+- `lib/meta_ralph.py` (insight effectiveness API)
+
+---
+
 ### Session 7: 2026-02-03 (Task-to-Tool Outcome Linking Fix)
 
 **Goal:** Fix acted-on rate being stuck at 0.2% despite 500 retrievals.
@@ -1102,7 +1141,7 @@ The goal isn't to block things - it's to **evolve** the entire system until ever
 
 ---
 
-## Current State: 2026-02-03 (Session 7 Complete)
+## Current State: 2026-02-03 (Session 8 Complete)
 
 ### Intelligence Evolution Metrics
 
