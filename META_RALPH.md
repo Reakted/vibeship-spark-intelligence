@@ -274,6 +274,10 @@ curl http://localhost:8788/api/stats
 | 2026-02-03 | needs_work_threshold 4→2 | Proportional adjustment | Better distribution |
 | 2026-02-03 | Added dynamic recommendations | Hardcoded values were stale | Recommendations now use current threshold |
 | 2026-02-03 | Tightened "items_worth_capturing" | Was recommending LOWER for 2.5 avg items | Now correctly recommends KEEP |
+| 2026-02-03 | Enhanced cognitive detection | Filter accuracy only 70% - missing "remember this", decisions | Filter accuracy 100%, pass rate 8%→23% |
+| 2026-02-03 | Added priority/decision boosts | "Remember this" not boosting score | Priority items get +2 novelty, decisions get +1 |
+| 2026-02-03 | Expanded reasoning patterns | Only explicit "because" detected | Now detects "for better X", "to avoid Y" |
+| 2026-02-03 | Added cognitive extraction hook | Only capturing tool events (94%) | Now extracts cognitive signals from user prompts |
 
 ---
 
