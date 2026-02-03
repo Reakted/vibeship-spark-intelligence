@@ -875,3 +875,113 @@ spark importance --text "okay got it"
 3. Validate 3 times
 4. Check promotion to CLAUDE.md
 5. Verify retrieval in next session
+
+---
+
+## 9. Meta-Ralph (Quality Gate)
+
+**File:** `lib/meta_ralph.py` (vibeship-spark)
+
+Meta-Ralph is the quality gate for Spark's self-evolution. It roasts every proposed learning before storage, scoring it on multiple dimensions to ensure only valuable cognitive insights pass through.
+
+### How It Works
+
+Every learning is scored 0-10 on five dimensions. The total score determines the verdict:
+
+```
+Total = actionability + novelty + reasoning + specificity + outcome_linked
+```
+
+### Thresholds
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `quality_threshold` | **5** | Items scoring >= 5 pass as QUALITY. Lowered from 7 (2026-02-03) after over-filtering detected. |
+| `needs_work_threshold` | **3** | Items scoring 3-4 are NEEDS_WORK (refinable). |
+| `primitive_threshold` | **<3** | Items scoring < 3 are PRIMITIVE (rejected). |
+
+### Scoring Dimensions
+
+Each dimension scores 0-2:
+
+| Dimension | 0 | 1 | 2 |
+|-----------|---|---|---|
+| **Actionability** | Can't act on it | Vague guidance | Specific action |
+| **Novelty** | Already obvious | Somewhat new | Genuine insight |
+| **Reasoning** | No "why" | Implied "why" | Explicit "because" |
+| **Specificity** | Generic | Domain-specific | Context-specific |
+| **Outcome Linked** | No outcome | Implied outcome | Validated outcome |
+
+### Scoring Examples
+
+**QUALITY (score 7) - Passes:**
+```
+"User prefers dark theme because it reduces eye strain during late night coding"
+- actionability: 2 (specific: use dark theme)
+- novelty: 2 (learned this about user)
+- reasoning: 2 (explicit "because")
+- specificity: 1 (domain-specific)
+- outcome_linked: 0 (no validation)
+Total: 7 PASSES
+```
+
+**NEEDS_WORK (score 6) - Previously blocked, now passes:**
+```
+"For authentication, use OAuth with PKCE because it prevents token interception"
+- actionability: 2 (specific: use PKCE)
+- novelty: 1 (known best practice)
+- reasoning: 2 (explicit "because")
+- specificity: 0 (generic advice)
+- outcome_linked: 1 (implied security outcome)
+Total: 6 PASSES (after threshold lowered to 5)
+```
+
+**PRIMITIVE (score 3) - Correctly rejected:**
+```
+"For read tasks, use standard approach"
+- actionability: 2 (action: use standard)
+- novelty: 0 (obvious)
+- reasoning: 0 (no "why")
+- specificity: 1 (task-specific)
+- outcome_linked: 0 (no outcome)
+Total: 3 REJECTED
+```
+
+### Tuneable Analysis
+
+Meta-Ralph continuously analyzes its own filter performance and recommends adjustments:
+
+| Metric | Healthy Range | Issue | Recommendation |
+|--------|--------------|-------|----------------|
+| Pass rate | 15-40% | <10% | Lower threshold |
+| Pass rate | 15-40% | >60% | Raise threshold |
+| Primitive rate | 30-70% | <20% | Filter too loose |
+| Primitive rate | 30-70% | >80% | Filter too tight |
+
+### When to Tune
+
+| Scenario | Adjustment |
+|----------|------------|
+| Valuable insights being blocked | Lower `quality_threshold` to 4-5 |
+| Too much noise passing through | Raise `quality_threshold` to 6-7 |
+| Want more reasoning-based learning | Raise reasoning weight |
+| Need faster learning | Lower novelty requirements |
+
+### History
+
+| Date | Change | Reason |
+|------|--------|--------|
+| 2026-02-03 | quality_threshold 7→5 | Over-filtering (2.8% pass rate) blocking valuable insights like OAuth/PKCE advice |
+
+### Monitoring
+
+```bash
+# Check Meta-Ralph stats
+python -c "from lib.meta_ralph import get_meta_ralph; print(get_meta_ralph().get_stats())"
+
+# Check tuneable recommendations
+python -c "from lib.meta_ralph import get_meta_ralph; import json; print(json.dumps(get_meta_ralph().analyze_tuneables(), indent=2))"
+
+# Dashboard (if running)
+curl http://localhost:8788/api/stats
+```
