@@ -702,6 +702,203 @@ class MetaRalph:
 
         return "\n".join(lines)
 
+    def deep_analysis(self) -> Dict:
+        """
+        Comprehensive analysis of Spark's learning evolution.
+
+        Analyzes:
+        - Skill domain coverage
+        - Learning pattern quality
+        - User resonance signals
+        - Evolution trajectory
+        - Improvement opportunities
+        """
+        analysis = {
+            "timestamp": datetime.now().isoformat(),
+            "skill_domains": {},
+            "learning_patterns": {},
+            "user_resonance": {},
+            "evolution_trajectory": {},
+            "improvement_opportunities": [],
+            "meta_insights": []
+        }
+
+        if len(self.roast_history) < 10:
+            analysis["meta_insights"].append("Need more data for deep analysis")
+            return analysis
+
+        # Skill domain detection patterns
+        skill_domains = {
+            "orchestration": ["workflow", "pipeline", "sequence", "parallel", "coordinate"],
+            "ui_ux": ["layout", "component", "responsive", "accessibility", "design"],
+            "debugging": ["error", "trace", "root cause", "hypothesis", "debug"],
+            "architecture": ["pattern", "tradeoff", "scalability", "interface", "module"],
+            "agent_coordination": ["agent", "handoff", "routing", "capability"],
+            "team_management": ["delegation", "blocker", "review", "sprint"],
+            "game_dev": ["balance", "feel", "gameplay", "physics", "player"],
+            "fintech": ["compliance", "security", "transaction", "risk"],
+            "product": ["user", "feature", "roadmap", "priority"],
+        }
+
+        # Learning pattern types
+        pattern_types = {
+            "preferences": ["prefer", "like", "want", "love", "hate"],
+            "decisions": ["decided", "chose", "choosing", "went with", "switched"],
+            "corrections": ["actually", "no,", "not ", "wrong", "instead"],
+            "reasoning": ["because", "since", "the reason", "due to"],
+            "rules": ["always", "never", "must", "should"],
+            "context": ["this project", "here", "our", "my"],
+        }
+
+        # User resonance signals
+        resonance_signals = {
+            "explicit_memory": ["remember this", "don't forget", "important"],
+            "style_preference": ["prefer", "style", "approach", "way"],
+            "domain_expertise": ["experience", "learned", "found that"],
+            "constraint": ["constraint", "requirement", "must have"],
+        }
+
+        # Count occurrences
+        for roast in self.roast_history:
+            result = roast.get("result", {})
+            content = result.get("original", "").lower()
+            verdict = result.get("verdict", "")
+
+            if verdict != "quality":
+                continue
+
+            # Check skill domains
+            for domain, keywords in skill_domains.items():
+                if any(kw in content for kw in keywords):
+                    analysis["skill_domains"][domain] = analysis["skill_domains"].get(domain, 0) + 1
+
+            # Check learning patterns
+            for pattern, keywords in pattern_types.items():
+                if any(kw in content for kw in keywords):
+                    analysis["learning_patterns"][pattern] = analysis["learning_patterns"].get(pattern, 0) + 1
+
+            # Check user resonance
+            for signal, keywords in resonance_signals.items():
+                if any(kw in content for kw in keywords):
+                    analysis["user_resonance"][signal] = analysis["user_resonance"].get(signal, 0) + 1
+
+        # Evolution trajectory
+        total_quality = sum(1 for r in self.roast_history if r.get("result", {}).get("verdict") == "quality")
+        total_primitive = sum(1 for r in self.roast_history if r.get("result", {}).get("verdict") == "primitive")
+        total_needs_work = sum(1 for r in self.roast_history if r.get("result", {}).get("verdict") == "needs_work")
+
+        analysis["evolution_trajectory"] = {
+            "quality_rate": total_quality / max(len(self.roast_history), 1),
+            "primitive_rate": total_primitive / max(len(self.roast_history), 1),
+            "needs_work_rate": total_needs_work / max(len(self.roast_history), 1),
+            "trend": "improving" if self.quality_passed > self.primitive_rejected else "needs_attention"
+        }
+
+        # Generate improvement opportunities
+        covered_domains = set(analysis["skill_domains"].keys())
+        all_domains = set(skill_domains.keys())
+        missing_domains = all_domains - covered_domains
+
+        if missing_domains:
+            analysis["improvement_opportunities"].append({
+                "area": "skill_coverage",
+                "issue": f"No learnings in: {', '.join(missing_domains)}",
+                "suggestion": "Ask about these domains when relevant to capture expertise"
+            })
+
+        if analysis["learning_patterns"].get("reasoning", 0) < 5:
+            analysis["improvement_opportunities"].append({
+                "area": "reasoning_depth",
+                "issue": "Few reasoned learnings (with 'because')",
+                "suggestion": "Prompt for explanations: 'Why did that work?'"
+            })
+
+        if analysis["user_resonance"].get("explicit_memory", 0) < 3:
+            analysis["improvement_opportunities"].append({
+                "area": "user_engagement",
+                "issue": "Few explicit memory requests from user",
+                "suggestion": "User may not know about 'Remember this:' feature"
+            })
+
+        # Meta insights
+        if analysis["evolution_trajectory"]["quality_rate"] > 0.3:
+            analysis["meta_insights"].append("Good quality rate - system is capturing valuable insights")
+
+        if len(covered_domains) >= 5:
+            analysis["meta_insights"].append(f"Broad skill coverage across {len(covered_domains)} domains")
+
+        dominant_pattern = max(analysis["learning_patterns"].items(), key=lambda x: x[1], default=("none", 0))
+        if dominant_pattern[1] > 0:
+            analysis["meta_insights"].append(f"Strongest learning pattern: {dominant_pattern[0]} ({dominant_pattern[1]} instances)")
+
+        return analysis
+
+    def print_deep_analysis(self) -> str:
+        """Print human-readable deep analysis."""
+        analysis = self.deep_analysis()
+
+        lines = [
+            "",
+            "=" * 70,
+            " META-RALPH DEEP ANALYSIS: SPARK INTELLIGENCE EVOLUTION",
+            "=" * 70,
+            "",
+        ]
+
+        # Skill domains
+        lines.append("SKILL DOMAIN COVERAGE:")
+        if analysis["skill_domains"]:
+            for domain, count in sorted(analysis["skill_domains"].items(), key=lambda x: -x[1]):
+                bar = "#" * min(count, 20)
+                lines.append(f"  {domain:20} {bar} ({count})")
+        else:
+            lines.append("  No domain-specific learnings yet")
+        lines.append("")
+
+        # Learning patterns
+        lines.append("LEARNING PATTERN DISTRIBUTION:")
+        if analysis["learning_patterns"]:
+            for pattern, count in sorted(analysis["learning_patterns"].items(), key=lambda x: -x[1]):
+                bar = "#" * min(count, 20)
+                lines.append(f"  {pattern:20} {bar} ({count})")
+        lines.append("")
+
+        # User resonance
+        lines.append("USER RESONANCE SIGNALS:")
+        if analysis["user_resonance"]:
+            for signal, count in sorted(analysis["user_resonance"].items(), key=lambda x: -x[1]):
+                lines.append(f"  {signal}: {count}")
+        else:
+            lines.append("  Limited user resonance signals detected")
+        lines.append("")
+
+        # Evolution trajectory
+        traj = analysis["evolution_trajectory"]
+        lines.append("EVOLUTION TRAJECTORY:")
+        lines.append(f"  Quality rate: {traj.get('quality_rate', 0):.1%}")
+        lines.append(f"  Trend: {traj.get('trend', 'unknown')}")
+        lines.append("")
+
+        # Improvement opportunities
+        if analysis["improvement_opportunities"]:
+            lines.append("IMPROVEMENT OPPORTUNITIES:")
+            for opp in analysis["improvement_opportunities"]:
+                lines.append(f"  [{opp['area']}]")
+                lines.append(f"    Issue: {opp['issue']}")
+                lines.append(f"    Action: {opp['suggestion']}")
+            lines.append("")
+
+        # Meta insights
+        if analysis["meta_insights"]:
+            lines.append("META INSIGHTS:")
+            for insight in analysis["meta_insights"]:
+                lines.append(f"  > {insight}")
+            lines.append("")
+
+        lines.append("=" * 70)
+
+        return "\n".join(lines)
+
     def analyze_tuneables(self) -> Dict:
         """Analyze current learning patterns and recommend tuneable adjustments."""
         analysis = {
