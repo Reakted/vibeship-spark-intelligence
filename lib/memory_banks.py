@@ -433,3 +433,88 @@ def get_bank_stats() -> Dict[str, Any]:
         "project_counts": project_counts,
         "by_category": by_category,
     }
+
+
+# =============================================================================
+# Maintenance: Purge Telemetry/Sequence Noise
+# =============================================================================
+
+def _is_telemetry_memory(text: str) -> bool:
+    """Return True if memory entry is operational telemetry or tool sequence noise."""
+    if not text:
+        return True
+    t = text.strip()
+    tl = t.lower()
+
+    if t.startswith("Sequence '") or t.startswith('Sequence "'):
+        return True
+    if "sequence" in tl and ("worked" in tl or "pattern" in tl):
+        return True
+    if t.startswith("Pattern '") and "->" in t and "risky" not in tl:
+        return True
+
+    if "->" in t and any(s in tl for s in ["sequence", "pattern", "worked well", "works well"]):
+        return True
+
+    if re.search(r"\bheavy\s+\w+\s+usage\b", tl):
+        return True
+    if re.search(r"\busage\s*\(\d+\s*calls?\)", tl):
+        return True
+    if "usage count" in tl or tl.startswith("usage "):
+        return True
+
+    if t.startswith("User was satisfied after:") or t.startswith("User frustrated after:"):
+        return True
+
+    return False
+
+
+def purge_telemetry_entries(
+    include_global: bool = True,
+    dry_run: bool = False,
+    max_preview: int = 20,
+) -> Dict[str, Any]:
+    """Purge telemetry/sequence noise from memory banks."""
+    _ensure_dirs()
+    targets: List[Path] = []
+    if include_global:
+        targets.append(GLOBAL_FILE)
+    targets.extend(PROJECTS_DIR.glob("*.jsonl"))
+
+    removed = 0
+    by_file: Dict[str, int] = {}
+    preview: List[str] = []
+
+    for path in targets:
+        if not path.exists():
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        kept: List[str] = []
+        removed_here = 0
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except Exception:
+                # Keep malformed rows rather than delete.
+                kept.append(line)
+                continue
+            text = (row.get("text") or "").strip()
+            if _is_telemetry_memory(text):
+                removed_here += 1
+                if len(preview) < max(0, int(max_preview or 0)):
+                    preview.append(text[:120])
+                continue
+            kept.append(line)
+
+        if removed_here:
+            removed += removed_here
+            by_file[path.name] = removed_here
+            if not dry_run:
+                path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+
+    return {
+        "removed": removed,
+        "by_file": by_file,
+        "preview": preview,
+        "dry_run": dry_run,
+    }

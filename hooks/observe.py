@@ -578,7 +578,8 @@ def main():
         # Track outcome in Advisor (flows to Meta-Ralph)
         try:
             from lib.advisor import report_outcome
-            report_outcome(tool_name, success=True, advice_helped=True)
+            # Only mark advice as helpful with explicit evidence (avoid hallucinated outcomes).
+            report_outcome(tool_name, success=True, advice_helped=False)
         except Exception as e:
             log_debug("observe", "outcome tracking failed", e)
 

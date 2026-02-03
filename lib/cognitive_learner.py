@@ -625,13 +625,23 @@ class CognitiveLearner:
         if "sequence" in tl and "worked" in tl:
             return True
 
-        # 2. Tool chains with arrows: multiple -> indicates tool sequence
-        arrow_count = t.count("->") + t.count("→")
+        # 2. Tool chains with arrows: indicates tool sequence
+        arrow_count = t.count("->")
         if arrow_count >= 2:
+            return True
+        if arrow_count >= 1 and any(s in tl for s in ["sequence", "pattern", "worked well", "works well"]):
             return True
 
         # 3. Pattern telemetry: "Pattern 'X -> Y' risky" (unless it has actionable content)
         if t.startswith("Pattern '") and "->" in t and "risky" not in tl:
+            return True
+
+        # 3b. Usage telemetry: "Heavy Bash usage (42 calls)"
+        if re.search(r"\bheavy\s+\w+\s+usage\b", tl):
+            return True
+        if re.search(r"\busage\s*\(\d+\s*calls?\)", tl):
+            return True
+        if "usage count" in tl or tl.startswith("usage "):
             return True
 
         # 4. User wanted without context (short, no explanation)
@@ -661,17 +671,23 @@ class CognitiveLearner:
     # RETRIEVAL AND QUERY
     # =========================================================================
 
-    def get_insights_for_context(self, context: str, limit: int = 10) -> List[CognitiveInsight]:
+    def get_insights_for_context(
+        self,
+        context: str,
+        limit: int = 10,
+        with_keys: bool = False,
+    ) -> List[Any]:
         """Get relevant cognitive insights for a given context.
 
         Lightweight ranking:
         - Prefer direct string matches (query in insight.context/insight text)
         - Then reliability/validations
+        - If with_keys=True, returns (insight_key, insight) tuples
         """
-        relevant: List[tuple[float, CognitiveInsight]] = []
+        relevant: List[tuple[float, str, CognitiveInsight]] = []
         context_lower = (context or "").lower()
 
-        for insight in self.insights.values():
+        for key, insight in self.insights.items():
             ic = (insight.context or "").lower()
             ii = (insight.insight or "").lower()
 
@@ -689,10 +705,13 @@ class CognitiveLearner:
             if context_lower and context_lower in ii:
                 match_score += 0.7
 
-            relevant.append((match_score, insight))
+            relevant.append((match_score, key, insight))
 
-        relevant.sort(key=lambda t: (t[0], t[1].reliability, t[1].times_validated), reverse=True)
-        return [i for _, i in relevant[:limit]]
+        relevant.sort(key=lambda t: (t[0], t[2].reliability, t[2].times_validated), reverse=True)
+        top = relevant[:limit]
+        if with_keys:
+            return [(k, i) for _, k, i in top]
+        return [i for _, _, i in top]
 
     def add_insight(self, category: CognitiveCategory, insight: str,
                     context: str = "", confidence: float = 0.7,
@@ -748,6 +767,61 @@ class CognitiveLearner:
                 pass  # Don't fail if exposure tracking unavailable
 
         return self.insights[key]
+
+    def purge_primitive_insights(self, dry_run: bool = False, max_preview: int = 20) -> Dict[str, Any]:
+        """Remove operational/primitive insights from storage.
+
+        Uses the same noise filter as the final gate to identify items to purge.
+        """
+        to_remove: List[str] = []
+        by_category: Dict[str, int] = {}
+        previews: List[str] = []
+
+        for key, insight in self.insights.items():
+            if not self._is_noise_insight(insight.insight):
+                continue
+            to_remove.append(key)
+            cat = insight.category.value
+            by_category[cat] = by_category.get(cat, 0) + 1
+            if len(previews) < max(0, int(max_preview or 0)):
+                previews.append(insight.insight[:120])
+
+        if not dry_run and to_remove:
+            for key in to_remove:
+                self.insights.pop(key, None)
+            self._save_insights()
+
+        return {
+            "removed": len(to_remove),
+            "by_category": by_category,
+            "preview": previews,
+            "dry_run": dry_run,
+        }
+
+    def apply_outcome(self, insight_key: str, outcome: str, evidence: str = "") -> bool:
+        """Apply an outcome (good/bad) to a known insight to influence reliability."""
+        if insight_key not in self.insights:
+            return False
+
+        ins = self.insights[insight_key]
+        outcome = (outcome or "").strip().lower()
+        if outcome == "good":
+            self._touch_validation(ins, validated_delta=1)
+            if evidence:
+                ins.evidence.append(evidence[:200])
+                ins.evidence = ins.evidence[-10:]
+            ins.confidence = _boost_confidence(ins.confidence, 1)
+        elif outcome == "bad":
+            self._touch_validation(ins, contradicted_delta=1)
+            if evidence:
+                ins.counter_examples.append(evidence[:200])
+                ins.counter_examples = ins.counter_examples[-10:]
+            ins.confidence = max(0.1, ins.confidence * 0.85)
+        else:
+            return False
+
+        self._save_insights()
+        return True
 
     def get_self_awareness_insights(self) -> List[CognitiveInsight]:
         """Get all self-awareness insights."""

@@ -28,6 +28,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import re
 
+# Tuneables (kept in sync with META_RALPH.md)
+QUALITY_THRESHOLD = 4
+NEEDS_WORK_THRESHOLD = 2
+NEEDS_WORK_CLOSE_DELTA = 0.5
+MIN_OUTCOME_SAMPLES = 5
+
 
 class QualityDimension(Enum):
     """Concrete scoring dimensions - not fuzzy "useful vs primitive"."""
@@ -68,9 +74,9 @@ class QualityScore:
         - quality_threshold: 4 (lowered from 7 to reduce over-filtering)
         - needs_work_threshold: 2
         """
-        if self.total >= 4:
+        if self.total >= QUALITY_THRESHOLD:
             return RoastVerdict.QUALITY
-        elif self.total >= 2:
+        elif self.total >= NEEDS_WORK_THRESHOLD:
             return RoastVerdict.NEEDS_WORK
         else:
             return RoastVerdict.PRIMITIVE
@@ -116,6 +122,8 @@ class OutcomeRecord:
     learning_id: str
     learning_content: str
     retrieved_at: str
+    insight_key: Optional[str] = None
+    source: Optional[str] = None
     acted_on: bool = False
     outcome: Optional[str] = None  # "good", "bad", "neutral"
     outcome_evidence: Optional[str] = None
@@ -125,6 +133,8 @@ class OutcomeRecord:
             "learning_id": self.learning_id,
             "learning_content": self.learning_content[:100],
             "retrieved_at": self.retrieved_at,
+            "insight_key": self.insight_key,
+            "source": self.source,
             "acted_on": self.acted_on,
             "outcome": self.outcome,
             "outcome_evidence": self.outcome_evidence
@@ -143,11 +153,13 @@ class MetaRalph:
     PRIMITIVE_PATTERNS = [
         r"tasks? succeed with",           # "read tasks succeed with Read"
         r"pattern using \w+\.",           # "Successful write pattern using Write"
+        r"pattern found",                 # "Pattern found: X"
         r"over \d+ uses",                 # "Success rate: 100% over 1794 uses"
         r"success rate: \d+%",            # Pure stats
         r"tool sequence",                 # Tool sequences
-        r"\w+ → \w+",                     # "Read → Edit"
-        r"Generation: \d+",               # Generation counts
+        r"\b(?:read|edit|write|bash|glob|grep)\b\s*->\s*\b(?:read|edit|write|bash|glob|grep)\b",  # "Read -> Edit"
+        r"\b\w+\s*->\s*\w+\b",             # Generic arrows
+        r"generation: \d+",               # Generation counts
         r"accumulated \d+ learnings",     # Meta counts
         r"pattern distribution",          # Stats
         r"events processed",              # Processing stats
@@ -176,6 +188,7 @@ class MetaRalph:
     DATA_DIR = Path.home() / ".spark" / "meta_ralph"
     ROAST_HISTORY_FILE = DATA_DIR / "roast_history.json"
     OUTCOME_TRACKING_FILE = DATA_DIR / "outcome_tracking.json"
+    LEARNINGS_STORE_FILE = DATA_DIR / "learnings_store.json"
     SELF_ROAST_FILE = DATA_DIR / "self_roast.json"
 
     def __init__(self, mind_client=None):
@@ -221,6 +234,31 @@ class MetaRalph:
             except Exception:
                 pass
 
+        if self.LEARNINGS_STORE_FILE.exists():
+            try:
+                data = json.loads(self.LEARNINGS_STORE_FILE.read_text())
+                self.learnings_stored = data.get("learnings", {})
+            except Exception:
+                self.learnings_stored = {}
+
+        # If learnings store is empty but we have roast history, rebuild a small cache.
+        if not self.learnings_stored and self.roast_history:
+            for roast in self.roast_history:
+                result = roast.get("result", {})
+                if result.get("verdict") != "quality":
+                    continue
+                content = result.get("refined_version") or result.get("original") or ""
+                if not content:
+                    continue
+                h = self._hash_learning(content)
+                self.learnings_stored[h] = {
+                    "content": content[:200],
+                    "stored_at": roast.get("timestamp"),
+                    "source": roast.get("source", "unknown"),
+                    "was_refined": bool(result.get("refined_version")),
+                    "outcomes": {"good": 0, "bad": 0, "neutral": 0},
+                }
+
     def _save_state(self):
         """Persist state to disk."""
         self.ROAST_HISTORY_FILE.write_text(json.dumps({
@@ -234,6 +272,18 @@ class MetaRalph:
 
         self.OUTCOME_TRACKING_FILE.write_text(json.dumps({
             "records": [r.to_dict() for r in list(self.outcome_records.values())[-500:]],
+            "last_updated": datetime.now().isoformat()
+        }, indent=2))
+
+        # Keep last N learnings for dedupe (oldest trimmed)
+        if self.learnings_stored:
+            items = list(self.learnings_stored.items())
+            items.sort(key=lambda kv: kv[1].get("stored_at") or "")
+            items = items[-5000:]
+            self.learnings_stored = {k: v for k, v in items}
+
+        self.LEARNINGS_STORE_FILE.write_text(json.dumps({
+            "learnings": self.learnings_stored,
             "last_updated": datetime.now().isoformat()
         }, indent=2))
 
@@ -329,7 +379,8 @@ class MetaRalph:
                 "content": final_learning,
                 "stored_at": datetime.now().isoformat(),
                 "source": source,
-                "was_refined": refined_version is not None
+                "was_refined": refined_version is not None,
+                "outcomes": {"good": 0, "bad": 0, "neutral": 0},
             }
 
         result = RoastResult(
@@ -347,9 +398,8 @@ class MetaRalph:
 
     def _is_primitive(self, learning: str) -> bool:
         """Check if learning matches primitive patterns."""
-        learning_lower = learning.lower()
         for pattern in self.PRIMITIVE_PATTERNS:
-            if re.search(pattern, learning_lower):
+            if re.search(pattern, learning or "", flags=re.IGNORECASE):
                 return True
         return False
 
@@ -365,7 +415,9 @@ class MetaRalph:
         Enhanced with priority/decision boosts and importance scorer integration.
         """
         score = QualityScore()
-        learning_lower = learning.lower()
+        learning_lower = (learning or "").lower()
+        project_key = context.get("project") or context.get("project_key")
+        domain = context.get("domain")
 
         # PRIORITY BOOST: "Remember this" or explicit instructions
         priority_boost = 0
@@ -377,11 +429,18 @@ class MetaRalph:
 
         # DECISION/CORRECTION BOOST: User made a decision or correction
         decision_boost = 0
-        if any(phrase in learning_lower for phrase in [
-            "decided to", "chose to", "choosing", "switched to",
-            "instead of", "rather than", "not ", "corrected",
-            "actually", "the user wants", "user prefers"
-        ]):
+        decision_patterns = [
+            r"\bdecided to\b",
+            r"\bchose to\b",
+            r"\bchose\b",
+            r"\bwent with\b",
+            r"\bswitched to\b",
+            r"\bopted to\b",
+            r"\bopted for\b",
+            r"\binstead of\b",
+            r"\brather than\b",
+        ]
+        if any(re.search(p, learning_lower) for p in decision_patterns):
             decision_boost = 1
 
         # Check context for importance scorer result
@@ -417,13 +476,15 @@ class MetaRalph:
             score.reasoning = 1
 
         # SPECIFICITY: Is it specific or generic?
-        if context.get("domain") and context.get("project"):
+        if domain and project_key:
             score.specificity = 2
-        elif context.get("domain") or any(word in learning_lower for word in [
+        elif domain or project_key or any(word in learning_lower for word in [
             "user", "this project", "here", "our", "my",
             "typescript", "javascript", "python", "react",
             "postgresql", "mysql", "oauth", "api",
         ]):
+            score.specificity = 1
+        elif any(tok in learning_lower for tok in ["/", "\\", ".py", ".js", ".ts", ".md", ".json"]):
             score.specificity = 1
 
         # OUTCOME_LINKED: Is it tied to real outcomes?
@@ -435,6 +496,8 @@ class MetaRalph:
             "type safety", "security", "performance"
         ]):
             score.outcome_linked = 1
+        elif context.get("has_outcome"):
+            score.outcome_linked = max(score.outcome_linked, 1)
 
         # Apply boosts
         if priority_boost > 0:
@@ -554,22 +617,90 @@ class MetaRalph:
     # OUTCOME TRACKING
     # =========================================================================
 
-    def track_retrieval(self, learning_id: str, learning_content: str):
+    def track_retrieval(
+        self,
+        learning_id: str,
+        learning_content: str,
+        insight_key: Optional[str] = None,
+        source: Optional[str] = None,
+    ):
         """Track when a learning is retrieved."""
         self.outcome_records[learning_id] = OutcomeRecord(
             learning_id=learning_id,
             learning_content=learning_content,
-            retrieved_at=datetime.now().isoformat()
+            retrieved_at=datetime.now().isoformat(),
+            insight_key=insight_key,
+            source=source,
         )
         self._save_state()
 
     def track_outcome(self, learning_id: str, outcome: str, evidence: str = ""):
         """Track the outcome of acting on a learning."""
         if learning_id in self.outcome_records:
-            self.outcome_records[learning_id].acted_on = True
-            self.outcome_records[learning_id].outcome = outcome
-            self.outcome_records[learning_id].outcome_evidence = evidence
+            rec = self.outcome_records[learning_id]
+            rec.acted_on = True
+            rec.outcome = outcome
+            rec.outcome_evidence = evidence
+            self._update_learning_outcomes(rec)
+            self._apply_outcome_to_cognitive(rec)
             self._save_state()
+
+    def _normalize_outcome(self, outcome: Optional[str]) -> str:
+        if not outcome:
+            return "neutral"
+        o = outcome.strip().lower()
+        if o in ("good", "bad", "neutral"):
+            return o
+        return "neutral"
+
+    def _update_learning_outcomes(self, record: OutcomeRecord) -> None:
+        """Update stored learning outcome stats for dedupe and tuning."""
+        outcome = self._normalize_outcome(record.outcome)
+        if not record.learning_content:
+            return
+        h = self._hash_learning(record.learning_content)
+        entry = self.learnings_stored.get(h)
+        if not entry:
+            return
+        outcomes = entry.setdefault("outcomes", {"good": 0, "bad": 0, "neutral": 0})
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+        entry["last_outcome"] = outcome
+        entry["last_outcome_at"] = datetime.now().isoformat()
+
+    def _apply_outcome_to_cognitive(self, record: OutcomeRecord) -> None:
+        """Apply outcome feedback to cognitive insights when possible."""
+        outcome = self._normalize_outcome(record.outcome)
+        if outcome not in ("good", "bad"):
+            return
+        try:
+            from lib.cognitive_learner import get_cognitive_learner
+            cog = get_cognitive_learner()
+        except Exception:
+            return
+
+        # Prefer explicit insight key when available.
+        if record.insight_key and record.insight_key in cog.insights:
+            cog.apply_outcome(record.insight_key, outcome, record.outcome_evidence or "")
+            return
+
+        # Fallback: try to match by text.
+        target = (record.learning_content or "").strip().lower()
+        if not target:
+            return
+        # Remove bracketed prefixes (e.g., [Caution]).
+        target = re.sub(r"^\[[^\]]+\]\s*", "", target)
+        matches = []
+        for key, ins in cog.insights.items():
+            text = (ins.insight or "").strip().lower()
+            if not text:
+                continue
+            if text == target:
+                matches.append(key)
+            elif len(target) > 30 and (target in text or text in target):
+                matches.append(key)
+
+        if len(matches) == 1:
+            cog.apply_outcome(matches[0], outcome, record.outcome_evidence or "")
 
     def get_outcome_stats(self) -> Dict:
         """Get aggregate outcome statistics."""
@@ -954,32 +1085,84 @@ class MetaRalph:
             elif verdict == "needs_work":
                 needs_work_items.append({"content": original, "score": score_total})
 
-        pass_rate = len(quality_items) / max(len(self.roast_history), 1)
+        total = max(len(self.roast_history), 1)
+        pass_rate = len(quality_items) / total
+        needs_work_rate = len(needs_work_items) / total
 
         analysis["current_state"] = {
             "quality_count": len(quality_items),
             "primitive_count": len(primitive_items),
             "needs_work_count": len(needs_work_items),
-            "pass_rate": pass_rate
+            "pass_rate": pass_rate,
+            "needs_work_rate": needs_work_rate,
+            "quality_threshold": QUALITY_THRESHOLD,
+            "needs_work_threshold": NEEDS_WORK_THRESHOLD,
         }
 
         # Analyze and recommend
-        avg_needs_work = sum(i["score"] for i in needs_work_items) / max(len(needs_work_items), 1) if needs_work_items else 0
+        avg_needs_work = (
+            sum(i["score"] for i in needs_work_items) / max(len(needs_work_items), 1)
+            if needs_work_items else 0
+        )
+        outcome_stats = self.get_outcome_stats()
+        effectiveness = outcome_stats.get("effectiveness_rate", 0.0)
+        with_outcome = outcome_stats.get("with_outcome", 0)
 
-        if pass_rate < 0.1 and avg_needs_work >= 3:
-            analysis["issues_detected"].append(f"OVER-FILTERING: {pass_rate:.1%} passing, needs-work avg {avg_needs_work:.1f}")
-            analysis["recommendations"].append({
-                "tuneable": "quality_threshold",
-                "action": "LOWER",
-                "reason": "Valuable items being blocked"
-            })
-        elif pass_rate < 0.1:
-            analysis["issues_detected"].append(f"LOW QUALITY INPUT: {pass_rate:.1%} passing, needs-work avg {avg_needs_work:.1f}")
-            analysis["recommendations"].append({
-                "tuneable": "quality_threshold",
-                "action": "KEEP",
-                "reason": "Input is genuinely low-value"
-            })
+        # Decision tree aligned with META_RALPH.md
+        if pass_rate < 0.1:
+            if avg_needs_work >= (QUALITY_THRESHOLD - 1):
+                analysis["issues_detected"].append(
+                    f"OVER-FILTERING: {pass_rate:.1%} passing, needs-work avg {avg_needs_work:.1f}"
+                )
+                analysis["recommendations"].append({
+                    "tuneable": "quality_threshold",
+                    "action": "LOWER",
+                    "reason": "Valuable items being blocked"
+                })
+            else:
+                analysis["issues_detected"].append(
+                    f"LOW QUALITY INPUT: {pass_rate:.1%} passing, needs-work avg {avg_needs_work:.1f}"
+                )
+                analysis["recommendations"].append({
+                    "tuneable": "quality_threshold",
+                    "action": "KEEP",
+                    "reason": "Input is genuinely low-value"
+                })
+
+        elif pass_rate > 0.8:
+            if with_outcome >= MIN_OUTCOME_SAMPLES and effectiveness < 0.5:
+                analysis["issues_detected"].append(
+                    f"NOISE LEAK: pass_rate {pass_rate:.1%} with effectiveness {effectiveness:.0%}"
+                )
+                analysis["recommendations"].append({
+                    "tuneable": "quality_threshold",
+                    "action": "RAISE",
+                    "reason": "Letting through noise"
+                })
+            elif with_outcome < MIN_OUTCOME_SAMPLES:
+                analysis["issues_detected"].append(
+                    "INSUFFICIENT OUTCOME DATA: need more outcome-linked feedback to judge quality"
+                )
+
+        elif needs_work_rate > 0.5:
+            if avg_needs_work >= (QUALITY_THRESHOLD - NEEDS_WORK_CLOSE_DELTA):
+                analysis["issues_detected"].append(
+                    f"BORDERLINE HEAVY: needs-work rate {needs_work_rate:.1%}, avg {avg_needs_work:.1f}"
+                )
+                analysis["recommendations"].append({
+                    "tuneable": "quality_threshold",
+                    "action": "CONSIDER_LOWERING",
+                    "reason": "Borderline items are close to threshold"
+                })
+            else:
+                analysis["issues_detected"].append(
+                    f"NEEDS_WORK ITEMS LOW QUALITY: avg {avg_needs_work:.1f}"
+                )
+                analysis["recommendations"].append({
+                    "tuneable": "quality_threshold",
+                    "action": "KEEP",
+                    "reason": "Items are genuinely low-value"
+                })
 
         return analysis
 

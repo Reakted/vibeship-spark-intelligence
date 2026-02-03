@@ -35,6 +35,9 @@ from .memory_banks import retrieve as bank_retrieve, infer_project_key
 ADVISOR_DIR = Path.home() / ".spark" / "advisor"
 ADVICE_LOG = ADVISOR_DIR / "advice_log.jsonl"
 EFFECTIVENESS_FILE = ADVISOR_DIR / "effectiveness.json"
+RECENT_ADVICE_LOG = ADVISOR_DIR / "recent_advice.jsonl"
+RECENT_ADVICE_MAX_AGE_S = 300
+RECENT_ADVICE_MAX_LINES = 200
 
 # Thresholds (Improvement #8: Advisor Integration tuneables)
 MIN_RELIABILITY_FOR_ADVICE = 0.5  # Lowered from 0.6 for more advice coverage
@@ -205,7 +208,12 @@ class SparkAdvisor:
             from .meta_ralph import get_meta_ralph
             ralph = get_meta_ralph()
             for adv in advice_list:
-                ralph.track_retrieval(adv.advice_id, adv.text)
+                ralph.track_retrieval(
+                    adv.advice_id,
+                    adv.text,
+                    insight_key=adv.insight_key,
+                    source=adv.source,
+                )
         except Exception:
             pass  # Don't break advice flow if tracking fails
 
@@ -219,15 +227,15 @@ class SparkAdvisor:
         advice = []
 
         # Query insights relevant to this context
-        insights = self.cognitive.get_insights_for_context(context, limit=10)
+        insights = self.cognitive.get_insights_for_context(context, limit=10, with_keys=True)
 
         # Also get tool-specific insights
-        tool_insights = self.cognitive.get_insights_for_context(tool_name, limit=5)
+        tool_insights = self.cognitive.get_insights_for_context(tool_name, limit=5, with_keys=True)
 
         # Combine and dedupe
         seen = set()
-        for insight in insights + tool_insights:
-            key = insight.insight[:50]
+        for insight_key, insight in insights + tool_insights:
+            key = insight_key or insight.insight[:50]
             if key in seen:
                 continue
             seen.add(key)
@@ -240,7 +248,7 @@ class SparkAdvisor:
 
             advice.append(Advice(
                 advice_id=self._generate_advice_id(insight.insight),
-                insight_key=f"{insight.category.value}:{insight.insight[:30]}",
+                insight_key=insight_key,
                 text=insight.insight,
                 confidence=insight.reliability,
                 source="cognitive",
@@ -416,6 +424,8 @@ class SparkAdvisor:
             "context": context[:100],
             "advice_ids": [a.advice_id for a in advice_list],
             "advice_texts": [a.text[:100] for a in advice_list],
+            "insight_keys": [a.insight_key for a in advice_list],
+            "sources": [a.source for a in advice_list],
         }
 
         with open(ADVICE_LOG, "a", encoding="utf-8") as f:
@@ -423,6 +433,42 @@ class SparkAdvisor:
 
         self.effectiveness["total_advice_given"] += len(advice_list)
         self._save_effectiveness()
+
+        # Keep a lightweight recent-advice log for outcome linkage.
+        recent = {
+            "ts": time.time(),
+            "tool": tool,
+            "advice_ids": [a.advice_id for a in advice_list],
+            "insight_keys": [a.insight_key for a in advice_list],
+            "sources": [a.source for a in advice_list],
+        }
+        try:
+            with open(RECENT_ADVICE_LOG, "a", encoding="utf-8") as f:
+                f.write(json.dumps(recent) + "\n")
+        except Exception:
+            pass
+
+    def _get_recent_advice_entry(self, tool_name: str) -> Optional[Dict[str, Any]]:
+        """Return the most recent advice entry for a tool within TTL."""
+        if not RECENT_ADVICE_LOG.exists():
+            return None
+        try:
+            lines = RECENT_ADVICE_LOG.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            return None
+
+        now = time.time()
+        for line in reversed(lines[-RECENT_ADVICE_MAX_LINES:]):
+            try:
+                entry = json.loads(line)
+            except Exception:
+                continue
+            if entry.get("tool") != tool_name:
+                continue
+            ts = float(entry.get("ts") or 0.0)
+            if now - ts <= RECENT_ADVICE_MAX_AGE_S:
+                return entry
+        return None
 
     # ============= Outcome Tracking =============
 
@@ -496,6 +542,24 @@ class SparkAdvisor:
             self.effectiveness["by_source"][source]["helpful"] += 1
 
         self._save_effectiveness()
+
+        # If recent advice exists, report outcome to Meta-Ralph for feedback loop.
+        entry = self._get_recent_advice_entry(tool_name)
+        if entry:
+            advice_ids = entry.get("advice_ids") or []
+            if advice_ids:
+                if advice_was_relevant:
+                    outcome_str = "good" if success else "bad"
+                else:
+                    outcome_str = "neutral"
+                evidence = f"tool={tool_name} success={success}"
+                try:
+                    from .meta_ralph import get_meta_ralph
+                    ralph = get_meta_ralph()
+                    for aid in advice_ids:
+                        ralph.track_outcome(aid, outcome_str, evidence)
+                except Exception:
+                    pass
 
     # ============= Quick Access Methods =============
 
