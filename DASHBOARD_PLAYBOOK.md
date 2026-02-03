@@ -50,8 +50,10 @@ Goal: turn "done" into a contract.
 3. Review steps in order and confirm evidence exists for each step.
 4. If evidence is missing, log a validation gap and block promotion.
 
+CLI helper:
+`python scripts/trace_query.py --trace-id <trace_id>`
+
 ## Weekly maintenance
 1. Review top repeated failures and add a distillation or guardrail.
 2. Review top contradicted insights and downgrade reliability.
 3. Audit evidence store for expiring high-value artifacts and extend retention.
-

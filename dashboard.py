@@ -8,13 +8,16 @@ Open: http://localhost:8585
 
 import json
 import time
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import threading
 import webbrowser
-from typing import Dict
+from typing import Dict, List, Any
+from urllib import request
+from urllib.parse import urlparse, parse_qs
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
@@ -32,12 +35,28 @@ from lib.dashboard_project import get_active_project, get_project_memory_preview
 from lib.taste_api import add_from_dashboard
 from lib.diagnostics import setup_component_logging
 
+# Service control
+from lib.service_control import service_status
+
 # EIDOS integration
 try:
     from lib.eidos import (
         get_store, get_elevated_control_plane,
         get_truth_ledger, get_policy_patch_engine,
-        get_minimal_mode_controller
+        get_minimal_mode_controller,
+        get_acceptance_compiler,
+        get_deferred_tracker,
+        get_evidence_store,
+        WatcherEngine,
+        WatcherSeverity,
+        WatcherType,
+        Phase,
+        Outcome,
+        DistillationType,
+        Evaluation,
+        EscalationType,
+        build_escalation,
+        MinimalModeReason,
     )
     HAS_EIDOS = True
 except ImportError:
@@ -45,6 +64,16 @@ except ImportError:
 
 PORT = 8585
 SPARK_DIR = Path.home() / ".spark"
+QUEUE_FILE = SPARK_DIR / "queue" / "events.jsonl"
+QUEUE_LOCK_FILE = SPARK_DIR / "queue" / ".queue.lock"
+INVALID_EVENTS_FILE = SPARK_DIR / "invalid_events.jsonl"
+OUTCOMES_FILE = SPARK_DIR / "outcomes.jsonl"
+BRIDGE_HEARTBEAT_FILE = SPARK_DIR / "bridge_worker_heartbeat.json"
+WATCHDOG_STATE_FILE = SPARK_DIR / "watchdog_state.json"
+EIDOS_ACTIVE_EPISODES_FILE = SPARK_DIR / "eidos_active_episodes.json"
+EIDOS_ACTIVE_STEPS_FILE = SPARK_DIR / "eidos_active_steps.json"
+EIDOS_ESCALATIONS_FILE = SPARK_DIR / "eidos_escalations.jsonl"
+MINIMAL_MODE_HISTORY_FILE = SPARK_DIR / "minimal_mode_history.jsonl"
 
 
 def get_eidos_status():
@@ -246,6 +275,196 @@ def _load_json(path: Path) -> Dict:
         return {}
 
 
+def _http_ok(url: str, timeout: float = 1.5) -> bool:
+    try:
+        req = request.Request(url, method="GET")
+        with request.urlopen(req, timeout=timeout) as resp:
+            return 200 <= resp.status < 300
+    except Exception:
+        return False
+
+
+def _read_jsonl(path: Path, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    items: List[Dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    items.append(json.loads(raw))
+                except Exception:
+                    continue
+    except Exception:
+        return []
+
+    if limit and limit > 0:
+        return items[-limit:]
+    return items
+
+
+def _count_jsonl(path: Path, max_lines: Optional[int] = None) -> int:
+    if not path.exists():
+        return 0
+    count = 0
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    count += 1
+                    if max_lines and count >= max_lines:
+                        break
+    except Exception:
+        return 0
+    return count
+
+
+def _append_jsonl(path: Path, payload: Dict[str, Any]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload) + "\n")
+    except Exception:
+        return
+
+
+def get_trace_timeline_data(trace_id: str) -> Dict[str, Any]:
+    if not trace_id:
+        return {"trace_id": trace_id, "steps": [], "evidence": [], "outcomes": [], "episodes": []}
+    if not HAS_EIDOS:
+        return {"trace_id": trace_id, "steps": [], "evidence": [], "outcomes": [], "episodes": [], "available": False}
+
+    store = _get_eidos_store_safe()
+    if not store:
+        return {"trace_id": trace_id, "steps": [], "evidence": [], "outcomes": [], "episodes": [], "available": False}
+
+    steps: List[Dict[str, Any]] = []
+    episodes: List[Dict[str, Any]] = []
+    evidence_rows: List[Dict[str, Any]] = []
+    outcomes: List[Dict[str, Any]] = []
+
+    try:
+        with sqlite3.connect(store.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM steps WHERE trace_id = ? ORDER BY created_at",
+                (trace_id,),
+            ).fetchall()
+        step_objs = [store._row_to_step(r) for r in rows]
+    except Exception:
+        step_objs = []
+
+    if step_objs:
+        for step in step_objs:
+            tool = ""
+            try:
+                tool = step.action_details.get("tool") or ""
+            except Exception:
+                tool = ""
+            steps.append({
+                "step_id": step.step_id,
+                "episode_id": step.episode_id,
+                "intent": (step.intent or "")[:80],
+                "decision": (step.decision or "")[:80],
+                "tool": tool,
+                "evaluation": step.evaluation.value if hasattr(step.evaluation, "value") else str(step.evaluation),
+                "validated": bool(step.validated),
+                "created_at": step.created_at,
+                "result": (step.result or "")[:160],
+            })
+
+        episode_ids = sorted({s.episode_id for s in step_objs if s.episode_id})
+        for ep_id in episode_ids:
+            ep = store.get_episode(ep_id)
+            if not ep:
+                continue
+            episodes.append({
+                "episode_id": ep.episode_id,
+                "goal": ep.goal,
+                "phase": ep.phase.value,
+                "outcome": ep.outcome.value,
+                "step_count": ep.step_count,
+                "start_ts": ep.start_ts,
+                "end_ts": ep.end_ts,
+            })
+
+        try:
+            ev_store = get_evidence_store()
+            for step in step_objs:
+                for ev in ev_store.get_for_step(step.step_id):
+                    evidence_rows.append({
+                        "evidence_id": ev.evidence_id,
+                        "step_id": ev.step_id,
+                        "type": ev.type.value if hasattr(ev.type, "value") else str(ev.type),
+                        "tool": ev.tool_name,
+                        "created_at": ev.created_at,
+                        "expires_at": ev.expires_at,
+                        "bytes": ev.byte_size,
+                    })
+        except Exception:
+            pass
+
+    if OUTCOMES_FILE.exists():
+        for row in _read_jsonl(OUTCOMES_FILE, limit=400):
+            if row.get("trace_id") != trace_id:
+                continue
+            outcomes.append({
+                "outcome_id": row.get("outcome_id"),
+                "event_type": row.get("event_type"),
+                "tool": row.get("tool"),
+                "polarity": row.get("polarity"),
+                "text": (row.get("text") or "")[:160],
+                "created_at": row.get("created_at"),
+            })
+
+    return {
+        "trace_id": trace_id,
+        "steps": steps,
+        "episodes": episodes,
+        "evidence": evidence_rows,
+        "outcomes": outcomes,
+        "available": True,
+    }
+
+
+def _queue_oldest_event_age_s() -> Optional[float]:
+    if not QUEUE_FILE.exists():
+        return None
+    try:
+        with QUEUE_FILE.open("r", encoding="utf-8") as f:
+            for line in f:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    data = json.loads(raw)
+                    ts = data.get("timestamp")
+                    if isinstance(ts, (int, float)):
+                        return max(0.0, time.time() - ts)
+                except Exception:
+                    continue
+    except Exception:
+        return None
+    return None
+
+
+def _format_age(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "â€”"
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    minutes = int(seconds // 60)
+    rem = int(seconds % 60)
+    if minutes < 60:
+        return f"{minutes}m {rem}s"
+    hours = minutes // 60
+    minutes = minutes % 60
+    return f"{hours}h {minutes}m"
+
+
 def generate_system_badges(data: Dict) -> str:
     """Generate HTML for system status badges in footer."""
     badges = []
@@ -281,28 +500,6 @@ def generate_system_badges(data: Dict) -> str:
             )
 
     return " ".join(badges)
-
-
-def _read_jsonl(path: Path, limit: 'Optional[int]' = None) -> list:
-    if not path.exists():
-        return []
-    items = []
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            for line in f:
-                raw = line.strip()
-                if not raw:
-                    continue
-                try:
-                    items.append(json.loads(raw))
-                except Exception:
-                    continue
-    except Exception:
-        return []
-
-    if limit and limit > 0:
-        return items[-limit:]
-    return items
 
 
 def get_ops_data() -> Dict:
@@ -406,6 +603,589 @@ def get_ops_data() -> Dict:
         "best_pairs": best_pairs[:6],
         "risky_pairs": risky_pairs[:6],
     }
+
+
+def _get_eidos_store_safe():
+    if not HAS_EIDOS:
+        return None
+    try:
+        return get_store()
+    except Exception:
+        return None
+
+
+def _get_active_episodes(store) -> List:
+    mapping = _load_json(EIDOS_ACTIVE_EPISODES_FILE)
+    ids = list(mapping.values()) if isinstance(mapping, dict) else []
+    episodes = []
+    for eid in ids:
+        try:
+            ep = store.get_episode(eid)
+        except Exception:
+            ep = None
+        if not ep:
+            continue
+        if getattr(ep, "outcome", None) == Outcome.IN_PROGRESS:
+            episodes.append(ep)
+    episodes.sort(key=lambda e: getattr(e, "start_ts", 0), reverse=True)
+    return episodes
+
+
+def _count_steps_since(store, seconds: float) -> int:
+    try:
+        cutoff = time.time() - seconds
+        with sqlite3.connect(store.db_path) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM steps WHERE created_at >= ?",
+                (cutoff,)
+            ).fetchone()
+            return int(row[0] or 0)
+    except Exception:
+        return 0
+
+
+def _distillation_sums(store) -> Dict[str, int]:
+    try:
+        with sqlite3.connect(store.db_path) as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(times_retrieved),0), COALESCE(SUM(times_used),0), COALESCE(SUM(times_helped),0) FROM distillations"
+            ).fetchone()
+            return {
+                "retrieved": int(row[0] or 0),
+                "used": int(row[1] or 0),
+                "helped": int(row[2] or 0),
+            }
+    except Exception:
+        return {"retrieved": 0, "used": 0, "helped": 0}
+
+
+def get_funnel_kpis() -> Dict[str, int]:
+    if not HAS_EIDOS:
+        return {"retrieved": 0, "cited": 0, "used": 0, "helped": 0, "promoted": 0}
+
+    store = _get_eidos_store_safe()
+    if not store:
+        return {"retrieved": 0, "cited": 0, "used": 0, "helped": 0, "promoted": 0}
+
+    sums = _distillation_sums(store)
+    cited = 0
+    try:
+        with sqlite3.connect(store.db_path) as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM steps WHERE memory_cited = 1"
+            ).fetchone()
+            cited = int(row[0] or 0)
+    except Exception:
+        cited = 0
+
+    promoter = Promoter()
+    promo_stats = promoter.get_promotion_status()
+
+    return {
+        "retrieved": sums.get("retrieved", 0),
+        "cited": cited,
+        "used": sums.get("used", 0),
+        "helped": sums.get("helped", 0),
+        "promoted": int(promo_stats.get("promoted_count", 0)),
+    }
+
+
+def _derive_watcher_alerts(store, episodes: List) -> List[Dict[str, Any]]:
+    if not episodes:
+        return []
+    engine = WatcherEngine()
+    alerts: List[Dict[str, Any]] = []
+    for ep in episodes:
+        steps = store.get_episode_steps(ep.episode_id)
+        if not steps:
+            continue
+        recent = steps[-10:]
+        last_step = steps[-1]
+        try:
+            episode_alerts = engine.check_all(ep, last_step, recent, memories_exist=False)
+            for alert in episode_alerts:
+                payload = alert.to_dict()
+                if getattr(last_step, "trace_id", None):
+                    payload["trace_id"] = last_step.trace_id
+                alerts.append(payload)
+        except Exception:
+            continue
+    alerts.sort(key=lambda a: a.get("timestamp", 0), reverse=True)
+    return alerts
+
+
+def _extract_repeat_failures(store, limit: int = 10) -> List[Dict[str, Any]]:
+    counts: Dict[str, int] = {}
+    steps = store.get_recent_steps(limit=300)
+    for step in steps:
+        try:
+            if step.evaluation != Evaluation.FAIL:
+                continue
+        except Exception:
+            if str(step.evaluation).lower() != "evaluation.fail":
+                continue
+        sig = (step.result or step.lesson or "failure").strip()
+        if not sig:
+            sig = "failure"
+        sig = sig[:80]
+        counts[sig] = counts.get(sig, 0) + 1
+    ranked = sorted(counts.items(), key=lambda x: -x[1])
+    return [{"signature": k, "count": v} for k, v in ranked[:limit]]
+
+
+def _extract_diff_thrash(store, limit: int = 10) -> List[Dict[str, Any]]:
+    counts: Dict[str, int] = {}
+    steps = store.get_recent_steps(limit=500)
+    for step in steps:
+        tool = str(step.action_details.get("tool") or "").lower()
+        if tool not in ("edit", "write"):
+            continue
+        file_path = step.action_details.get("file_path") or step.action_details.get("path") or ""
+        file_path = str(file_path)
+        if not file_path:
+            continue
+        counts[file_path] = counts.get(file_path, 0) + 1
+    ranked = sorted(counts.items(), key=lambda x: -x[1])
+    return [{"file": k, "count": v} for k, v in ranked[:limit]]
+
+
+def _extract_validation_gaps(store, limit: int = 10) -> List[Dict[str, Any]]:
+    gaps: List[Dict[str, Any]] = []
+    episodes = store.get_recent_episodes(limit=50)
+    for ep in episodes:
+        steps = store.get_episode_steps(ep.episode_id)
+        if len(steps) < 2:
+            continue
+        recent = steps[-3:]
+        if all((not s.validated and not s.validation_method) for s in recent):
+            gaps.append({
+                "episode_id": ep.episode_id,
+                "goal": ep.goal[:60],
+                "missing_count": len(recent),
+                "phase": ep.phase.value,
+            })
+    return gaps[:limit]
+
+
+def _extract_no_evidence_streaks(store, limit: int = 10) -> List[Dict[str, Any]]:
+    streaks: List[Dict[str, Any]] = []
+    episodes = store.get_recent_episodes(limit=50)
+    for ep in episodes:
+        steps = store.get_episode_steps(ep.episode_id)
+        if not steps:
+            continue
+        streak = 0
+        for step in reversed(steps):
+            if step.validated or step.validation_method:
+                break
+            streak += 1
+        if streak > 0:
+            streaks.append({
+                "episode_id": ep.episode_id,
+                "goal": ep.goal[:60],
+                "streak": streak,
+                "phase": ep.phase.value,
+            })
+    streaks.sort(key=lambda x: -x["streak"])
+    return streaks[:limit]
+
+
+def get_mission_control_data() -> Dict[str, Any]:
+    funnel = get_funnel_kpis()
+    services = service_status()
+    mind_ok = _http_ok("http://127.0.0.1:8080/health")
+    services["mind_server"] = {
+        "running": mind_ok,
+        "healthy": mind_ok,
+        "pid": None,
+    }
+
+    queue_stats = get_queue_stats()
+    oldest_age = _queue_oldest_event_age_s()
+    invalid_count = _count_jsonl(INVALID_EVENTS_FILE)
+    queue_health = {
+        **queue_stats,
+        "oldest_age_s": oldest_age,
+        "oldest_age": _format_age(oldest_age),
+        "invalid_events": invalid_count,
+        "lock_present": QUEUE_LOCK_FILE.exists(),
+    }
+
+    bridge = _load_json(BRIDGE_HEARTBEAT_FILE)
+    bridge_stats = bridge.get("stats", {}) if isinstance(bridge, dict) else {}
+    bridge_last = bridge.get("ts") if isinstance(bridge, dict) else None
+    bridge_health = {
+        "last_run_ts": bridge_last,
+        "last_run": datetime.fromtimestamp(bridge_last).strftime("%H:%M:%S") if bridge_last else "â€”",
+        "pattern_processed": bridge_stats.get("pattern_processed", 0),
+        "content_learned": bridge_stats.get("content_learned", 0),
+        "events_processed": bridge_stats.get("events_processed", 0),
+        "errors": bridge_stats.get("errors") or [],
+    }
+
+    eidos_block = {
+        "available": HAS_EIDOS,
+        "active_episodes": 0,
+        "steps_per_min": 0,
+        "watchers_per_min": 0,
+    }
+    active_episode = None
+    watcher_feed: List[Dict[str, Any]] = []
+    minimal_mode = {"currently_active": False}
+    acceptance_status = {}
+
+    if HAS_EIDOS:
+        store = _get_eidos_store_safe()
+        if store:
+            active_eps = _get_active_episodes(store)
+            eidos_block["active_episodes"] = len(active_eps)
+            eidos_block["steps_per_min"] = _count_steps_since(store, 60)
+            watcher_feed = _derive_watcher_alerts(store, active_eps)
+            eidos_block["watchers_per_min"] = len([w for w in watcher_feed if w.get("timestamp", 0) > time.time() - 60])
+
+            if active_eps:
+                ep = active_eps[0]
+                steps = store.get_episode_steps(ep.episode_id)
+                elapsed = time.time() - ep.start_ts
+                time_remaining = max(0, ep.budget.max_time_seconds - elapsed)
+                recent_steps_detail = []
+                for s in steps[-5:]:
+                    recent_steps_detail.append({
+                        "step_id": s.step_id,
+                        "intent": (s.intent or "")[:60],
+                        "evaluation": s.evaluation.value if hasattr(s.evaluation, "value") else str(s.evaluation),
+                        "trace_id": getattr(s, "trace_id", None),
+                    })
+                active_episode = {
+                    "episode_id": ep.episode_id,
+                    "goal": ep.goal,
+                    "phase": ep.phase.value,
+                    "step_count": ep.step_count,
+                    "budget_remaining": max(0, ep.budget.max_steps - ep.step_count),
+                    "time_remaining": _format_age(time_remaining),
+                    "recent_steps": len(steps),
+                    "recent_steps_detail": recent_steps_detail,
+                }
+
+                compiler = get_acceptance_compiler()
+                plan = None
+                for p in compiler.plans.values():
+                    if p.episode_id == ep.episode_id:
+                        plan = p
+                        break
+                if plan:
+                    acceptance_status = {
+                        "plan_id": plan.plan_id,
+                        "is_approved": plan.is_approved,
+                        "critical_tests": len(plan.critical_tests),
+                        "progress": round(plan.progress * 100, 1),
+                    }
+
+            minimal = get_minimal_mode_controller()
+            minimal_mode = minimal.get_stats()
+            minimal_mode.update(minimal.state.to_dict())
+
+    escalations = _read_jsonl(EIDOS_ESCALATIONS_FILE, limit=10)
+
+    return {
+        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "funnel": funnel,
+        "services": services,
+        "queue": queue_health,
+        "bridge": bridge_health,
+        "eidos": eidos_block,
+        "active_episode": active_episode,
+        "acceptance_status": acceptance_status,
+        "minimal_mode": minimal_mode,
+        "watchers": watcher_feed[:20],
+        "escalations": escalations[-10:],
+    }
+
+
+def get_learning_factory_data() -> Dict[str, Any]:
+    funnel = get_funnel_kpis()
+    if not HAS_EIDOS:
+        return {"funnel": funnel, "available": False}
+
+    store = _get_eidos_store_safe()
+    if not store:
+        return {"funnel": funnel, "available": False}
+
+    now = time.time()
+    start_day = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    last_7d = now - 7 * 86400
+
+    with sqlite3.connect(store.db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        total_distillations = conn.execute("SELECT COUNT(*) FROM distillations").fetchone()[0]
+        today_distillations = conn.execute(
+            "SELECT COUNT(*) FROM distillations WHERE created_at >= ?",
+            (start_day,)
+        ).fetchone()[0]
+        week_distillations = conn.execute(
+            "SELECT COUNT(*) FROM distillations WHERE created_at >= ?",
+            (last_7d,)
+        ).fetchone()[0]
+        by_type_rows = conn.execute(
+            "SELECT type, COUNT(*) as cnt FROM distillations GROUP BY type"
+        ).fetchall()
+        by_type = {r["type"]: r["cnt"] for r in by_type_rows}
+
+        dist_rows = conn.execute(
+            "SELECT * FROM distillations ORDER BY created_at DESC LIMIT 200"
+        ).fetchall()
+
+    distillations = [store._row_to_distillation(r) for r in dist_rows]
+    top_helped = sorted(distillations, key=lambda d: -d.times_helped)[:5]
+    top_ignored = sorted(
+        [d for d in distillations if d.times_retrieved > 0 and d.times_used == 0],
+        key=lambda d: -d.times_retrieved
+    )[:5]
+
+    ledger = get_truth_ledger()
+    ledger_stats = ledger.get_stats()
+    evidence_levels = {"none": 0, "weak": 0, "strong": 0}
+    contradicted = 0
+    for entry in ledger.entries.values():
+        evidence_levels[entry.evidence_level.value] = evidence_levels.get(entry.evidence_level.value, 0) + 1
+        if entry.status.value == "contradicted":
+            contradicted += 1
+
+    promoter = Promoter()
+    promo_stats = promoter.get_promotion_status()
+    cognitive = CognitiveLearner()
+    promoted_items = [
+        {
+            "insight": i.insight[:80],
+            "target": i.promoted_to or "unknown",
+            "reliability": i.reliability,
+        }
+        for i in cognitive.insights.values()
+        if i.promoted
+    ]
+    promoted_items.sort(key=lambda x: -x["reliability"])
+
+    revalidation = store.get_distillations_for_revalidation()
+
+    return {
+        "funnel": funnel,
+        "available": True,
+        "distillations": {
+            "total": total_distillations,
+            "today": today_distillations,
+            "last_7d": week_distillations,
+            "by_type": by_type,
+        },
+        "truth_ledger": {
+            **ledger_stats,
+            "contradicted": contradicted,
+            "evidence_levels": evidence_levels,
+        },
+        "utilization": {
+            "top_helped": [
+                {"id": d.distillation_id, "statement": d.statement[:80], "helped": d.times_helped}
+                for d in top_helped
+            ],
+            "top_ignored": [
+                {"id": d.distillation_id, "statement": d.statement[:80], "retrieved": d.times_retrieved}
+                for d in top_ignored
+            ],
+        },
+        "promotion": {
+            **promo_stats,
+            "recent_promoted": promoted_items[:6],
+        },
+        "revalidation": {
+            "due": len(revalidation),
+            "items": [
+                {"id": d.distillation_id, "statement": d.statement[:80], "due": d.revalidate_by}
+                for d in revalidation[:6]
+            ],
+        },
+    }
+
+
+def get_rabbit_recovery_data() -> Dict[str, Any]:
+    funnel = get_funnel_kpis()
+    if not HAS_EIDOS:
+        return {"funnel": funnel, "available": False}
+
+    store = _get_eidos_store_safe()
+    if not store:
+        return {"funnel": funnel, "available": False}
+
+    repeat_failures = _extract_repeat_failures(store)
+    diff_thrash = _extract_diff_thrash(store)
+    no_evidence = _extract_no_evidence_streaks(store)
+
+    escape_distillations = store.get_distillations_by_domain("escape_protocol", limit=50)
+    escape_count = len(escape_distillations)
+
+    episodes = store.get_recent_episodes(limit=50)
+    escape_episodes = [e for e in episodes if e.escape_protocol_triggered]
+    recovered = len([e for e in escape_episodes if e.outcome == Outcome.SUCCESS])
+    avg_steps_to_escape = 0
+    if escape_episodes:
+        avg_steps_to_escape = sum(e.step_count for e in escape_episodes) / len(escape_episodes)
+
+    minimal = get_minimal_mode_controller()
+    minimal_stats = minimal.get_stats()
+    history = _read_jsonl(MINIMAL_MODE_HISTORY_FILE, limit=20)
+
+    escalations = _read_jsonl(EIDOS_ESCALATIONS_FILE, limit=10)
+
+    return {
+        "funnel": funnel,
+        "available": True,
+        "scoreboard": {
+            "repeat_failures": repeat_failures,
+            "no_evidence": no_evidence,
+            "diff_thrash": diff_thrash,
+        },
+        "escapes": {
+            "triggered": escape_count,
+            "avg_steps_to_escape": round(avg_steps_to_escape, 1) if escape_episodes else 0,
+            "recovered": recovered,
+            "artifacts": escape_count,
+            "recent": [
+                {"id": d.distillation_id, "statement": d.statement[:80], "created_at": d.created_at}
+                for d in escape_distillations[:6]
+            ],
+        },
+        "minimal_mode": {
+            **minimal_stats,
+            "history": history,
+        },
+        "escalations": escalations,
+    }
+
+
+def get_acceptance_data() -> Dict[str, Any]:
+    funnel = get_funnel_kpis()
+    if not HAS_EIDOS:
+        return {"funnel": funnel, "available": False}
+
+    store = _get_eidos_store_safe()
+    if not store:
+        return {"funnel": funnel, "available": False}
+
+    compiler = get_acceptance_compiler()
+    plans = []
+    for plan in compiler.plans.values():
+        status_counts = {
+            "pending": len([t for t in plan.tests if t.status.value == "pending"]),
+            "passed": len([t for t in plan.tests if t.status.value == "passed"]),
+            "failed": len([t for t in plan.tests if t.status.value == "failed"]),
+            "skipped": len([t for t in plan.tests if t.status.value == "skipped"]),
+            "blocked": len([t for t in plan.tests if t.status.value == "blocked"]),
+        }
+        plans.append({
+            "plan_id": plan.plan_id,
+            "episode_id": plan.episode_id,
+            "goal": plan.goal[:80],
+            "is_approved": plan.is_approved,
+            "progress": round(plan.progress * 100, 1),
+            "critical_tests": len(plan.critical_tests),
+            "status_counts": status_counts,
+            "tests": [
+                {
+                    "description": t.description[:80],
+                    "status": t.status.value,
+                    "priority": t.priority,
+                    "evidence_ref": t.evidence_ref or "",
+                }
+                for t in plan.tests[:6]
+            ],
+        })
+
+    tracker = get_deferred_tracker()
+    pending = tracker.get_pending()
+    overdue = tracker.get_overdue()
+
+    validation_gaps = _extract_validation_gaps(store)
+
+    evidence = get_evidence_store()
+    evidence_stats = evidence.get_stats()
+
+    return {
+        "funnel": funnel,
+        "available": True,
+        "plans": plans,
+        "deferrals": {
+            "pending": len(pending),
+            "overdue": len(overdue),
+            "items": [
+                {
+                    "step_id": d.step_id,
+                    "reason": d.reason,
+                    "age_s": time.time() - d.deferred_at,
+                    "max_wait_s": d.max_wait_seconds,
+                }
+                for d in pending[:6]
+            ],
+        },
+        "validation_gaps": validation_gaps,
+        "evidence": evidence_stats,
+    }
+
+
+def _handle_eidos_action(path: str, payload: Dict[str, Any]) -> tuple[str, str]:
+    if not HAS_EIDOS:
+        return "error", "EIDOS not available"
+
+    store = _get_eidos_store_safe()
+    if not store:
+        return "error", "EIDOS store unavailable"
+
+    episodes = _get_active_episodes(store)
+    if not episodes:
+        return "error", "No active episodes"
+
+    episode = episodes[0]
+    steps = store.get_episode_steps(episode.episode_id)
+    reason = str(payload.get("reason") or "manual").strip()
+
+    if path == "/api/eidos/escape":
+        ecp = get_elevated_control_plane()
+        result = ecp.initiate_escape(episode, steps, reason=reason)
+        _append_jsonl(EIDOS_ESCALATIONS_FILE, {
+            "type": "escape_protocol",
+            "episode_id": episode.episode_id,
+            "reason": result.reason or reason,
+            "summary": result.summary,
+            "timestamp": time.time(),
+        })
+        return "ok", result.reason or "escape triggered"
+
+    if path == "/api/eidos/minimal/enter":
+        minimal = get_minimal_mode_controller()
+        mm_reason = MinimalModeReason.MANUAL_TRIGGER
+        try:
+            if reason:
+                mm_reason = MinimalModeReason(reason)
+        except Exception:
+            mm_reason = MinimalModeReason.MANUAL_TRIGGER
+        minimal.enter(episode, mm_reason)
+        return "ok", f"entered minimal mode ({mm_reason.value})"
+
+    if path == "/api/eidos/minimal/exit":
+        minimal = get_minimal_mode_controller()
+        minimal.exit(episode, reason=reason)
+        return "ok", "exited minimal mode"
+
+    if path == "/api/eidos/escalate":
+        blocker = payload.get("reason") or "manual escalation"
+        esc = build_escalation(episode, steps, EscalationType.BLOCKED, str(blocker))
+        _append_jsonl(EIDOS_ESCALATIONS_FILE, {
+            "type": esc.escalation_type.value,
+            "episode_id": episode.episode_id,
+            "reason": blocker,
+            "summary": esc.summary[:200],
+            "timestamp": time.time(),
+        })
+        return "ok", "escalation recorded"
+
+    return "error", "unknown action"
 
 
 def generate_html():
@@ -2596,6 +3376,732 @@ def generate_ops_html():
     return html
 
 
+def _nav_html(active: str) -> str:
+    links = [
+        ("mission", "/", "Mission Control"),
+        ("learning", "/learning", "Learning Factory"),
+        ("rabbit", "/rabbit", "Rabbit Hole Recovery"),
+        ("acceptance", "/acceptance", "Acceptance Board"),
+    ]
+    items = []
+    for key, href, label in links:
+        cls = "nav-link active" if key == active else "nav-link"
+        items.append(f'<a class="{cls}" href="{href}">{label}</a>')
+    return "".join(items)
+
+
+def _funnel_html(funnel: Dict[str, Any]) -> str:
+    return f"""
+    <div class="funnel-grid">
+      <div class="funnel-item"><span class="f-label">retrieved</span><span id="f-retrieved" class="f-value">{funnel.get("retrieved", 0)}</span></div>
+      <div class="funnel-item"><span class="f-label">cited</span><span id="f-cited" class="f-value">{funnel.get("cited", 0)}</span></div>
+      <div class="funnel-item"><span class="f-label">used</span><span id="f-used" class="f-value">{funnel.get("used", 0)}</span></div>
+      <div class="funnel-item"><span class="f-label">helped</span><span id="f-helped" class="f-value">{funnel.get("helped", 0)}</span></div>
+      <div class="funnel-item accent"><span class="f-label">promoted</span><span id="f-promoted" class="f-value">{funnel.get("promoted", 0)}</span></div>
+    </div>
+    """
+
+
+def _base_page(title: str, active: str, body: str, data: Dict[str, Any], endpoint: str, page_js: str) -> str:
+    boot = json.dumps(data)
+    nav = _nav_html(active)
+    funnel = _funnel_html(data.get("funnel", {}))
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{title}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+    :root {{
+      --bg-0: #0b0f14;
+      --bg-1: #101724;
+      --panel: #141d2b;
+      --panel-2: #0f1621;
+      --text: #e6edf7;
+      --muted: #9aa8bb;
+      --accent: #f5b547;
+      --accent-2: #48d1a6;
+      --danger: #ff6b6b;
+      --warn: #f6c26b;
+      --ok: #6ee7b7;
+      --border: rgba(148, 163, 184, 0.18);
+      --shadow: 0 18px 40px rgba(0,0,0,0.35);
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      font-family: "Space Grotesk", system-ui, -apple-system, sans-serif;
+      color: var(--text);
+      background: radial-gradient(1200px 600px at 10% -10%, rgba(72,209,166,0.15), transparent),
+                  radial-gradient(1000px 500px at 110% 0%, rgba(245,181,71,0.12), transparent),
+                  linear-gradient(180deg, var(--bg-1), var(--bg-0));
+      min-height: 100vh;
+    }}
+    .bg-grid {{
+      position: fixed;
+      inset: 0;
+      background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 120px 120px;
+      pointer-events: none;
+      opacity: 0.25;
+    }}
+    header {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 6vw 12px;
+    }}
+    .title {{
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }}
+    nav {{
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }}
+    .nav-link {{
+      text-decoration: none;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 999px;
+      transition: 0.2s ease;
+      font-size: 0.85rem;
+    }}
+    .nav-link:hover {{
+      color: var(--text);
+      border-color: rgba(245,181,71,0.6);
+    }}
+    .nav-link.active {{
+      color: var(--text);
+      background: rgba(245,181,71,0.12);
+      border-color: rgba(245,181,71,0.6);
+    }}
+    .funnel {{
+      padding: 0 6vw 18px;
+    }}
+    .funnel-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+    }}
+    .funnel-item {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 10px 14px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }}
+    .funnel-item.accent {{
+      border-color: rgba(72,209,166,0.6);
+      background: linear-gradient(135deg, rgba(72,209,166,0.16), rgba(20,29,43,0.9));
+    }}
+    .f-label {{
+      text-transform: uppercase;
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      color: var(--muted);
+    }}
+    .f-value {{
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 1.2rem;
+      font-weight: 600;
+    }}
+    main {{
+      padding: 0 6vw 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }}
+    .grid {{
+      display: grid;
+      gap: 18px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }}
+    .card {{
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }}
+    .card-header {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }}
+    .card-title {{
+      font-weight: 600;
+      font-size: 1rem;
+    }}
+    .muted {{
+      color: var(--muted);
+      font-size: 0.8rem;
+    }}
+    .pill {{
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }}
+    .pill.ok {{ color: var(--ok); border-color: rgba(110,231,183,0.5); }}
+    .pill.warn {{ color: var(--warn); border-color: rgba(246,194,107,0.5); }}
+    .pill.danger {{ color: var(--danger); border-color: rgba(255,107,107,0.5); }}
+    .list {{
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }}
+    .row {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.85rem;
+      padding: 8px 10px;
+      border-radius: 12px;
+      background: var(--panel-2);
+      border: 1px solid rgba(148,163,184,0.12);
+    }}
+    .mono {{
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+    }}
+    .actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }}
+    .input {{
+      border: 1px solid var(--border);
+      background: rgba(15,22,33,0.9);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      min-width: 180px;
+    }}
+    .input:focus {{
+      outline: none;
+      border-color: rgba(245,181,71,0.7);
+    }}
+    .btn {{
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: rgba(15,22,33,0.8);
+      color: var(--text);
+      font-size: 0.8rem;
+      cursor: pointer;
+    }}
+    .btn.primary {{
+      background: rgba(245,181,71,0.16);
+      border-color: rgba(245,181,71,0.6);
+    }}
+    .btn.danger {{
+      background: rgba(255,107,107,0.16);
+      border-color: rgba(255,107,107,0.6);
+    }}
+    footer {{
+      padding: 0 6vw 24px;
+      color: var(--muted);
+      font-size: 0.75rem;
+    }}
+    @keyframes pulse {{
+      0% {{ box-shadow: 0 0 0 rgba(245,181,71,0.0); }}
+      50% {{ box-shadow: 0 0 18px rgba(245,181,71,0.25); }}
+      100% {{ box-shadow: 0 0 0 rgba(245,181,71,0.0); }}
+    }}
+    .pulse {{ animation: pulse 3s ease-in-out infinite; }}
+  </style>
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <header>
+    <div class="title">{title}</div>
+    <nav>{nav}</nav>
+  </header>
+  <section class="funnel">{funnel}</section>
+  <main>{body}</main>
+  <footer>Updated <span id="last-updated">{datetime.now().strftime("%H:%M:%S")}</span></footer>
+  <script>
+    const ENDPOINT = "{endpoint}";
+    const BOOT = {boot};
+    const $ = (id) => document.getElementById(id);
+    const setText = (id, value) => {{ const el = $(id); if (el) el.textContent = value ?? "â€”"; }};
+    const renderList = (id, items, render) => {{
+      const el = $(id);
+      if (!el) return;
+      if (!items || !items.length) {{
+        el.innerHTML = '<div class="muted">No activity yet.</div>';
+        return;
+      }}
+      el.innerHTML = items.map(render).join('');
+    }};
+    const updateFunnel = (f) => {{
+      if (!f) return;
+      setText("f-retrieved", f.retrieved ?? 0);
+      setText("f-cited", f.cited ?? 0);
+      setText("f-used", f.used ?? 0);
+      setText("f-helped", f.helped ?? 0);
+      setText("f-promoted", f.promoted ?? 0);
+    }};
+    const updatePage = (data) => {{
+      if (!data) return;
+      updateFunnel(data.funnel);
+      setText("last-updated", data.timestamp || new Date().toLocaleTimeString());
+      {page_js}
+    }};
+    updatePage(BOOT);
+    setInterval(async () => {{
+      try {{
+        const res = await fetch(ENDPOINT, {{ cache: "no-store" }});
+        const data = await res.json();
+        updatePage(data);
+      }} catch (e) {{}}
+    }}, 4000);
+  </script>
+</body>
+</html>"""
+
+
+def generate_mission_html() -> str:
+    data = get_mission_control_data()
+    body = """
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Services Health</span><span class="pill" id="services-summary"></span></div>
+        <div class="list" id="services-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Queue Health</span><span class="pill" id="queue-status"></span></div>
+        <div class="list" id="queue-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Bridge Cycle</span><span class="pill" id="bridge-status"></span></div>
+        <div class="list" id="bridge-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">EIDOS Activity</span><span class="pill" id="eidos-status"></span></div>
+        <div class="list" id="eidos-list"></div>
+      </div>
+    </section>
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Active Episode</span><span class="pill" id="episode-phase"></span></div>
+        <div class="list" id="episode-details"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">System Mode</span><span class="pill" id="mode-status"></span></div>
+        <div class="list" id="mode-details"></div>
+      </div>
+    </section>
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Watchers Feed</span><span class="muted">last 20</span></div>
+        <div class="list" id="watchers-feed"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Escalations</span><span class="muted">last 10</span></div>
+        <div class="list" id="escalations-feed"></div>
+      </div>
+    </section>
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Trace Drilldown</span><span class="muted">trace_id</span></div>
+        <div class="actions">
+          <input id="trace-input" class="input" placeholder="trace_id" />
+          <button class="btn primary" id="trace-load">Load</button>
+        </div>
+        <div class="list" id="trace-summary"></div>
+        <div class="list" id="trace-steps"></div>
+        <div class="list" id="trace-evidence"></div>
+        <div class="list" id="trace-outcomes"></div>
+      </div>
+    </section>
+    """
+    page_js = """
+      const renderTrace = (trace) => {
+        if (!trace) return;
+        const summary = [
+          `<div class="row"><span>trace</span><span class="mono">${trace.trace_id || "—"}</span></div>`,
+          `<div class="row"><span>steps</span><span class="mono">${(trace.steps || []).length}</span></div>`,
+          `<div class="row"><span>evidence</span><span class="mono">${(trace.evidence || []).length}</span></div>`,
+          `<div class="row"><span>outcomes</span><span class="mono">${(trace.outcomes || []).length}</span></div>`
+        ];
+        renderList("trace-summary", summary, (x) => x);
+        renderList("trace-steps", trace.steps || [], (s) => `
+          <div class="row">
+            <span>${s.intent || "step"}</span>
+            <span class="pill ${s.evaluation === "pass" ? "ok" : s.evaluation === "fail" ? "danger" : "warn"}">${s.evaluation || "unknown"}</span>
+            <span class="mono">${s.step_id || ""}</span>
+          </div>
+        `);
+        renderList("trace-evidence", trace.evidence || [], (e) => `
+          <div class="row">
+            <span>${e.type || "evidence"}</span>
+            <span class="mono">${e.step_id || ""}</span>
+            <span class="muted">${e.tool || ""}</span>
+          </div>
+        `);
+        renderList("trace-outcomes", trace.outcomes || [], (o) => `
+          <div class="row">
+            <span>${o.polarity || "outcome"}</span>
+            <span class="muted">${o.text || ""}</span>
+          </div>
+        `);
+      };
+      const loadTrace = async (traceId) => {
+        const tid = (traceId || "").trim();
+        if (!tid) return;
+        try {
+          const res = await fetch(`/api/trace?trace_id=${encodeURIComponent(tid)}`, { cache: "no-store" });
+          const data = await res.json();
+          renderTrace(data);
+        } catch (e) {}
+      };
+      const traceButton = (tid) => {
+        if (!tid) return "";
+        return `<button class="btn" onclick="loadTrace('${tid}')">trace</button>`;
+      };
+
+      const services = data.services || {};
+      const serviceItems = Object.entries(services).map(([name, info]) => {
+        const ok = info.healthy || info.running;
+        const pill = ok ? "ok" : "danger";
+        const details = [];
+        if (info.pid) details.push(`pid ${info.pid}`);
+        if (info.heartbeat_age_s !== undefined && info.heartbeat_age_s !== null) {
+          details.push(`heartbeat ${Math.round(info.heartbeat_age_s)}s`);
+        }
+        return `<div class="row"><span>${name.replace(/_/g,' ')}</span><span class="pill ${pill}">${ok ? "ok" : "down"}</span><span class="muted mono">${details.join(" Â· ")}</span></div>`;
+      });
+      renderList("services-list", serviceItems, (x) => x);
+      setText("services-summary", Object.keys(services).length + " services");
+
+      const queue = data.queue || {};
+      const queueItems = [
+        `<div class="row"><span>events</span><span class="mono">${queue.event_count ?? 0}</span></div>`,
+        `<div class="row"><span>oldest event</span><span class="mono">${queue.oldest_age ?? "â€”"}</span></div>`,
+        `<div class="row"><span>invalid events</span><span class="mono">${queue.invalid_events ?? 0}</span></div>`,
+        `<div class="row"><span>lock present</span><span class="mono">${queue.lock_present ? "yes" : "no"}</span></div>`
+      ];
+      renderList("queue-list", queueItems, (x) => x);
+      setText("queue-status", queue.needs_rotation ? "rotate" : "ok");
+
+      const bridge = data.bridge || {};
+      const bridgeItems = [
+        `<div class="row"><span>last run</span><span class="mono">${bridge.last_run || "â€”"}</span></div>`,
+        `<div class="row"><span>patterns</span><span class="mono">${bridge.pattern_processed ?? 0}</span></div>`,
+        `<div class="row"><span>content learned</span><span class="mono">${bridge.content_learned ?? 0}</span></div>`,
+        `<div class="row"><span>errors</span><span class="mono">${(bridge.errors || []).length}</span></div>`
+      ];
+      renderList("bridge-list", bridgeItems, (x) => x);
+      setText("bridge-status", (bridge.errors || []).length ? "errors" : "ok");
+
+      const eidos = data.eidos || {};
+      const eidosItems = [
+        `<div class="row"><span>active episodes</span><span class="mono">${eidos.active_episodes ?? 0}</span></div>`,
+        `<div class="row"><span>steps/min</span><span class="mono">${eidos.steps_per_min ?? 0}</span></div>`,
+        `<div class="row"><span>watchers/min</span><span class="mono">${eidos.watchers_per_min ?? 0}</span></div>`
+      ];
+      renderList("eidos-list", eidosItems, (x) => x);
+      setText("eidos-status", eidos.active_episodes ? "active" : "idle");
+
+      const ep = data.active_episode;
+      if (ep) {
+        setText("episode-phase", ep.phase);
+        const details = [
+          `<div class="row"><span>goal</span><span class="muted">${ep.goal}</span></div>`,
+          `<div class="row"><span>steps</span><span class="mono">${ep.step_count}</span></div>`,
+          `<div class="row"><span>budget left</span><span class="mono">${ep.budget_remaining}</span></div>`,
+          `<div class="row"><span>time remaining</span><span class="mono">${ep.time_remaining}</span></div>`
+        ];
+        const acc = data.acceptance_status || {};
+        if (acc.plan_id) {
+          details.push(`<div class="row"><span>acceptance</span><span class="mono">${acc.is_approved ? "approved" : "pending"} (${acc.critical_tests} critical)</span></div>`);
+        }
+        const recent = ep.recent_steps_detail || [];
+        for (const s of recent) {
+          details.push(`<div class="row"><span>${s.intent || "step"}</span><span class="mono">${s.trace_id || "—"}</span>${traceButton(s.trace_id)}</div>`);
+        }
+        renderList("episode-details", details, (x) => x);
+      } else {
+        setText("episode-phase", "none");
+        renderList("episode-details", [], (x) => x);
+      }
+
+      const mode = data.minimal_mode || {};
+      const modeActive = mode.currently_active;
+      setText("mode-status", modeActive ? "minimal" : "normal");
+      const modeItems = [
+        `<div class="row"><span>state</span><span class="mono">${modeActive ? "active" : "normal"}</span></div>`,
+        `<div class="row"><span>reason</span><span class="mono">${mode.reason || "â€”"}</span></div>`,
+        `<div class="row"><span>edits allowed</span><span class="mono">${mode.edits_allowed ? "yes" : "no"}</span></div>`
+      ];
+      renderList("mode-details", modeItems, (x) => x);
+
+      renderList("watchers-feed", data.watchers || [], (w) => `
+        <div class="row">
+          <span>${w.watcher}</span>
+          <span class="pill ${w.severity === "force" ? "danger" : w.severity === "block" ? "warn" : "warn"}">${w.severity}</span>
+          <span class="muted">${w.message}</span>
+          ${traceButton(w.trace_id)}
+        </div>
+      `);
+
+      renderList("escalations-feed", data.escalations || [], (e) => `
+        <div class="row">
+          <span>${e.type || "escalation"}</span>
+          <span class="muted">${e.summary || e.reason || ""}</span>
+          <span class="mono">${new Date((e.timestamp || 0) * 1000).toLocaleTimeString()}</span>
+        </div>
+      `);
+
+      const traceBtn = document.getElementById("trace-load");
+      if (traceBtn && !traceBtn.dataset.bound) {
+        traceBtn.dataset.bound = "1";
+        traceBtn.onclick = () => {
+          const input = document.getElementById("trace-input");
+          loadTrace(input ? input.value : "");
+        };
+      }
+    """
+    return _base_page("Mission Control", "mission", body, data, "/api/mission", page_js)
+
+
+def generate_learning_html() -> str:
+    data = get_learning_factory_data()
+    body = """
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Distillation Pipeline</span><span class="pill" id="distill-total"></span></div>
+        <div class="list" id="distillations-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Truth Ledger</span><span class="pill" id="truth-total"></span></div>
+        <div class="list" id="truth-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Utilization</span><span class="pill" id="util-status"></span></div>
+        <div class="list" id="util-list"></div>
+      </div>
+    </section>
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Top Helped Distillations</span></div>
+        <div class="list" id="top-helped"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Top Retrieved / Ignored</span></div>
+        <div class="list" id="top-ignored"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Promotion</span><span class="pill" id="promo-ready"></span></div>
+        <div class="list" id="promo-list"></div>
+      </div>
+    </section>
+    """
+    page_js = """
+      const dist = data.distillations || {};
+      setText("distill-total", dist.total ?? 0);
+      const distList = [
+        `<div class="row"><span>today</span><span class="mono">${dist.today ?? 0}</span></div>`,
+        `<div class="row"><span>7d</span><span class="mono">${dist.last_7d ?? 0}</span></div>`
+      ];
+      Object.entries(dist.by_type || {}).forEach(([k,v]) => {
+        distList.push(`<div class="row"><span>${k}</span><span class="mono">${v}</span></div>`);
+      });
+      renderList("distillations-list", distList, (x) => x);
+
+      const truth = data.truth_ledger || {};
+      setText("truth-total", truth.total ?? 0);
+      const truthList = [
+        `<div class="row"><span>claims</span><span class="mono">${truth.claims ?? 0}</span></div>`,
+        `<div class="row"><span>facts</span><span class="mono">${truth.facts ?? 0}</span></div>`,
+        `<div class="row"><span>rules</span><span class="mono">${truth.rules ?? 0}</span></div>`,
+        `<div class="row"><span>stale</span><span class="mono">${truth.stale ?? 0}</span></div>`,
+        `<div class="row"><span>contradicted</span><span class="mono">${truth.contradicted ?? 0}</span></div>`
+      ];
+      const levels = truth.evidence_levels || {};
+      truthList.push(`<div class="row"><span>evidence strong</span><span class="mono">${levels.strong ?? 0}</span></div>`);
+      truthList.push(`<div class="row"><span>evidence weak</span><span class="mono">${levels.weak ?? 0}</span></div>`);
+      truthList.push(`<div class="row"><span>evidence none</span><span class="mono">${levels.none ?? 0}</span></div>`);
+      renderList("truth-list", truthList, (x) => x);
+
+      const util = data.utilization || {};
+      setText("util-status", (data.funnel?.helped ?? 0) + " helped");
+      renderList("util-list", [
+        `<div class="row"><span>retrieved</span><span class="mono">${data.funnel?.retrieved ?? 0}</span></div>`,
+        `<div class="row"><span>used</span><span class="mono">${data.funnel?.used ?? 0}</span></div>`,
+        `<div class="row"><span>helped</span><span class="mono">${data.funnel?.helped ?? 0}</span></div>`
+      ], (x) => x);
+
+      renderList("top-helped", util.top_helped || [], (d) => `
+        <div class="row"><span>${d.statement}</span><span class="mono">${d.helped}</span></div>
+      `);
+      renderList("top-ignored", util.top_ignored || [], (d) => `
+        <div class="row"><span>${d.statement}</span><span class="mono">${d.retrieved}</span></div>
+      `);
+
+      const promo = data.promotion || {};
+      setText("promo-ready", `${promo.ready_for_promotion ?? 0} ready`);
+      renderList("promo-list", promo.recent_promoted || [], (p) => `
+        <div class="row"><span>${p.insight}</span><span class="mono">${p.target}</span></div>
+      `);
+    """
+    return _base_page("Learning Factory", "learning", body, data, "/api/learning", page_js)
+
+
+def generate_rabbit_html() -> str:
+    data = get_rabbit_recovery_data()
+    body = """
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Rabbit Hole Scoreboard</span></div>
+        <div class="list" id="scoreboard-repeat"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">No-Evidence Streaks</span></div>
+        <div class="list" id="scoreboard-evidence"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Diff Thrash Files</span></div>
+        <div class="list" id="scoreboard-diff"></div>
+      </div>
+    </section>
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Escape Protocol Outcomes</span></div>
+        <div class="list" id="escape-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Minimal Mode Timeline</span></div>
+        <div class="list" id="minimal-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Manual Actions</span></div>
+        <div class="actions">
+          <button class="btn danger" onclick="triggerEscape()">Trigger ESCAPE_PROTOCOL</button>
+          <button class="btn primary" onclick="enterMinimal()">Enter Minimal Mode</button>
+          <button class="btn" onclick="freezeEdits()">Freeze Edits</button>
+          <button class="btn" onclick="createEscalation()">Create Escalation</button>
+        </div>
+        <div class="list" id="action-status"></div>
+      </div>
+    </section>
+    """
+    page_js = """
+      const sb = data.scoreboard || {};
+      renderList("scoreboard-repeat", sb.repeat_failures || [], (r) => `
+        <div class="row"><span>${r.signature}</span><span class="mono">${r.count}</span></div>
+      `);
+      renderList("scoreboard-evidence", sb.no_evidence || [], (r) => `
+        <div class="row"><span>${r.goal}</span><span class="mono">${r.streak}</span></div>
+      `);
+      renderList("scoreboard-diff", sb.diff_thrash || [], (r) => `
+        <div class="row"><span>${r.file}</span><span class="mono">${r.count}</span></div>
+      `);
+
+      const esc = data.escapes || {};
+      renderList("escape-list", [
+        `<div class="row"><span>triggered</span><span class="mono">${esc.triggered ?? 0}</span></div>`,
+        `<div class="row"><span>avg steps to escape</span><span class="mono">${esc.avg_steps_to_escape ?? 0}</span></div>`,
+        `<div class="row"><span>recovered</span><span class="mono">${esc.recovered ?? 0}</span></div>`,
+        `<div class="row"><span>learning artifacts</span><span class="mono">${esc.artifacts ?? 0}</span></div>`
+      ], (x) => x);
+
+      const minimal = data.minimal_mode || {};
+      renderList("minimal-list", minimal.history || [], (h) => `
+        <div class="row"><span>${h.event}</span><span class="muted">${h.reason || ""}</span><span class="mono">${new Date((h.timestamp || 0) * 1000).toLocaleTimeString()}</span></div>
+      `);
+
+      window.triggerEscape = async () => {{
+        await postAction('/api/eidos/escape', {{ reason: 'manual' }});
+      }};
+      window.enterMinimal = async () => {{
+        await postAction('/api/eidos/minimal/enter', {{ reason: 'manual_trigger' }});
+      }};
+      window.freezeEdits = async () => {{
+        await postAction('/api/eidos/minimal/enter', {{ reason: 'manual_trigger' }});
+      }};
+      window.createEscalation = async () => {{
+        const reason = prompt("Escalation summary?");
+        if (!reason) return;
+        await postAction('/api/eidos/escalate', {{ reason }});
+      }};
+      async function postAction(url, payload) {{
+        try {{
+          const res = await fetch(url, {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(payload || {{}}) }});
+          const data = await res.json();
+          renderList("action-status", [data], (d) => `<div class="row"><span>${d.status}</span><span class="muted">${d.message || ""}</span></div>`);
+        }} catch (e) {{
+          renderList("action-status", [{{status: 'error', message: e.message}}], (d) => `<div class="row"><span>${d.status}</span><span class="muted">${d.message}</span></div>`);
+        }}
+      }}
+    """
+    return _base_page("Rabbit Hole Recovery", "rabbit", body, data, "/api/rabbit", page_js)
+
+
+def generate_acceptance_html() -> str:
+    data = get_acceptance_data()
+    body = """
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Acceptance Plans</span></div>
+        <div class="list" id="plans-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Deferrals</span><span class="pill" id="deferral-count"></span></div>
+        <div class="list" id="deferral-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Validation Gap Alerts</span></div>
+        <div class="list" id="gap-list"></div>
+      </div>
+    </section>
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Evidence Store</span></div>
+        <div class="list" id="evidence-list"></div>
+      </div>
+    </section>
+    """
+    page_js = """
+      renderList("plans-list", data.plans || [], (p) => `
+        <div class="row">
+          <span>${p.goal}</span>
+          <span class="pill ${p.is_approved ? "ok" : "warn"}">${p.is_approved ? "approved" : "pending"}</span>
+          <span class="mono">${p.progress}%</span>
+        </div>
+      `);
+      const def = data.deferrals || {};
+      setText("deferral-count", `${def.pending ?? 0} pending / ${def.overdue ?? 0} overdue`);
+      renderList("deferral-list", def.items || [], (d) => `
+        <div class="row"><span>${d.reason}</span><span class="mono">${Math.round(d.age_s/60)}m</span></div>
+      `);
+      renderList("gap-list", data.validation_gaps || [], (g) => `
+        <div class="row"><span>${g.goal}</span><span class="mono">${g.missing_count} steps</span></div>
+      `);
+      const ev = data.evidence || {};
+      renderList("evidence-list", [
+        `<div class="row"><span>total evidence</span><span class="mono">${ev.total_items ?? 0}</span></div>`,
+        `<div class="row"><span>expiring 24h</span><span class="mono">${ev.expiring_in_24h ?? 0}</span></div>`,
+        `<div class="row"><span>permanent</span><span class="mono">${ev.permanent ?? 0}</span></div>`
+      ], (x) => x);
+    """
+    return _base_page("Acceptance & Validation Board", "acceptance", body, data, "/api/acceptance", page_js)
+
+
 class DashboardHandler(SimpleHTTPRequestHandler):
     def _serve_sse(self, data_fn, interval: float = 2.0) -> None:
         self.send_response(200)
@@ -2623,31 +4129,78 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
 
     def do_GET(self):
-        if self.path == '/' or self.path == '/index.html':
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query)
+
+        if path in ('/', '/index.html', '/mission'):
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
-            self.wfile.write(generate_html().encode())
-        elif self.path == '/ops' or self.path == '/ops.html':
+            self.wfile.write(generate_mission_html().encode())
+        elif path in ('/learning', '/learning.html'):
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(generate_learning_html().encode())
+        elif path in ('/rabbit', '/rabbit.html'):
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(generate_rabbit_html().encode())
+        elif path in ('/acceptance', '/acceptance.html'):
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(generate_acceptance_html().encode())
+        elif path == '/ops' or path == '/ops.html':
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
             self.wfile.write(generate_ops_html().encode())
-        elif self.path == '/api/status':
+        elif path == '/api/status':
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
-            self.wfile.write(json.dumps(get_dashboard_data(), indent=2).encode())
-        elif self.path == '/api/ops':
+            self.wfile.write(json.dumps(get_mission_control_data(), indent=2).encode())
+        elif path == '/api/mission':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(get_mission_control_data(), indent=2).encode())
+        elif path == '/api/learning':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(get_learning_factory_data(), indent=2).encode())
+        elif path == '/api/rabbit':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(get_rabbit_recovery_data(), indent=2).encode())
+        elif path == '/api/acceptance':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(get_acceptance_data(), indent=2).encode())
+        elif path == '/api/ops':
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps(get_ops_data(), indent=2).encode())
-        elif self.path == '/api/status/stream':
-            self._serve_sse(get_dashboard_data)
-        elif self.path == '/api/ops/stream':
+        elif path == '/api/trace':
+            trace_id = ""
+            if "trace_id" in query and query["trace_id"]:
+                trace_id = query["trace_id"][0]
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(get_trace_timeline_data(trace_id), indent=2).encode())
+        elif path == '/api/status/stream':
+            self._serve_sse(get_mission_control_data)
+        elif path == '/api/ops/stream':
             self._serve_sse(get_ops_data)
-        elif self.path == '/logo.png':
+        elif path == '/logo.png':
             if not LOGO_FILE.exists():
                 self.send_response(404)
                 self.end_headers()
@@ -2676,6 +4229,22 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path in ('/api/eidos/escape', '/api/eidos/minimal/enter', '/api/eidos/minimal/exit', '/api/eidos/escalate'):
+            length = int(self.headers.get('Content-Length', '0') or 0)
+            raw = self.rfile.read(length) if length else b'{}'
+            try:
+                payload = json.loads(raw.decode('utf-8') or '{}')
+            except Exception:
+                payload = {}
+
+            status, message = _handle_eidos_action(self.path, payload)
+            body = json.dumps({"status": status, "message": message}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
             return
