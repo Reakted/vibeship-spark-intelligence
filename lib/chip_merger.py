@@ -172,7 +172,14 @@ def merge_chip_insights(
 
     # Batch record exposures
     if exposures_to_record and not dry_run:
-        record_exposures(source="chip_merge", items=exposures_to_record)
+        try:
+            from lib.exposure_tracker import infer_latest_trace_id, infer_latest_session_id
+            session_id = infer_latest_session_id()
+            trace_id = infer_latest_trace_id(session_id)
+        except Exception:
+            session_id = None
+            trace_id = None
+        record_exposures(source="chip_merge", items=exposures_to_record, session_id=session_id, trace_id=trace_id)
 
     # Save state
     if not dry_run:

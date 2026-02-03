@@ -179,6 +179,13 @@ class SparkOrchestrator:
         with self.handoffs_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
         try:
+            try:
+                from lib.exposure_tracker import infer_latest_trace_id, infer_latest_session_id
+                session_id = infer_latest_session_id()
+                trace_id = infer_latest_trace_id(session_id)
+            except Exception:
+                session_id = None
+                trace_id = None
             record_exposures(
                 "orchestration",
                 [{
@@ -186,6 +193,8 @@ class SparkOrchestrator:
                     "category": "orchestration",
                     "text": handoff_text,
                 }],
+                session_id=session_id,
+                trace_id=trace_id,
             )
         except Exception:
             pass

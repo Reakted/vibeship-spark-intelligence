@@ -808,14 +808,18 @@ class CognitiveLearner:
         # Record exposure so predictions can be generated
         if record_exposure:
             try:
-                from lib.exposure_tracker import record_exposures
+                from lib.exposure_tracker import record_exposures, infer_latest_trace_id, infer_latest_session_id
+                session_id = infer_latest_session_id()
+                trace_id = infer_latest_trace_id(session_id)
                 record_exposures(
                     source="spark_inject",
                     items=[{
                         "insight_key": key,
                         "category": category.value,
                         "text": insight,
-                    }]
+                    }],
+                    session_id=session_id,
+                    trace_id=trace_id
                 )
             except Exception:
                 pass  # Don't fail if exposure tracking unavailable

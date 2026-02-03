@@ -19,7 +19,7 @@ from .output_adapters import (
 )
 from .project_context import get_project_context, filter_insights_for_context
 from .project_profile import load_profile, get_suggested_questions
-from .exposure_tracker import record_exposures, infer_latest_session_id
+from .exposure_tracker import record_exposures, infer_latest_session_id, infer_latest_trace_id
 from .sync_tracker import get_sync_tracker
 from .outcome_checkin import list_checkins
 
@@ -357,6 +357,8 @@ def sync_context(
     )
 
     try:
+        session_id = infer_latest_session_id()
+        trace_id = infer_latest_trace_id(session_id)
         key_by_id = {id(v): k for k, v in cognitive.insights.items()}
         exposures = []
         for ins in insights:
@@ -365,7 +367,7 @@ def sync_context(
                 "category": ins.category.value,
                 "text": ins.insight,
             })
-        record_exposures("sync_context", exposures, session_id=infer_latest_session_id())
+        record_exposures("sync_context", exposures, session_id=session_id, trace_id=trace_id)
     except Exception:
         pass
 
@@ -385,7 +387,9 @@ def sync_context(
                 "text": m.get("text"),
             })
         if p_exposures:
-            record_exposures("sync_context:project", p_exposures, session_id=infer_latest_session_id())
+            session_id = infer_latest_session_id()
+            trace_id = infer_latest_trace_id(session_id)
+            record_exposures("sync_context:project", p_exposures, session_id=session_id, trace_id=trace_id)
     except Exception:
         pass
 
