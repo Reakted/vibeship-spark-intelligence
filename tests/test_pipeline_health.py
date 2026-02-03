@@ -295,21 +295,23 @@ class PipelineHealthChecker:
     def check_pattern_aggregator(self) -> Tuple[bool, Dict]:
         """Check if pattern aggregator is receiving events."""
         try:
-            from lib.pattern_detection import get_aggregator
+            from lib.pattern_detection import get_aggregator, get_pattern_backlog
             agg = get_aggregator()
             stats = agg.get_stats()
 
-            events = stats.get('events_processed', 0)
-            patterns = stats.get('patterns_detected', 0)
+            logged = stats.get('total_patterns_logged', 0)
+            detected = stats.get('total_patterns_detected', 0)
+            backlog = get_pattern_backlog()
+            active = (logged > 0) or (detected > 0)
 
             self._add_check(
                 "Pattern aggregator active",
-                events > 0,
-                f"Events: {events}, Patterns: {patterns}",
-                "warning" if events == 0 else "info",
-                stats
+                active,
+                f"Logged: {logged}, In-memory: {detected}, Backlog: {backlog}",
+                "warning" if not active else "info",
+                {**stats, "backlog": backlog}
             )
-            return events > 0, stats
+            return active, stats
         except Exception as e:
             self._add_check(
                 "Pattern aggregator active",
