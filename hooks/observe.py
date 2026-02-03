@@ -28,6 +28,7 @@ import json
 import time
 import os
 from pathlib import Path
+from typing import Optional
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -164,6 +165,90 @@ def make_prediction(tool_name: str, tool_input: dict) -> dict:
     }
 
 
+# ===== Domain Detection =====
+
+# Domain triggers for auto-detection (Improvement #6: Skill Domain Coverage)
+DOMAIN_TRIGGERS = {
+    "game_dev": [
+        "player", "spawn", "physics", "collision", "balance", "gameplay",
+        "difficulty", "level", "enemy", "health", "damage", "score",
+        "inventory", "quest", "boss", "npc", "animation", "sprite",
+        "tilemap", "hitbox", "frame rate", "fps", "game loop", "state machine",
+    ],
+    "fintech": [
+        "payment", "transaction", "compliance", "risk", "audit", "kyc", "aml",
+        "pci", "ledger", "settlement", "clearing", "fraud", "reconciliation",
+        "banking", "wallet", "transfer", "fee", "interest", "loan", "credit",
+    ],
+    "marketing": [
+        "audience", "campaign", "conversion", "roi", "funnel", "messaging",
+        "channel", "brand", "engagement", "ctr", "impression", "retention",
+        "acquisition", "segmentation", "persona", "content", "seo", "ad",
+    ],
+    "product": [
+        "user", "feature", "feedback", "priority", "roadmap", "mvp",
+        "backlog", "sprint", "story", "epic", "milestone", "release",
+        "launch", "metric", "kpi", "adoption", "onboarding",
+    ],
+    "orchestration": [
+        "workflow", "pipeline", "sequence", "parallel", "coordination",
+        "handoff", "trigger", "event", "queue", "scheduler", "cron",
+        "dag", "task", "step", "stage", "job", "batch",
+    ],
+    "architecture": [
+        "pattern", "tradeoff", "scalability", "coupling", "interface",
+        "abstraction", "modularity", "layer", "microservice", "monolith",
+        "api", "contract", "schema", "migration", "refactor", "decouple",
+    ],
+    "agent_coordination": [
+        "agent", "capability", "routing", "specialization", "collaboration",
+        "escalation", "delegation", "context", "prompt", "chain", "tool",
+        "memory", "reasoning", "planning", "retrieval", "rag",
+    ],
+    "team_management": [
+        "delegation", "blocker", "review", "sprint", "standup", "retro",
+        "pr", "merge", "conflict", "branch", "deploy", "release",
+        "oncall", "incident", "postmortem",
+    ],
+    "ui_ux": [
+        "layout", "component", "responsive", "accessibility", "a11y",
+        "interaction", "animation", "modal", "form", "validation",
+        "navigation", "menu", "button", "input", "dropdown", "theme",
+        "dark mode", "mobile", "tablet", "desktop", "breakpoint",
+    ],
+    "debugging": [
+        "error", "trace", "root cause", "hypothesis", "reproduce",
+        "bisect", "isolate", "stacktrace", "breakpoint", "log",
+        "assert", "crash", "exception", "bug", "regression", "flaky",
+    ],
+}
+
+
+def detect_domain(text: str) -> Optional[str]:
+    """
+    Detect the domain from text content.
+
+    Returns the domain with most trigger matches, or None if no clear match.
+    """
+    if not text:
+        return None
+
+    text_lower = text.lower()
+    domain_scores = {}
+
+    for domain, triggers in DOMAIN_TRIGGERS.items():
+        score = sum(1 for t in triggers if t in text_lower)
+        if score > 0:
+            domain_scores[domain] = score
+
+    if not domain_scores:
+        return None
+
+    # Return domain with highest score (at least 1 match)
+    best_domain = max(domain_scores, key=domain_scores.get)
+    return best_domain
+
+
 # ===== Cognitive Signal Extraction =====
 
 # Patterns that indicate high-value cognitive content
@@ -211,9 +296,10 @@ def extract_cognitive_signals(text: str, session_id: str):
     """
     Extract cognitive signals from user messages and route to Meta-Ralph.
 
-    Uses two scoring systems:
-    1. Pattern-based signal detection (fast)
-    2. Importance scorer (semantic, more accurate)
+    Uses three scoring systems:
+    1. Domain detection (context-aware learning)
+    2. Pattern-based signal detection (fast)
+    3. Importance scorer (semantic, more accurate)
 
     This is where we capture the GOOD stuff:
     - User preferences
@@ -227,11 +313,15 @@ def extract_cognitive_signals(text: str, session_id: str):
     text_lower = text.lower()
     signals_found = []
 
-    # Also use importance scorer for semantic analysis
+    # Detect domain for context-aware learning (Improvement #6)
+    detected_domain = detect_domain(text)
+
+    # Also use importance scorer for semantic analysis (with domain context)
     importance_score = None
     try:
-        from lib.importance_scorer import score_importance
-        importance_result = score_importance(text)
+        from lib.importance_scorer import get_importance_scorer
+        scorer = get_importance_scorer(domain=detected_domain)
+        importance_result = scorer.score(text)
         importance_score = importance_result.score
 
         # If importance scorer says it's valuable, add its signals
@@ -258,7 +348,7 @@ def extract_cognitive_signals(text: str, session_id: str):
             # Extract the learning (use the full text if it's short, otherwise summarize)
             learning = text[:500] if len(text) <= 500 else text[:500] + "..."
 
-            # Roast it with importance score context
+            # Roast it with importance score + domain context
             result = ralph.roast(
                 learning,
                 source="user_prompt",
@@ -267,6 +357,7 @@ def extract_cognitive_signals(text: str, session_id: str):
                     "session_id": session_id,
                     "importance_score": importance_score,
                     "is_priority": importance_score and importance_score >= 0.7,
+                    "domain": detected_domain,  # Improvement #6: Domain context
                 }
             )
 
@@ -289,12 +380,13 @@ def extract_cognitive_signals(text: str, session_id: str):
                 elif "remember" in signals_found:
                     category = CognitiveCategory.WISDOM
 
-                # Store the insight
+                # Store the insight with domain context
                 cognitive = get_cognitive_learner()
+                domain_ctx = f", domain: {detected_domain}" if detected_domain else ""
                 stored = cognitive.add_insight(
                     category=category,
                     insight=learning,
-                    context=f"signals: {signals_found}, session: {session_id}",
+                    context=f"signals: {signals_found}, session: {session_id}{domain_ctx}",
                     confidence=0.7 + (importance_score * 0.2 if importance_score else 0)
                 )
 

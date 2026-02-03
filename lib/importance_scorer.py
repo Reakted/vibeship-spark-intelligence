@@ -261,11 +261,29 @@ DEFAULT_WEIGHTS = {
 # =============================================================================
 
 # These map onboarding questions to content patterns
+# Updated for Improvement #6: Comprehensive domain detection
 QUESTION_PATTERNS = {
     "domain": [
-        (r"\b(?:game|gaming|player)\b", "game_dev"),
-        (r"\b(?:finance|fintech|banking)\b", "fintech"),
-        (r"\b(?:market|campaign|audience)\b", "marketing"),
+        # Game development
+        (r"\b(?:game|gaming|player|spawn|collision|physics|gameplay|enemy|health|damage|score)\b", "game_dev"),
+        # Fintech
+        (r"\b(?:finance|fintech|banking|payment|transaction|compliance|risk|kyc|aml|ledger)\b", "fintech"),
+        # Marketing
+        (r"\b(?:market|campaign|audience|conversion|roi|funnel|messaging|channel|brand|engagement)\b", "marketing"),
+        # Product
+        (r"\b(?:product|feature|feedback|roadmap|mvp|backlog|sprint|story|epic|release)\b", "product"),
+        # Orchestration
+        (r"\b(?:workflow|pipeline|sequence|parallel|coordination|handoff|trigger|queue|scheduler|dag)\b", "orchestration"),
+        # Architecture
+        (r"\b(?:architecture|pattern|tradeoff|scalability|coupling|interface|abstraction|modularity|microservice)\b", "architecture"),
+        # Agent coordination
+        (r"\b(?:agent|capability|routing|specialization|collaboration|escalation|prompt|chain|rag|memory)\b", "agent_coordination"),
+        # Team management
+        (r"\b(?:delegation|blocker|review|standup|retro|oncall|incident|postmortem)\b", "team_management"),
+        # UI/UX
+        (r"\b(?:layout|component|responsive|accessibility|a11y|interaction|animation|modal|form|navigation)\b", "ui_ux"),
+        # Debugging
+        (r"\b(?:debug|error|trace|root cause|hypothesis|reproduce|bisect|isolate|stacktrace|breakpoint|crash|exception|bug|regression)\b", "debugging"),
     ],
     "success": [
         (r"\bsuccess\s+(?:means|is|looks)\b", 1.5),
