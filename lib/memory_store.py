@@ -13,7 +13,7 @@ import json
 import sqlite3
 from array import array
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from lib.embeddings import embed_texts
 
@@ -226,6 +226,8 @@ def upsert_entry(
     source: str,
     meta: Optional[Dict[str, Any]] = None,
 ) -> None:
+    if _is_telemetry_memory(content):
+        return
     conn = _connect()
     try:
         conn.execute(
@@ -283,6 +285,70 @@ def _fetch_vectors(conn: sqlite3.Connection, ids: Iterable[str]) -> Dict[str, Li
     return out
 
 
+def _is_telemetry_memory(text: str) -> bool:
+    if not text:
+        return False
+    t = text.strip()
+    tl = t.lower()
+    if t.startswith("Sequence '") or t.startswith('Sequence "'):
+        return True
+    if "sequence" in tl and ("worked" in tl or "pattern" in tl):
+        return True
+    if t.startswith("Pattern '") and "->" in t and "risky" not in tl:
+        return True
+    if "->" in t and any(s in tl for s in ["sequence", "pattern", "worked well", "works well"]):
+        return True
+    if "heavy " in tl and " usage" in tl:
+        return True
+    if "usage count" in tl or "usage (" in tl:
+        return True
+    if t.startswith("User was satisfied after:") or t.startswith("User frustrated after:"):
+        return True
+    return False
+
+
+def _chunked(items: List[str], size: int = 200) -> Iterable[List[str]]:
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+def purge_telemetry_memories(
+    *,
+    dry_run: bool = True,
+    max_preview: int = 20,
+) -> Dict[str, Any]:
+    """Purge telemetry/sequence noise from memory_store."""
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT memory_id, content FROM memories").fetchall()
+        to_delete: List[str] = []
+        preview: List[str] = []
+        for r in rows:
+            content = r["content"] or ""
+            if _is_telemetry_memory(content):
+                to_delete.append(r["memory_id"])
+                if len(preview) < max(0, int(max_preview or 0)):
+                    preview.append(content[:120])
+
+        if not to_delete or dry_run:
+            return {"removed": len(to_delete), "preview": preview, "dry_run": dry_run}
+
+        for chunk in _chunked(to_delete, 200):
+            placeholders = ",".join("?" for _ in chunk)
+            conn.execute(f"DELETE FROM memories WHERE memory_id IN ({placeholders})", chunk)
+            if _ensure_fts(conn):
+                conn.execute(f"DELETE FROM memories_fts WHERE memory_id IN ({placeholders})", chunk)
+            conn.execute(f"DELETE FROM memories_vec WHERE memory_id IN ({placeholders})", chunk)
+            conn.execute(
+                f"DELETE FROM memory_edges WHERE source_id IN ({placeholders}) OR target_id IN ({placeholders})",
+                chunk + chunk,
+            )
+        conn.commit()
+        return {"removed": len(to_delete), "preview": preview, "dry_run": dry_run}
+    finally:
+        conn.close()
+
+
 def retrieve(
     query: str,
     *,
@@ -320,12 +386,15 @@ def retrieve(
             ).fetchall()
 
             for r in rows:
+                content = r["content"] or ""
+                if _is_telemetry_memory(content):
+                    continue
                 bm25 = float(r["bm25"]) if r["bm25"] is not None else 0.0
                 bm25 = max(0.0, bm25)
                 lex = 1.0 / (1.0 + bm25)
                 items.append({
                     "entry_id": r["memory_id"],
-                    "text": r["content"],
+                    "text": content,
                     "scope": r["scope"],
                     "project_key": r["project_key"],
                     "category": r["category"],
@@ -346,7 +415,10 @@ def retrieve(
             q_lower = q.lower()
             q_words = [w for w in q_lower.split() if len(w) > 2]
             for r in rows:
-                text = (r["content"] or "").lower()
+                content = r["content"] or ""
+                if _is_telemetry_memory(content):
+                    continue
+                text = content.lower()
                 score = 0.0
                 if q_lower in text:
                     score += 2.0
@@ -359,7 +431,7 @@ def retrieve(
                     continue
                 items.append({
                     "entry_id": r["memory_id"],
-                    "text": r["content"],
+                    "text": content,
                     "scope": r["scope"],
                     "project_key": r["project_key"],
                     "category": r["category"],
@@ -435,6 +507,8 @@ def retrieve(
                 continue
             r = row_map.get(tid)
             if not r:
+                continue
+            if _is_telemetry_memory(r["content"] or ""):
                 continue
             if project_key and r["project_key"] not in (project_key, None, "") and r["scope"] != "global":
                 continue

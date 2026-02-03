@@ -648,6 +648,10 @@ class CognitiveLearner:
         if t.startswith("User wanted:") and len(t) < 60:
             return True
 
+        # 4b. Tool satisfaction/frustration telemetry
+        if t.startswith("User was satisfied after:") or t.startswith("User frustrated after:"):
+            return True
+
         # 5. User persistently asking (just word tracking)
         if t.startswith("User persistently asking about:"):
             return True
@@ -666,6 +670,10 @@ class CognitiveLearner:
                 return True
 
         return False
+
+    def is_noise_insight(self, text: str) -> bool:
+        """Public helper for filtering noise insights."""
+        return self._is_noise_insight(text)
 
     # =========================================================================
     # RETRIEVAL AND QUERY

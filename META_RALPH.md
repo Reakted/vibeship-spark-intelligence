@@ -167,6 +167,13 @@ ELIF needs_work_rate > 50%:
         → KEEP (items are genuinely borderline)
 ```
 
+### Sample-Size Guardrails
+
+Meta-Ralph does not tune on tiny samples:
+- Require 50+ roasted items before adjusting thresholds.
+- Require 5+ needs-work items before using avg_needs_work_score.
+- Flag low-quality sources only after 15+ items from that source.
+
 ### Key Insight
 
 The magic number isn't pass rate - it's whether blocked items are worth capturing:
@@ -272,6 +279,7 @@ curl http://localhost:8788/api/stats
 
 | Date | Change | Reason | Outcome |
 |------|--------|--------|---------|
+| 2026-02-03 | Added sample-size guardrails + per-source quality checks | Avoid tuning on low data | More stable recommendations |
 | 2026-02-03 | quality_threshold 7→5→4 | Over-filtering (2.8% pass rate) | Pass rate 8.1%, quality maintained |
 | 2026-02-03 | needs_work_threshold 4→2 | Proportional adjustment | Better distribution |
 | 2026-02-03 | Added dynamic recommendations | Hardcoded values were stale | Recommendations now use current threshold |

@@ -14,6 +14,7 @@ Only patterns that pass the memory gate become Distillations.
 """
 
 import hashlib
+import os
 import re
 import time
 from collections import Counter
@@ -24,6 +25,8 @@ from ..eidos.models import (
     Step, Distillation, DistillationType, Evaluation, ActionType
 )
 from ..eidos.store import get_store
+from ..primitive_filter import is_primitive_text
+from ..promoter import is_operational_insight
 
 
 @dataclass
@@ -83,6 +86,18 @@ class PatternDistiller:
             "gate_rejections": 0,
             "critical_fast_tracked": 0,  # CRITICAL tier fast-track count
         }
+        self._tool_patterns_enabled = self._get_tool_pattern_flag()
+
+    def _get_tool_pattern_flag(self) -> bool:
+        """Return True when tool-pattern distillation is enabled."""
+        enable = os.environ.get("SPARK_ENABLE_TOOL_DISTILLATION", "").strip().lower()
+        disable = os.environ.get("SPARK_DISABLE_TOOL_DISTILLATION", "").strip().lower()
+        if disable in {"1", "true", "yes", "on"}:
+            return False
+        if enable in {"1", "true", "yes", "on"}:
+            return True
+        # Default: disabled to avoid telemetry-heavy distillations.
+        return False
 
     def distill_from_steps(self, steps: List[Step]) -> List[Distillation]:
         """
@@ -115,8 +130,9 @@ class PatternDistiller:
         distillations.extend(user_distillations)
 
         # Strategy 2: Tool effectiveness patterns
-        tool_distillations = self._distill_tool_patterns(evaluated)
-        distillations.extend(tool_distillations)
+        if self._tool_patterns_enabled:
+            tool_distillations = self._distill_tool_patterns(evaluated)
+            distillations.extend(tool_distillations)
 
         # Strategy 3: Surprise patterns (sharp edges)
         surprise_distillations = self._distill_surprises(evaluated)
@@ -432,11 +448,11 @@ class PatternDistiller:
             # Extract reasoning from successful uses (Improvement #7)
             tool_lessons = [s.lesson for s in successes if s.lesson and len(s.lesson) > 10]
             reasoning = self._extract_reasoning(tool_lessons)
+            if not reasoning:
+                # Avoid telemetry-style statements like success rates without reasoning.
+                continue
 
-            if reasoning:
-                statement = f"For {intent_desc}, use {tool} because {reasoning}"
-            else:
-                statement = f"For {intent_desc}, {tool} is reliable ({count}/{len(tool_steps)} success rate)"
+            statement = f"For {intent_desc}, use {tool} because {reasoning}"
 
             distillation = Distillation(
                 distillation_id="",
@@ -673,6 +689,12 @@ class PatternDistiller:
 
         steps = candidate.source_steps
         distillation = candidate.distillation
+        statement = distillation.statement or ""
+
+        if is_primitive_text(statement) or is_operational_insight(statement):
+            candidate.gate_score = 0.0
+            candidate.gate_reasons = ["operational_or_primitive"]
+            return False
 
         # Impact: Did these steps make progress?
         progress_steps = [s for s in steps if s.progress_made]

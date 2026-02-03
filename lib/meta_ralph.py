@@ -33,6 +33,9 @@ QUALITY_THRESHOLD = 4
 NEEDS_WORK_THRESHOLD = 2
 NEEDS_WORK_CLOSE_DELTA = 0.5
 MIN_OUTCOME_SAMPLES = 5
+MIN_TUNEABLE_SAMPLES = 50
+MIN_NEEDS_WORK_SAMPLES = 5
+MIN_SOURCE_SAMPLES = 15
 
 
 class QualityDimension(Enum):
@@ -1063,31 +1066,50 @@ class MetaRalph:
             "recommendations": []
         }
 
-        if len(self.roast_history) < 10:
-            analysis["issues_detected"].append("Not enough data yet - need 10+ roasted items")
+        if len(self.roast_history) < MIN_TUNEABLE_SAMPLES:
+            analysis["issues_detected"].append(
+                f"Not enough data yet - need {MIN_TUNEABLE_SAMPLES}+ roasted items"
+            )
             return analysis
 
         # Categorize roasts
         quality_items = []
         primitive_items = []
         needs_work_items = []
+        source_stats: Dict[str, Dict[str, Any]] = {}
 
         for roast in self.roast_history:
             result = roast.get("result", {})
             verdict = result.get("verdict", "")
             original = result.get("original", "")
             score_total = result.get("score", {}).get("total", 0)
+            source = roast.get("source", "unknown")
+
+            if source not in source_stats:
+                source_stats[source] = {
+                    "total": 0,
+                    "quality": 0,
+                    "needs_work": 0,
+                    "primitive": 0,
+                }
+            source_stats[source]["total"] += 1
 
             if verdict == "quality":
                 quality_items.append({"content": original, "score": score_total})
+                source_stats[source]["quality"] += 1
             elif verdict == "primitive":
                 primitive_items.append({"content": original, "score": score_total})
+                source_stats[source]["primitive"] += 1
             elif verdict == "needs_work":
                 needs_work_items.append({"content": original, "score": score_total})
+                source_stats[source]["needs_work"] += 1
 
         total = max(len(self.roast_history), 1)
         pass_rate = len(quality_items) / total
         needs_work_rate = len(needs_work_items) / total
+
+        for stats in source_stats.values():
+            stats["pass_rate"] = stats["quality"] / max(stats["total"], 1)
 
         analysis["current_state"] = {
             "quality_count": len(quality_items),
@@ -1097,20 +1119,35 @@ class MetaRalph:
             "needs_work_rate": needs_work_rate,
             "quality_threshold": QUALITY_THRESHOLD,
             "needs_work_threshold": NEEDS_WORK_THRESHOLD,
+            "samples": {
+                "total_roasts": len(self.roast_history),
+                "needs_work": len(needs_work_items),
+            },
+            "source_quality": source_stats,
         }
 
         # Analyze and recommend
-        avg_needs_work = (
-            sum(i["score"] for i in needs_work_items) / max(len(needs_work_items), 1)
-            if needs_work_items else 0
-        )
+        avg_needs_work: Optional[float] = None
+        if len(needs_work_items) >= MIN_NEEDS_WORK_SAMPLES:
+            avg_needs_work = (
+                sum(i["score"] for i in needs_work_items) / max(len(needs_work_items), 1)
+            )
         outcome_stats = self.get_outcome_stats()
         effectiveness = outcome_stats.get("effectiveness_rate", 0.0)
         with_outcome = outcome_stats.get("with_outcome", 0)
 
         # Decision tree aligned with META_RALPH.md
         if pass_rate < 0.1:
-            if avg_needs_work >= (QUALITY_THRESHOLD - 1):
+            if avg_needs_work is None:
+                analysis["issues_detected"].append(
+                    "Low pass rate but insufficient needs-work samples to tune thresholds"
+                )
+                analysis["recommendations"].append({
+                    "tuneable": "quality_threshold",
+                    "action": "KEEP",
+                    "reason": f"Collect {MIN_NEEDS_WORK_SAMPLES}+ needs-work samples first"
+                })
+            elif avg_needs_work >= (QUALITY_THRESHOLD - 1):
                 analysis["issues_detected"].append(
                     f"OVER-FILTERING: {pass_rate:.1%} passing, needs-work avg {avg_needs_work:.1f}"
                 )
@@ -1141,11 +1178,25 @@ class MetaRalph:
                 })
             elif with_outcome < MIN_OUTCOME_SAMPLES:
                 analysis["issues_detected"].append(
-                    "INSUFFICIENT OUTCOME DATA: need more outcome-linked feedback to judge quality"
+                    f"INSUFFICIENT OUTCOME DATA: only {with_outcome} outcomes, need {MIN_OUTCOME_SAMPLES}+"
                 )
+                analysis["recommendations"].append({
+                    "tuneable": "quality_threshold",
+                    "action": "KEEP",
+                    "reason": "Need more outcome validation"
+                })
 
         elif needs_work_rate > 0.5:
-            if avg_needs_work >= (QUALITY_THRESHOLD - NEEDS_WORK_CLOSE_DELTA):
+            if avg_needs_work is None:
+                analysis["issues_detected"].append(
+                    "Needs-work rate high but insufficient samples to judge threshold proximity"
+                )
+                analysis["recommendations"].append({
+                    "tuneable": "quality_threshold",
+                    "action": "KEEP",
+                    "reason": f"Collect {MIN_NEEDS_WORK_SAMPLES}+ needs-work samples first"
+                })
+            elif avg_needs_work >= (QUALITY_THRESHOLD - NEEDS_WORK_CLOSE_DELTA):
                 analysis["issues_detected"].append(
                     f"BORDERLINE HEAVY: needs-work rate {needs_work_rate:.1%}, avg {avg_needs_work:.1f}"
                 )
@@ -1162,6 +1213,20 @@ class MetaRalph:
                     "tuneable": "quality_threshold",
                     "action": "KEEP",
                     "reason": "Items are genuinely low-value"
+                })
+
+        # Source-level quality: flag consistently low-quality sources
+        for source, stats in source_stats.items():
+            if stats["total"] < MIN_SOURCE_SAMPLES:
+                continue
+            if stats["pass_rate"] < 0.1:
+                analysis["issues_detected"].append(
+                    f"LOW QUALITY SOURCE: {source} pass_rate {stats['pass_rate']:.1%} over {stats['total']} items"
+                )
+                analysis["recommendations"].append({
+                    "tuneable": "source_pipeline",
+                    "action": "AUDIT",
+                    "reason": f"Improve {source} signals before changing global thresholds"
                 })
 
         return analysis

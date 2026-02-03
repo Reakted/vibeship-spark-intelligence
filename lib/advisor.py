@@ -242,6 +242,8 @@ class SparkAdvisor:
 
             if insight.reliability < MIN_RELIABILITY_FOR_ADVICE:
                 continue
+            if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(insight.insight):
+                continue
 
             # Calculate context match
             context_match = self._calculate_context_match(insight.context, context)
@@ -270,6 +272,8 @@ class SparkAdvisor:
             text = (mem.get("text") or "").strip()
             if not text:
                 continue
+            if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(text):
+                continue
             context_match = self._calculate_context_match(text, context)
             advice.append(Advice(
                 advice_id=self._generate_advice_id(text),
@@ -296,6 +300,8 @@ class SparkAdvisor:
                 salience = mem.get("salience", 0.5)
 
                 if salience < 0.5:
+                    continue
+                if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(content):
                     continue
 
                 advice.append(Advice(
@@ -470,6 +476,24 @@ class SparkAdvisor:
                 return entry
         return None
 
+    def _find_recent_advice_by_id(self, advice_id: str) -> Optional[Dict[str, Any]]:
+        """Find recent advice entry containing a specific advice_id."""
+        if not RECENT_ADVICE_LOG.exists() or not advice_id:
+            return None
+        try:
+            lines = RECENT_ADVICE_LOG.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            return None
+        for line in reversed(lines[-RECENT_ADVICE_MAX_LINES:]):
+            try:
+                entry = json.loads(line)
+            except Exception:
+                continue
+            ids = entry.get("advice_ids") or []
+            if advice_id in ids:
+                return entry
+        return None
+
     # ============= Outcome Tracking =============
 
     def report_outcome(
@@ -560,6 +584,78 @@ class SparkAdvisor:
                         ralph.track_outcome(aid, outcome_str, evidence)
                 except Exception:
                     pass
+
+    def record_advice_feedback(
+        self,
+        helpful: Optional[bool],
+        notes: str = "",
+        tool: Optional[str] = None,
+        advice_id: Optional[str] = None,
+        followed: bool = True,
+    ) -> Dict[str, Any]:
+        """Record explicit feedback on advice helpfulness.
+
+        If advice_id is provided, records outcome for that advice.
+        Else if tool is provided, uses the most recent advice entry for that tool.
+        """
+        if advice_id:
+            self.report_outcome(advice_id, was_followed=followed, was_helpful=helpful, notes=notes or "")
+            try:
+                entry = self._find_recent_advice_by_id(advice_id)
+                insight_keys = []
+                sources = []
+                tool_name = tool
+                if entry:
+                    tool_name = tool_name or entry.get("tool")
+                    ids = entry.get("advice_ids") or []
+                    idx = ids.index(advice_id) if advice_id in ids else -1
+                    ik = entry.get("insight_keys") or []
+                    src = entry.get("sources") or []
+                    if 0 <= idx < len(ik):
+                        insight_keys = [ik[idx]]
+                    if 0 <= idx < len(src):
+                        sources = [src[idx]]
+                from .advice_feedback import record_feedback
+                record_feedback(
+                    advice_ids=[advice_id],
+                    tool=tool_name,
+                    helpful=helpful,
+                    followed=followed,
+                    notes=notes or "",
+                    insight_keys=insight_keys,
+                    sources=sources,
+                )
+            except Exception:
+                pass
+            return {"status": "ok", "advice_ids": [advice_id], "tool": tool}
+
+        if tool:
+            entry = self._get_recent_advice_entry(tool)
+            if not entry:
+                return {"status": "not_found", "message": "No recent advice found for tool", "tool": tool}
+            advice_ids = entry.get("advice_ids") or []
+            if not advice_ids:
+                return {"status": "not_found", "message": "Recent advice had no advice_ids", "tool": tool}
+            for aid in advice_ids:
+                self.report_outcome(aid, was_followed=followed, was_helpful=helpful, notes=notes or "")
+            try:
+                insight_keys = entry.get("insight_keys") or []
+                sources = entry.get("sources") or []
+                from .advice_feedback import record_feedback
+                record_feedback(
+                    advice_ids=advice_ids,
+                    tool=tool,
+                    helpful=helpful,
+                    followed=followed,
+                    notes=notes or "",
+                    insight_keys=insight_keys,
+                    sources=sources,
+                )
+            except Exception:
+                pass
+            return {"status": "ok", "advice_ids": advice_ids, "tool": tool}
+
+        return {"status": "error", "message": "Provide advice_id or tool"}
 
     # ============= Quick Access Methods =============
 
@@ -664,6 +760,23 @@ def should_be_careful(tool_name: str) -> Tuple[bool, str]:
 def report_outcome(tool_name: str, success: bool, advice_helped: bool = False):
     """Report action outcome to close the feedback loop."""
     get_advisor().report_action_outcome(tool_name, success, advice_helped)
+
+
+def record_advice_feedback(
+    helpful: Optional[bool],
+    notes: str = "",
+    tool: Optional[str] = None,
+    advice_id: Optional[str] = None,
+    followed: bool = True,
+):
+    """Record explicit feedback on advice helpfulness."""
+    return get_advisor().record_advice_feedback(
+        helpful=helpful,
+        notes=notes,
+        tool=tool,
+        advice_id=advice_id,
+        followed=followed,
+    )
 
 
 def generate_context(tool_name: str, task: str = "") -> str:

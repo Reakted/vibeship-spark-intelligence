@@ -14,6 +14,7 @@ This is NOT where tool logs go. Tool logs are ephemeral evidence.
 
 import json
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -644,6 +645,54 @@ class EidosStore:
                 "db_path": self.db_path
             }
 
+    def purge_telemetry_distillations(self, dry_run: bool = False, max_preview: int = 20) -> Dict[str, Any]:
+        """Remove telemetry/primitive distillations from the EIDOS store."""
+        from ..primitive_filter import is_primitive_text
+        from ..promoter import is_operational_insight
+
+        def _is_telemetry_distillation(text: str) -> bool:
+            t = (text or "").strip()
+            if not t:
+                return False
+            if is_primitive_text(t) or is_operational_insight(t):
+                return True
+            tl = t.lower()
+            if "success rate" in tl:
+                return True
+            if re.search(r"over\s+\d+\s+uses", tl):
+                return True
+            if "sequence" in tl and "->" in t:
+                return True
+            return False
+
+        removed_ids: List[str] = []
+        preview: List[str] = []
+
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT distillation_id, statement FROM distillations"
+            ).fetchall()
+            for row in rows:
+                dist_id = row[0]
+                statement = row[1] or ""
+                if _is_telemetry_distillation(statement):
+                    removed_ids.append(dist_id)
+                    if len(preview) < max_preview:
+                        preview.append(statement[:200])
+
+            if not dry_run and removed_ids:
+                conn.executemany(
+                    "DELETE FROM distillations WHERE distillation_id = ?",
+                    [(rid,) for rid in removed_ids]
+                )
+
+        return {
+            "scanned": len(rows),
+            "removed": len(removed_ids),
+            "preview": preview,
+            "dry_run": dry_run,
+        }
+
 
 # Singleton instance
 _store: Optional[EidosStore] = None
@@ -655,3 +704,9 @@ def get_store(db_path: Optional[str] = None) -> EidosStore:
     if _store is None or (db_path and _store.db_path != db_path):
         _store = EidosStore(db_path)
     return _store
+
+
+def purge_telemetry_distillations(dry_run: bool = False, max_preview: int = 20) -> Dict[str, Any]:
+    """Purge telemetry/primitive distillations from the EIDOS store."""
+    store = get_store()
+    return store.purge_telemetry_distillations(dry_run=dry_run, max_preview=max_preview)

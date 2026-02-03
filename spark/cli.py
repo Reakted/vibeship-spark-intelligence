@@ -18,6 +18,7 @@ Usage:
     python -m spark.cli health     # Health check
     python -m spark.cli memory     # Memory capture suggestions
     python -m spark.cli outcome    # Record explicit outcome check-in
+    python -m spark.cli advice-feedback  # Record explicit advice helpfulness
     python -m spark.cli eval       # Evaluate predictions vs outcomes
     python -m spark.cli validate-ingest  # Validate recent queue events
     python -m spark.cli project    # Project questioning + capture
@@ -85,6 +86,9 @@ from lib.project_profile import (
     completion_score,
 )
 from lib.memory_banks import store_memory, sync_insights_to_banks, get_bank_stats
+from lib.memory_store import purge_telemetry_memories
+from lib.eidos.store import purge_telemetry_distillations
+from lib.advisor import record_advice_feedback
 from lib.outcome_log import append_outcome, make_outcome_id, auto_link_outcomes, get_linkable_candidates
 from lib.memory_capture import (
     process_recent_memory_events,
@@ -630,6 +634,68 @@ def cmd_outcome(args):
     print(f"[SPARK] Outcome recorded: {row.get('result')} (polarity={polarity})")
 
 
+def cmd_advice_feedback(args):
+    """Record explicit feedback on advice helpfulness."""
+    if args.pending:
+        from lib.advice_feedback import list_requests
+        items = list_requests(limit=args.limit or 5)
+        if not items:
+            print("[SPARK] No pending advice feedback requests.")
+            return
+        print(f"[SPARK] Advice Feedback Requests ({len(items)}):")
+        for row in items:
+            tool = row.get("tool") or "unknown"
+            ts = row.get("created_at")
+            print(f"  - tool={tool} ts={ts}")
+        return
+    if args.analyze:
+        from lib.advice_feedback import analyze_feedback
+        summary = analyze_feedback(min_samples=args.min_samples or 3, write_summary=True)
+        if summary.get("total_feedback", 0) == 0:
+            print("[SPARK] No advice feedback yet.")
+            return
+        print("[SPARK] Advice Feedback Summary")
+        print(f"  Total feedback: {summary.get('total_feedback')}")
+        print(f"  Helpful rate: {summary.get('helpful_rate'):.0%}")
+        print(f"  Helpful known: {summary.get('helpful_known')}")
+        if summary.get("by_tool"):
+            print("  By tool (top):")
+            for row in summary["by_tool"][:5]:
+                print(f"    - {row['key']}: {row['helpful_rate']:.0%} ({row['helpful_known']} samples)")
+        if summary.get("by_source"):
+            print("  By source (top):")
+            for row in summary["by_source"][:5]:
+                print(f"    - {row['key']}: {row['helpful_rate']:.0%} ({row['helpful_known']} samples)")
+        if summary.get("recommendations"):
+            print("  Recommendations:")
+            for rec in summary["recommendations"][:5]:
+                print(f"    - {rec}")
+        return
+
+    helpful_map = {
+        "yes": True,
+        "no": False,
+        "unknown": None,
+    }
+    helpful = helpful_map.get(args.helpful)
+    followed = args.followed != "no"
+
+    result = record_advice_feedback(
+        helpful=helpful,
+        notes=args.notes or "",
+        tool=args.tool,
+        advice_id=args.advice_id,
+        followed=followed,
+    )
+
+    if result.get("status") == "ok":
+        ids = result.get("advice_ids") or []
+        tool = result.get("tool") or args.tool or ""
+        print(f"[SPARK] Advice feedback recorded for {len(ids)} item(s){' on ' + tool if tool else ''}.")
+    else:
+        print(f"[SPARK] Advice feedback failed: {result.get('message')}")
+
+
 def cmd_eval(args):
     """Evaluate prediction accuracy against outcomes."""
     max_age_s = float(args.days) * 24 * 3600
@@ -812,6 +878,33 @@ def cmd_bank_stats(args):
         print("\n   By category:")
         for cat, count in stats['by_category'].items():
             print(f"      - {cat}: {count}")
+
+
+def cmd_memory_purge_telemetry(args):
+    """Purge telemetry noise from the SQLite memory store."""
+    stats = purge_telemetry_memories(dry_run=bool(getattr(args, "dry_run", False)))
+    mode = "DRY RUN" if getattr(args, "dry_run", False) else "APPLIED"
+    print(f"[SPARK] Memory Store Telemetry Purge ({mode})")
+    print(f"   Removed: {stats.get('removed', 0)}")
+    preview = stats.get("preview") or []
+    if preview:
+        print("   Preview:")
+        for item in preview[:10]:
+            print(f"      - {item}")
+
+
+def cmd_eidos_purge_telemetry(args):
+    """Purge telemetry noise from EIDOS distillations."""
+    stats = purge_telemetry_distillations(dry_run=bool(getattr(args, "dry_run", False)))
+    mode = "DRY RUN" if getattr(args, "dry_run", False) else "APPLIED"
+    print(f"[SPARK] EIDOS Distillation Telemetry Purge ({mode})")
+    print(f"   Scanned: {stats.get('scanned', 0)}")
+    print(f"   Removed: {stats.get('removed', 0)}")
+    preview = stats.get("preview") or []
+    if preview:
+        print("   Preview:")
+        for item in preview[:10]:
+            print(f"      - {item}")
 
 
 def cmd_validate_ingest(args):
@@ -2249,6 +2342,18 @@ Examples:
     outcome_parser.add_argument("--link-window-mins", type=float, default=30.0, help="Auto-link window in minutes")
     outcome_parser.add_argument("--session-id", help="Attach session_id to outcome")
 
+    # advice-feedback
+    advice_fb = subparsers.add_parser("advice-feedback", help="Record explicit advice helpfulness")
+    advice_fb.add_argument("--tool", help="Tool name to match recent advice")
+    advice_fb.add_argument("--advice-id", help="Explicit advice_id to mark")
+    advice_fb.add_argument("--helpful", choices=["yes", "no", "unknown"], default="yes", help="Was the advice helpful?")
+    advice_fb.add_argument("--followed", choices=["yes", "no"], default="yes", help="Was the advice followed?")
+    advice_fb.add_argument("--notes", "-n", help="Optional notes/evidence")
+    advice_fb.add_argument("--pending", action="store_true", help="List recent advice feedback requests")
+    advice_fb.add_argument("--analyze", action="store_true", help="Summarize advice feedback backlog")
+    advice_fb.add_argument("--min-samples", type=int, default=3, help="Min samples for recommendations")
+    advice_fb.add_argument("--limit", type=int, default=5, help="How many requests to show")
+
     # eval
     eval_parser = subparsers.add_parser("eval", help="Evaluate predictions against outcomes")
     eval_parser.add_argument("--days", type=float, default=7.0, help="Lookback window in days")
@@ -2295,6 +2400,14 @@ Examples:
 
     # bank-stats: Show memory bank statistics
     subparsers.add_parser("bank-stats", help="Show memory bank statistics")
+
+    # memory-purge-telemetry: Remove telemetry from SQLite memory store
+    mem_purge = subparsers.add_parser("memory-purge-telemetry", help="Purge telemetry from memory store")
+    mem_purge.add_argument("--dry-run", action="store_true", help="Preview without deleting")
+
+    # eidos-purge-telemetry: Remove telemetry distillations from EIDOS store
+    eidos_purge = subparsers.add_parser("eidos-purge-telemetry", help="Purge telemetry from EIDOS distillations")
+    eidos_purge.add_argument("--dry-run", action="store_true", help="Preview without deleting")
 
     # validate-ingest
     ingest_parser = subparsers.add_parser("validate-ingest", help="Validate recent queue events")
@@ -2503,6 +2616,7 @@ Examples:
         "health": cmd_health,
         "events": cmd_events,
         "outcome": cmd_outcome,
+        "advice-feedback": cmd_advice_feedback,
         "outcome-link": cmd_outcome_link,
         "outcome-stats": cmd_outcome_stats,
         "outcome-validate": cmd_outcome_validate,
@@ -2511,6 +2625,8 @@ Examples:
         "auto-link": cmd_auto_link,
         "sync-banks": cmd_sync_banks,
         "bank-stats": cmd_bank_stats,
+        "memory-purge-telemetry": cmd_memory_purge_telemetry,
+        "eidos-purge-telemetry": cmd_eidos_purge_telemetry,
         "eval": cmd_eval,
         "validate-ingest": cmd_validate_ingest,
         "capture": cmd_capture,

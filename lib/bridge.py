@@ -40,6 +40,12 @@ def _normalize_insight_text(text: str) -> str:
 
 def _is_low_value_insight(text: str) -> bool:
     t = (text or "").lower()
+    try:
+        from lib.promoter import is_operational_insight
+        if is_operational_insight(t):
+            return True
+    except Exception:
+        pass
     if "indicates task type" in t:
         return True
     if "heavy " in t and " usage" in t:

@@ -188,8 +188,10 @@ def append_entry(entry: BankEntry) -> None:
         f.write(json.dumps(entry.to_dict(), ensure_ascii=False) + "\n")
 
 
-def store_memory(text: str, category: str, session_id: Optional[str] = None, source: str = "spark") -> BankEntry:
+def store_memory(text: str, category: str, session_id: Optional[str] = None, source: str = "spark") -> Optional[BankEntry]:
     _ensure_dirs()
+    if _is_telemetry_memory(text):
+        return None
     project_key = infer_project_key()
     scope, proj = choose_scope(text=text, category=category, project_key=project_key)
 
@@ -257,6 +259,9 @@ def retrieve(query: str, project_key: Optional[str] = None, limit: int = 6) -> L
 
         out = store_retrieve(query, project_key=project_key, limit=limit)
         for it in out:
+            text = (it.get("text") or "").strip()
+            if _is_telemetry_memory(text):
+                continue
             key = it.get("entry_id") or it.get("text")
             if key:
                 seen.add(key)
@@ -276,6 +281,8 @@ def retrieve(query: str, project_key: Optional[str] = None, limit: int = 6) -> L
     for it in candidates:
         text = (it.get("text") or "").lower()
         if not text:
+            continue
+        if _is_telemetry_memory(text):
             continue
 
         # basic scoring
@@ -300,6 +307,9 @@ def retrieve(query: str, project_key: Optional[str] = None, limit: int = 6) -> L
 
     scored.sort(key=lambda t: t[0], reverse=True)
     for _, it in scored:
+        text = (it.get("text") or "").strip()
+        if _is_telemetry_memory(text):
+            continue
         key = it.get("entry_id") or it.get("text")
         if key and key in seen:
             continue
