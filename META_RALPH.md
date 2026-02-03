@@ -6,6 +6,57 @@ Meta-Ralph is Spark's internal quality gate - a system that evaluates every prop
 
 ---
 
+## 🚨 PRIMARY RULE: Source of Truth for Testing
+
+**CRITICAL:** When testing and iterating on Spark learning quality:
+
+> **Always retrieve test data directly from Mind memory and Spark Intelligence (via MCP tools or Python imports) - NEVER rely on terminal output.**
+
+### Why This Matters
+
+Terminal output is ephemeral and incomplete. The real data lives in:
+- **Spark Intelligence**: `~/.spark/cognitive_insights.json`, EIDOS store, pattern aggregator
+- **Mind Memory**: SQLite at `~/.mind/lite/memories.db` with 32,335+ memories
+- **MCP Tools**: `mcp__spark__spark_learnings`, `mcp__spark__spark_stats`
+
+### How to Test Correctly
+
+```python
+# ✅ CORRECT: Query Spark directly
+from lib.meta_ralph import get_meta_ralph
+stats = get_meta_ralph().get_stats()
+print(f"Quality Rate: {stats['quality_rate']:.1%}")
+
+# ✅ CORRECT: Query Mind directly
+import requests
+response = requests.get("http://localhost:8080/v1/stats")
+print(response.json())
+
+# ❌ WRONG: Relying on terminal output
+# "I saw in the terminal that 5 learnings were captured..."
+```
+
+### Test Data Sources
+
+| Data Type | Source | Access Method |
+|-----------|--------|---------------|
+| Quality Metrics | Meta-Ralph | `get_meta_ralph().get_stats()` |
+| Cognitive Insights | Spark | `~/.spark/cognitive_insights.json` |
+| EIDOS Distillations | EIDOS Store | `get_store().get_all_distillations()` |
+| Pattern Aggregator | Aggregator | `get_aggregator().get_stats()` |
+| Mind Memories | Mind API | `GET /v1/memories/` or `/v1/stats` |
+| Spark MCP | MCP Server | `spark_learnings`, `spark_stats` |
+
+### Validation Checklist
+
+Before claiming test results:
+- [ ] Data retrieved via Python import or API call?
+- [ ] Stats from persistent storage, not terminal output?
+- [ ] Can reproduce by running the same query?
+- [ ] Evidence is from durable source, not ephemeral logs?
+
+---
+
 ## Core Philosophy
 
 ### The Problem We Solved

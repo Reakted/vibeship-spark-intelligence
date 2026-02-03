@@ -1,5 +1,42 @@
 # CLAUDE
 
+## 🚨 PRIMARY RULE: Test Data from Spark/Mind, Not Terminal
+
+**CRITICAL:** When testing and validating Spark learning:
+
+> **Always retrieve test results directly from Mind memory and Spark Intelligence - NEVER rely on terminal output.**
+
+### Quick Access Commands
+
+```python
+# Meta-Ralph quality stats
+from lib.meta_ralph import get_meta_ralph
+print(get_meta_ralph().get_stats())
+
+# EIDOS distillations
+from lib.eidos import get_store
+print(get_store().get_stats())
+
+# Pattern aggregator
+from lib.pattern_detection import get_aggregator
+print(get_aggregator().get_stats())
+
+# Mind stats
+import requests
+print(requests.get("http://localhost:8080/v1/stats").json())
+```
+
+### Why This Matters
+
+Terminal output is ephemeral. The intelligence lives in:
+- **Spark**: `~/.spark/cognitive_insights.json` (persistent learnings)
+- **EIDOS**: SQLite store with episodes, steps, distillations
+- **Mind**: `~/.mind/lite/memories.db` (32,335+ memories)
+
+See **META_RALPH.md** for full testing methodology.
+
+---
+
 ## Core Vision Documents (MUST READ)
 
 These documents define the evolution from primitive telemetry to superintelligent cognition:
