@@ -204,3 +204,89 @@ class ChipLoader:
     def get_all_chips(self) -> List[Chip]:
         """Get all cached chips."""
         return list(self._cache.values())
+
+    def get_active_chips(self, context: str = "", threshold: float = None) -> List[Chip]:
+        """
+        Get chips that are active for the given context.
+
+        Improvement #10: Chips Auto-Activation
+
+        Args:
+            context: Text context to match against chip triggers
+            threshold: Activation threshold (0-1). If None, uses strategist default.
+
+        Returns:
+            List of activated chips, sorted by match strength
+        """
+        if threshold is None:
+            try:
+                from ..metalearning.strategist import get_strategist
+                threshold = get_strategist().strategy.auto_activate_threshold
+            except Exception:
+                threshold = 0.5  # Fallback
+
+        if not self._cache:
+            self.discover_chips()
+
+        if not context:
+            # Return all auto-activation chips
+            return [c for c in self._cache.values() if c.activation == "auto"]
+
+        context_lower = context.lower()
+        active_chips = []
+
+        for chip in self._cache.values():
+            # Allow both auto AND opt_in chips to activate on context match
+            # This is intelligent auto-activation: opt_in chips activate when
+            # their triggers match the content (Improvement #10)
+
+            # Calculate match score
+            match_count = 0
+            for trigger in chip.trigger_patterns:
+                if trigger.lower() in context_lower:
+                    match_count += 1
+
+            # Normalize score
+            if chip.trigger_patterns:
+                match_score = match_count / len(chip.trigger_patterns)
+            else:
+                match_score = 0
+
+            # Check if above threshold (or has any match)
+            if match_score >= threshold or match_count > 0:
+                active_chips.append((chip, match_score, match_count))
+
+        # Sort by match score
+        active_chips.sort(key=lambda x: (x[1], x[2]), reverse=True)
+
+        return [c[0] for c in active_chips]
+
+
+# ============= Singleton and Convenience Functions =============
+
+_loader: Optional[ChipLoader] = None
+
+
+def get_chip_loader() -> ChipLoader:
+    """Get the singleton chip loader."""
+    global _loader
+    if _loader is None:
+        _loader = ChipLoader()
+        _loader.discover_chips()
+    return _loader
+
+
+def get_active_chips(context: str = "", threshold: float = None) -> List[Chip]:
+    """
+    Get chips that are active for the given context.
+
+    Convenience function for Improvement #10: Chips Auto-Activation.
+
+    Args:
+        context: Text context to match against chip triggers
+        threshold: Activation threshold (0-1). If None, uses strategist default (0.5).
+
+    Returns:
+        List of activated chips, sorted by match strength
+    """
+    return get_chip_loader().get_active_chips(context, threshold)

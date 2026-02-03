@@ -35,8 +35,8 @@ class LearningStrategy:
     transferability_weight: float = 0.10
     domain_weight: float = 0.10
 
-    # Chip settings
-    auto_activate_threshold: float = 0.7
+    # Chip settings (Improvement #10: Lower threshold for proactive activation)
+    auto_activate_threshold: float = 0.5  # Lowered from 0.7
     trigger_deprecation_threshold: float = 0.2
     provisional_chip_confidence: float = 0.3
 
