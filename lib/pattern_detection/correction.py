@@ -173,12 +173,12 @@ class CorrectionDetector(PatternDetector):
                     evidence.append(f"After AI used: {recent_action['tool']}")
                     context["preceding_action"] = recent_action
 
-                # Create suggested insight
-                suggested_insight = None
-                if "rejected" in correction_context:
-                    suggested_insight = f"User prefers '{correction_context.get('wanted', 'alternative')}' over '{correction_context['rejected']}'"
-                elif "wanted" in correction_context:
-                    suggested_insight = f"User wanted: {correction_context['wanted']}"
+                # Create ACTIONABLE insight using full context
+                suggested_insight = self._create_actionable_insight(
+                    correction_context,
+                    recent_action,
+                    text
+                )
 
                 patterns.append(DetectedPattern(
                     pattern_type=PatternType.CORRECTION,
@@ -191,3 +191,93 @@ class CorrectionDetector(PatternDetector):
                 ))
 
         return patterns
+
+    def _create_actionable_insight(
+        self,
+        correction_context: Dict[str, str],
+        recent_action: Optional[Dict],
+        user_text: str
+    ) -> Optional[str]:
+        """
+        Transform raw correction data into ACTIONABLE advice.
+
+        Instead of "User wanted: let's do it this way..."
+        Create: "When using [tool], prefer [approach] because [reason]"
+
+        This is the key transformation that makes advice useful.
+        """
+        wanted = correction_context.get("wanted", "").strip()
+        rejected = correction_context.get("rejected", "").strip()
+
+        if not wanted:
+            return None
+
+        # Skip if "wanted" is too conversational (not actionable)
+        conversational_starts = [
+            "let's", "let me", "can you", "could you", "i think",
+            "maybe", "perhaps", "how about", "what if"
+        ]
+        wanted_lower = wanted.lower()
+        if any(wanted_lower.startswith(s) for s in conversational_starts):
+            # Try to extract the actionable part
+            wanted = self._extract_actionable_part(wanted)
+            if not wanted:
+                return None
+
+        # Build actionable insight based on available context
+        tool_name = None
+        if recent_action:
+            tool_name = recent_action.get("tool", "").strip()
+
+        # Pattern 1: Full context (tool + rejected + wanted)
+        if tool_name and rejected:
+            return f"When using {tool_name}, prefer '{wanted}' over '{rejected}'"
+
+        # Pattern 2: Tool + wanted (no rejected)
+        if tool_name:
+            return f"When using {tool_name}, remember: {wanted}"
+
+        # Pattern 3: Rejected + wanted (no tool)
+        if rejected:
+            return f"Prefer '{wanted}' over '{rejected}'"
+
+        # Pattern 4: Just wanted - make it a directive
+        # Only if it's short and clear enough to be actionable
+        if len(wanted) < 100 and not wanted_lower.startswith("user"):
+            return f"Remember: {wanted}"
+
+        return None
+
+    def _extract_actionable_part(self, text: str) -> Optional[str]:
+        """
+        Extract actionable directive from conversational text.
+
+        "let's do it with proper error handling" -> "use proper error handling"
+        "can you make it more concise" -> "make it more concise"
+        """
+        import re
+
+        # Remove conversational prefixes
+        patterns = [
+            r"^let'?s\s+",
+            r"^let\s+me\s+",
+            r"^can\s+you\s+",
+            r"^could\s+you\s+",
+            r"^i\s+think\s+(we\s+should\s+)?",
+            r"^maybe\s+(we\s+should\s+)?",
+            r"^perhaps\s+(we\s+should\s+)?",
+            r"^how\s+about\s+",
+            r"^what\s+if\s+(we\s+)?",
+        ]
+
+        result = text.lower()
+        for pattern in patterns:
+            result = re.sub(pattern, "", result, flags=re.IGNORECASE)
+
+        result = result.strip()
+
+        # If still too conversational or too short, skip
+        if len(result) < 10 or result.startswith(("i ", "we ", "you ")):
+            return None
+
+        return result.capitalize()

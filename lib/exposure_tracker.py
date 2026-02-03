@@ -125,3 +125,19 @@ def infer_latest_session_id() -> Optional[str]:
     except Exception:
         return None
     return None
+
+
+def infer_latest_trace_id(session_id: Optional[str] = None, limit: int = 50) -> Optional[str]:
+    """Best-effort trace_id from recent queue events (optionally scoped to session)."""
+    try:
+        from lib.queue import read_recent_events
+        events = read_recent_events(limit)
+        for ev in reversed(events):
+            if session_id and ev.session_id != session_id:
+                continue
+            trace_id = (ev.data or {}).get("trace_id")
+            if trace_id:
+                return str(trace_id)
+    except Exception:
+        return None
+    return None

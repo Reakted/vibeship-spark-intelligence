@@ -17,10 +17,12 @@ Triggered by:
 This keeps you from burning hours on fancy reasoning when stuck.
 """
 
+import json
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
 
 from .models import Episode, Step, Phase, Evaluation
 
@@ -100,6 +102,9 @@ MINIMAL_MODE_BASH_BLOCKED = [
     "npm install", "pip install", "yarn add",
 ]
 
+STATE_FILE = Path.home() / ".spark" / "minimal_mode_state.json"
+HISTORY_FILE = Path.home() / ".spark" / "minimal_mode_history.jsonl"
+
 
 class MinimalModeController:
     """
@@ -112,6 +117,60 @@ class MinimalModeController:
     def __init__(self):
         self.state = MinimalModeState()
         self.history: List[Dict[str, Any]] = []
+        self._load_state()
+
+    def _load_state(self) -> None:
+        """Load persisted state/history from disk."""
+        try:
+            if STATE_FILE.exists():
+                data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+                reason = data.get("reason")
+                self.state = MinimalModeState(
+                    active=bool(data.get("active")),
+                    reason=MinimalModeReason(reason) if reason else None,
+                    entered_at=data.get("entered_at"),
+                    step_count_at_entry=data.get("step_count_at_entry", 0),
+                    edits_allowed=bool(data.get("edits_allowed", False)),
+                    writes_allowed=bool(data.get("writes_allowed", False)),
+                    refactors_allowed=bool(data.get("refactors_allowed", False)),
+                    new_features_allowed=bool(data.get("new_features_allowed", False)),
+                    reads_allowed=bool(data.get("reads_allowed", True)),
+                    diagnostics_allowed=bool(data.get("diagnostics_allowed", True)),
+                    tests_allowed=bool(data.get("tests_allowed", True)),
+                    simplify_allowed=bool(data.get("simplify_allowed", True)),
+                )
+        except Exception:
+            self.state = MinimalModeState()
+
+        # Load history
+        if HISTORY_FILE.exists():
+            try:
+                with HISTORY_FILE.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        raw = line.strip()
+                        if not raw:
+                            continue
+                        try:
+                            self.history.append(json.loads(raw))
+                        except Exception:
+                            continue
+            except Exception:
+                self.history = []
+
+    def _save_state(self) -> None:
+        try:
+            STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            STATE_FILE.write_text(json.dumps(self.state.to_dict()), encoding="utf-8")
+        except Exception:
+            return
+
+    def _append_history(self, entry: Dict[str, Any]) -> None:
+        try:
+            HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with HISTORY_FILE.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception:
+            return
 
     def should_enter(
         self,
@@ -159,29 +218,35 @@ class MinimalModeController:
             step_count_at_entry=episode.step_count,
         )
 
-        self.history.append({
+        entry = {
             "event": "enter",
             "reason": reason.value,
             "episode_id": episode.episode_id,
             "step_count": episode.step_count,
             "timestamp": time.time(),
-        })
+        }
+        self.history.append(entry)
+        self._append_history(entry)
+        self._save_state()
 
     def exit(self, episode: Episode, reason: str = ""):
         """Exit minimal mode."""
         if not self.state.active:
             return
 
-        self.history.append({
+        entry = {
             "event": "exit",
             "reason": reason,
             "episode_id": episode.episode_id,
             "step_count": episode.step_count,
             "duration_steps": episode.step_count - self.state.step_count_at_entry,
             "timestamp": time.time(),
-        })
+        }
+        self.history.append(entry)
+        self._append_history(entry)
 
         self.state = MinimalModeState()
+        self._save_state()
 
     def can_exit(self, episode: Episode, recent_steps: List[Step]) -> Tuple[bool, str]:
         """

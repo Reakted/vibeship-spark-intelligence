@@ -16,7 +16,7 @@ from typing import List, Dict, Any, Optional
 from lib.memory_banks import infer_project_key, retrieve as bank_retrieve
 from lib.tastebank import infer_domain as taste_infer_domain, retrieve as taste_retrieve
 from lib.diagnostics import log_debug
-from lib.exposure_tracker import record_exposures, infer_latest_session_id
+from lib.exposure_tracker import record_exposures, infer_latest_session_id, infer_latest_trace_id
 from lib.project_profile import load_profile, get_suggested_questions
 from lib.outcome_checkin import list_checkins
 
@@ -384,6 +384,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
         query = infer_current_focus()
 
     session_id = infer_latest_session_id()
+    trace_id = infer_latest_trace_id(session_id)
     contextual = get_contextual_insights(query, limit=6) if query else []
     skills = get_relevant_skills(query, limit=3) if query else []
     insights = get_high_value_insights()
@@ -422,7 +423,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
                     "category": f"{item.get('source')}:{cat}",
                     "text": text[:240],
                 })
-            record_exposures("spark_context:contextual", exposures, session_id=session_id)
+            record_exposures("spark_context:contextual", exposures, session_id=session_id, trace_id=trace_id)
         except Exception:
             pass
 
@@ -445,7 +446,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
                     "category": "skill",
                     "text": text[:240],
                 })
-            record_exposures("spark_context:skills", exposures, session_id=session_id)
+            record_exposures("spark_context:skills", exposures, session_id=session_id, trace_id=trace_id)
         except Exception:
             pass
     
@@ -549,6 +550,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
                     for w in warnings
                 ],
                 session_id=session_id,
+                trace_id=trace_id,
             )
         except Exception:
             pass
@@ -574,6 +576,7 @@ def generate_active_context(query: Optional[str] = None) -> str:
                     for i in insights[:5]
                 ],
                 session_id=session_id,
+                trace_id=trace_id,
             )
         except Exception:
             pass
