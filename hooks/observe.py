@@ -269,9 +269,36 @@ def extract_cognitive_signals(text: str, session_id: str):
                 }
             )
 
-            # Log what we found
+            # Store quality items in cognitive learner
             if result.verdict.value == "quality":
                 log_debug("observe", f"COGNITIVE CAPTURED: [{signals_found}] {text[:50]}...", None)
+
+                # Determine category based on signals
+                from lib.cognitive_learner import CognitiveCategory
+                category = CognitiveCategory.USER_UNDERSTANDING  # default
+
+                if "preference" in signals_found:
+                    category = CognitiveCategory.USER_UNDERSTANDING
+                elif "decision" in signals_found:
+                    category = CognitiveCategory.REASONING
+                elif "reasoning" in signals_found:
+                    category = CognitiveCategory.REASONING
+                elif "correction" in signals_found:
+                    category = CognitiveCategory.CONTEXT
+                elif "remember" in signals_found:
+                    category = CognitiveCategory.WISDOM
+
+                # Store the insight
+                cognitive = get_cognitive_learner()
+                stored = cognitive.add_insight(
+                    category=category,
+                    insight=learning,
+                    context=f"signals: {signals_found}, session: {session_id}",
+                    confidence=0.7 + (importance_score * 0.2 if importance_score else 0)
+                )
+
+                if stored:
+                    log_debug("observe", f"STORED: {category.value} - {learning[:40]}...", None)
 
         except Exception as e:
             log_debug("observe", "cognitive extraction failed", e)
