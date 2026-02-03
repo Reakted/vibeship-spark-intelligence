@@ -24,7 +24,33 @@ If you fix `cognitive_learner` but it's not being called by `bridge_cycle`, noth
 
 **Always verify:** Is bridge_worker running? Is the queue being processed?
 
+### Rule 3: Pipeline Health Before Tuning
+
+**CRITICAL:** Before ANY tuning or iteration session:
+
+> **Run `python tests/test_pipeline_health.py` FIRST. Scoring metrics are meaningless if the pipeline isn't operational.**
+
+Session 2 lesson: Meta-Ralph showed 39.4% quality rate, but `learnings_stored=0`. Perfect scoring, broken pipeline = zero learning.
+
+### Rule 4: Anti-Hallucination
+
+**CRITICAL:** Never claim improvements based on:
+- Terminal output (ephemeral)
+- "I saw X happen" (observation ≠ storage)
+- Code changes alone (may not be in data path)
+- Scoring improvements alone (scoring ≠ learning)
+
+**Always verify from storage:** `cognitive_insights.json`, `eidos.db`, Mind API.
+
 ### Quick Access Commands
+
+```bash
+# MANDATORY: Pipeline health check (run FIRST before any tuning)
+python tests/test_pipeline_health.py
+
+# Quick status
+python tests/test_pipeline_health.py quick
+```
 
 ```python
 # Meta-Ralph quality stats
@@ -42,6 +68,13 @@ print(get_aggregator().get_stats())
 # Mind stats
 import requests
 print(requests.get("http://localhost:8080/v1/stats").json())
+
+# Verify storage (not just scoring)
+from pathlib import Path
+import json
+f = Path.home() / '.spark' / 'cognitive_insights.json'
+data = json.loads(f.read_text())
+print(f'Stored insights: {len(data.get("insights", []))}')
 ```
 
 ### Why This Matters

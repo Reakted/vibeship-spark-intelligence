@@ -95,6 +95,308 @@ Before claiming test results:
 - [ ] Can reproduce by running the same query?
 - [ ] Evidence is from durable source, not ephemeral logs?
 
+### Rule 3: Pipeline Health Before Tuning (NEW)
+
+**CRITICAL:** Before ANY tuning or iteration session:
+
+> **Run pipeline health check FIRST. Scoring metrics are meaningless if the pipeline isn't operational.**
+
+```bash
+# MANDATORY: Run this before tuning
+python tests/test_pipeline_health.py
+```
+
+**The Session 2 Lesson:**
+In Session 2, Meta-Ralph was scoring correctly (39.4% quality rate), but:
+- `learnings_stored=0` - Nothing was being persisted!
+- `aggregator_events=0` - Pattern detection wasn't receiving events!
+- Components were correct but **not connected**
+
+Perfect scoring with broken pipeline = zero learning.
+
+### Rule 4: Anti-Hallucination (NEW)
+
+**CRITICAL:** Never claim improvements based on:
+
+| Hallucination Source | Why It's Wrong | What To Do Instead |
+|---------------------|----------------|---------------------|
+| Terminal output | Ephemeral, may not persist | Query storage directly |
+| "I saw X happen" | Observation ≠ storage | Verify in data files |
+| Code changes alone | Code may not be in data path | Run end-to-end flow test |
+| Scoring improvements | Scoring ≠ learning | Verify storage + utilization |
+
+**The Anti-Hallucination Test:**
+```bash
+# Before claiming improvement, verify:
+# 1. Pipeline is running
+python tests/test_pipeline_health.py quick
+
+# 2. Changes are in the active data path
+# (consult Intelligence_Flow_Map.md)
+
+# 3. Data is actually being stored
+python -c "
+from pathlib import Path
+import json
+f = Path.home() / '.spark' / 'cognitive_insights.json'
+data = json.loads(f.read_text())
+print(f'Insights stored: {len(data.get(\"insights\", []))}')
+"
+```
+
+---
+
+## Reality-Grounded Iteration Methodology (NEW)
+
+> "Perfect scoring with broken pipeline = zero learning"
+
+This methodology replaces the old "tune and test" approach with a reality-grounded workflow that prevents hallucinated improvements.
+
+### The Complete Iteration Workflow
+
+```
+STEP 0: PIPELINE HEALTH     (MANDATORY - Blocks all other steps)
+   ↓
+STEP 1: ARCHITECTURE REVIEW (Which components are you changing?)
+   ↓
+STEP 2: BASELINE           (Measure current reality from storage)
+   ↓
+STEP 3: CHANGE             (Make the improvement)
+   ↓
+STEP 4: VERIFY FLOW        (Did events flow through the change?)
+   ↓
+STEP 5: VERIFY STORAGE     (Did results persist?)
+   ↓
+STEP 6: VERIFY UTILIZATION (Are stored learnings being used?)
+   ↓
+STEP 7: DOCUMENT           (Record with evidence)
+```
+
+### Step 0: Pipeline Health Check (MANDATORY)
+
+**This step BLOCKS all other steps. Do not proceed if it fails.**
+
+```bash
+# Full health check
+python tests/test_pipeline_health.py
+
+# Quick check (minimum viable)
+python tests/test_pipeline_health.py quick
+```
+
+**What it checks (from Intelligence_Flow.md):**
+
+| Check | Critical? | Why |
+|-------|-----------|-----|
+| Bridge worker heartbeat | YES | If not running, nothing processes |
+| Queue has events | NO | May just be empty |
+| Meta-Ralph active | YES | If zero events, not connected |
+| Cognitive storage | YES | If zero stored, persistence broken |
+| Pattern aggregator | YES | If zero events, not called |
+| EIDOS store | NO | May not be used yet |
+| Mind connection | NO | Optional integration |
+
+**If any critical check fails:**
+1. STOP - Do not proceed with tuning
+2. Fix the pipeline issue first
+3. Re-run health check
+4. Only then continue to Step 1
+
+### Step 1: Architecture Review
+
+Before changing code, understand WHERE in the architecture it sits.
+
+```bash
+# Visual reference
+cat Intelligence_Flow_Map.md
+
+# Or view the mermaid diagram
+```
+
+**Key questions:**
+- [ ] Which layer am I modifying? (Sources, Queue, Bridge, Processing, Output)
+- [ ] What calls this component? (Check Intelligence_Flow.md)
+- [ ] What does this component call? (Check imports)
+- [ ] Is this component in the active data path?
+
+**Example (from Session 2):**
+- Changed: `observe.py` (Sources layer)
+- Problem: Didn't add call to `aggregator.process_event()`
+- Result: Pattern detection had 0 events
+- Fix: Added the call, events now flow
+
+### Step 2: Baseline Measurement
+
+**Measure FROM STORAGE, not terminal output.**
+
+```bash
+# Save baseline
+python tests/test_cognitive_capture.py baseline
+
+# Also capture pipeline state
+python -c "
+from lib.meta_ralph import get_meta_ralph
+from lib.eidos import get_store
+from lib.pattern_detection import get_aggregator
+import json
+
+state = {
+    'ralph': get_meta_ralph().get_stats(),
+    'eidos': get_store().get_stats(),
+    'aggregator': get_aggregator().get_stats()
+}
+print(json.dumps(state, indent=2))
+"
+```
+
+### Step 3: Make the Change
+
+Apply your improvement, keeping in mind:
+- [ ] Change is in active data path
+- [ ] Connected to calling component
+- [ ] Connected to downstream storage
+
+### Step 4: Verify Event Flow
+
+**After change, verify events flow through it.**
+
+```bash
+# Emit a test event
+python tests/test_pipeline_health.py flow
+
+# Wait for bridge cycle (60s) or trigger manually
+python -c "from lib.bridge_cycle import run_bridge_cycle; run_bridge_cycle()"
+
+# Check if event was processed
+python -c "
+from lib.meta_ralph import get_meta_ralph
+for r in get_meta_ralph().get_recent_roasts(5):
+    print(r.get('result', {}).get('original', '')[:80])
+"
+```
+
+### Step 5: Verify Storage
+
+**Events processed ≠ Events stored. Verify storage explicitly.**
+
+```bash
+# Compare to baseline
+python tests/test_cognitive_capture.py compare
+
+# Check storage delta
+python -c "
+from pathlib import Path
+import json
+f = Path.home() / '.spark' / 'cognitive_insights.json'
+data = json.loads(f.read_text())
+print(f'Total insights: {len(data.get(\"insights\", []))}')
+# Check recent
+for i in data.get('insights', [])[-3:]:
+    print(f'  - {i.get(\"text\", \"\")[:60]}...')
+"
+```
+
+### Step 6: Verify Utilization (NEW)
+
+**Stored learnings must be USED to matter.**
+
+```bash
+# Check if learnings are being retrieved for advice
+python -c "
+from lib.advisor import get_advisor
+from lib.meta_ralph import get_meta_ralph
+
+# Check retrieval stats
+ralph = get_meta_ralph()
+stats = ralph.get_stats()
+print(f'Retrievals tracked: {stats.get(\"outcome_stats\", {}).get(\"total_tracked\", 0)}')
+print(f'Good outcomes: {stats.get(\"outcome_stats\", {}).get(\"good_outcomes\", 0)}')
+"
+```
+
+**Questions to answer:**
+- [ ] Are stored learnings being retrieved during actions?
+- [ ] Do retrieved learnings lead to good outcomes?
+- [ ] Are low-utility learnings being demoted?
+
+### Step 7: Document with Evidence
+
+**Only claim improvements backed by storage evidence.**
+
+```markdown
+## Improvement: [Name]
+
+### Evidence (Required)
+- Pipeline health: PASSED (test_pipeline_health.py)
+- Baseline insights: 1,500
+- After insights: 1,525 (+25)
+- Storage verified: YES (cognitive_insights.json)
+- Utilization: 5 retrievals, 3 good outcomes
+
+### What Changed
+- Modified: lib/observe.py:273
+- Added: aggregator.process_event() call
+
+### Architecture Reference
+- Layer: Sources (observe.py)
+- Calls: lib.pattern_detection.aggregator
+- Called by: Claude Code hooks
+```
+
+---
+
+## Learning Utilization Tracking (NEW)
+
+> "Storing learnings that never get used is as bad as not learning at all."
+
+### The Utilization Loop
+
+```
+LEARN → STORE → RETRIEVE → USE → OUTCOME → VALIDATE
+   ↑                                           |
+   └───────────────────────────────────────────┘
+           (Good outcomes strengthen learning)
+```
+
+### What to Track
+
+| Metric | What It Means | Target |
+|--------|--------------|--------|
+| **Retrieval Rate** | How often are stored learnings retrieved? | >10% of stored |
+| **Acted On Rate** | How often are retrieved learnings acted upon? | >50% of retrieved |
+| **Good Outcome Rate** | How often does acting on learning help? | >60% of acted |
+| **Reliability Delta** | Are good learnings getting stronger? | Positive trend |
+
+### Commands to Check Utilization
+
+```bash
+# Check outcome stats
+python -c "
+from lib.meta_ralph import get_meta_ralph
+stats = get_meta_ralph().get_stats().get('outcome_stats', {})
+print(f'Total tracked: {stats.get(\"total_tracked\", 0)}')
+print(f'Good outcomes: {stats.get(\"good_outcomes\", 0)}')
+print(f'Bad outcomes: {stats.get(\"bad_outcomes\", 0)}')
+"
+
+# Check advisor activity
+python -c "
+from lib.advisor import get_advice_stats
+stats = get_advice_stats()
+print(f'Advice given: {stats.get(\"total_advice\", 0)}')
+print(f'Acted on: {stats.get(\"acted_on\", 0)}')
+"
+```
+
+### What If Utilization Is Low?
+
+| Symptom | Diagnosis | Action |
+|---------|-----------|--------|
+| High storage, low retrieval | Advisor not calling learnings | Check advisor.py integration |
+| High retrieval, low acted-on | Learnings not actionable | Improve actionability scoring |
+| High acted-on, low good outcome | Learnings are wrong | Lower reliability, demote |
+| All zeros | Outcome tracking broken | Check track_retrieval/track_outcome calls |
+
 ---
 
 ## Core Philosophy
@@ -446,10 +748,78 @@ curl http://localhost:8788/api/stats
 | 2026-02-03 | Chips auto-activation | Threshold too high | auto_activate_threshold 0.7→0.5, get_active_chips() added |
 | 2026-02-03 | **CRITICAL FIX**: Code content extraction | Write/Edit content not analyzed for cognitive signals | Now extracts REMEMBER:, PRINCIPLE:, CORRECTION:, etc. from code |
 | 2026-02-03 | Importance patterns expansion | REMEMBER:, CORRECTION:, PRINCIPLE: not scoring as CRITICAL | Added 5 new CRITICAL patterns for explicit learning markers |
+| 2026-02-03 | **SESSION 4 START** | --- | --- |
+| 2026-02-03 | **METHODOLOGY OVERHAUL**: Reality-Grounded Iteration | Test suite tested scoring in isolation, not pipeline flow | New methodology: Pipeline Health → Architecture Review → Baseline → Change → Verify Flow → Verify Storage → Verify Utilization |
+| 2026-02-03 | Created test_pipeline_health.py | No automated check for pipeline operational status | Tests all layers from Intelligence_Flow.md (Sources → Queue → Bridge → Processing → Output) |
+| 2026-02-03 | Added Rule 3: Pipeline Health Before Tuning | Session 2 had perfect scoring but broken pipeline (learnings_stored=0) | MANDATORY health check blocks tuning if pipeline unhealthy |
+| 2026-02-03 | Added Rule 4: Anti-Hallucination | Claims based on terminal output instead of storage | Must verify from persistent storage, not ephemeral logs |
+| 2026-02-03 | Added Learning Utilization Tracking | Stored learnings might never be used | Track retrieval → acted-on → outcome feedback loop |
+| 2026-02-03 | Updated Improvement Workflow | Old workflow skipped pipeline verification | 7-step workflow starting with mandatory health check |
 
 ---
 
 ## Session History
+
+### Session 4: 2026-02-03 (Reality-Grounded Methodology Overhaul)
+
+**Goal:** Fix fundamental gap where iteration methodology tested scoring but not pipeline flow.
+
+**The Problem Discovered:**
+
+Analysis of META_RALPH.md revealed that the iteration methodology was:
+- Testing Meta-Ralph scoring logic in isolation
+- NOT verifying the pipeline was operational
+- Allowing "improvements" to components not in the active data path
+
+**Evidence from Session 2:**
+- Meta-Ralph quality rate: 39.4% (looked good!)
+- But: `learnings_stored=0` (nothing persisted)
+- But: `aggregator_events=0` (pattern detection disconnected)
+- Perfect scoring with broken pipeline = zero learning
+
+**The Solution:**
+
+1. **Created `tests/test_pipeline_health.py`**
+   - Tests all layers from Intelligence_Flow.md
+   - Verifies bridge_worker heartbeat (CRITICAL)
+   - Checks event flow from queue to storage
+   - Validates component connectivity
+
+2. **Added Rule 3: Pipeline Health Before Tuning**
+   - MANDATORY check that BLOCKS all tuning if failed
+   - Prevents wasted effort on disconnected components
+
+3. **Added Rule 4: Anti-Hallucination**
+   - Must verify from storage, not terminal output
+   - Claims require evidence from persistent data
+
+4. **Updated Iteration Workflow to 7 Steps:**
+   ```
+   0. PIPELINE HEALTH (MANDATORY - blocks all other steps)
+   1. ARCHITECTURE REVIEW
+   2. BASELINE (from storage)
+   3. CHANGE
+   4. VERIFY FLOW
+   5. VERIFY STORAGE
+   6. VERIFY UTILIZATION
+   7. DOCUMENT WITH EVIDENCE
+   ```
+
+5. **Added Learning Utilization Tracking**
+   - Track: Learn → Store → Retrieve → Use → Outcome → Validate
+   - Close the feedback loop completely
+
+**Key Insight:**
+
+> "Perfect scoring with broken pipeline = zero learning"
+
+The old methodology was like tuning a car's fuel mixture without checking if the fuel pump was running.
+
+**Files Changed:**
+- `tests/test_pipeline_health.py` (NEW)
+- `META_RALPH.md` (methodology overhaul)
+
+---
 
 ### Session 3: 2026-02-03 (Code Content Extraction & Live Testing)
 
@@ -801,6 +1171,24 @@ r"tool timeout"                       # New pattern
 
 ## Commands Reference
 
+### Pipeline Health (RUN FIRST - ALWAYS)
+
+```bash
+# Full pipeline health check (MANDATORY before tuning)
+python tests/test_pipeline_health.py
+
+# Quick status check
+python tests/test_pipeline_health.py quick
+
+# Test event flow through pipeline
+python tests/test_pipeline_health.py flow
+
+# Trace a test event end-to-end
+python tests/test_pipeline_health.py trace
+```
+
+### Meta-Ralph Stats
+
 ```bash
 # Session summary with suggestions
 python -c "from lib.meta_ralph import get_meta_ralph; print(get_meta_ralph().print_session_summary())"
@@ -813,6 +1201,38 @@ python -c "from lib.meta_ralph import get_meta_ralph; import json; print(json.du
 
 # Tuneable recommendations
 python -c "from lib.meta_ralph import get_meta_ralph; import json; print(json.dumps(get_meta_ralph().analyze_tuneables(), indent=2))"
+```
+
+### Storage Verification
+
+```bash
+# Check cognitive insights count
+python -c "
+from pathlib import Path
+import json
+f = Path.home() / '.spark' / 'cognitive_insights.json'
+data = json.loads(f.read_text())
+print(f'Total insights: {len(data.get(\"insights\", []))}')
+"
+
+# Check EIDOS store
+python -c "from lib.eidos import get_store; import json; print(json.dumps(get_store().get_stats(), indent=2))"
+
+# Check pattern aggregator
+python -c "from lib.pattern_detection import get_aggregator; import json; print(json.dumps(get_aggregator().get_stats(), indent=2))"
+```
+
+### Utilization Tracking
+
+```bash
+# Check outcome stats
+python -c "
+from lib.meta_ralph import get_meta_ralph
+stats = get_meta_ralph().get_stats().get('outcome_stats', {})
+print(f'Total tracked: {stats.get(\"total_tracked\", 0)}')
+print(f'Good outcomes: {stats.get(\"good_outcomes\", 0)}')
+print(f'Bad outcomes: {stats.get(\"bad_outcomes\", 0)}')
+"
 ```
 
 ---
@@ -852,33 +1272,53 @@ python tests/test_cognitive_capture.py deep
 | **Skill Coverage** | Which domains have learnings |
 | **Filter Accuracy** | Correctly classifies cognitive vs operational |
 
-### Improvement Workflow
+### Improvement Workflow (Updated - Reality-Grounded)
+
+**CRITICAL:** See "Reality-Grounded Iteration Methodology" section for full details.
 
 ```
-1. BASELINE
-   python tests/test_cognitive_capture.py baseline
+0. PIPELINE HEALTH (MANDATORY - BLOCKS ALL OTHER STEPS)
+   python tests/test_pipeline_health.py
+   → If critical failures, STOP and fix pipeline first
+   → Do NOT proceed to tuning with broken pipeline
 
-2. TUNE
+1. ARCHITECTURE REVIEW
+   - Read Intelligence_Flow_Map.md
+   - Identify which layer you're modifying
+   - Verify component is in active data path
+
+2. BASELINE
+   python tests/test_cognitive_capture.py baseline
+   → Measure FROM STORAGE, not terminal
+
+3. TUNE
    - Adjust thresholds in lib/meta_ralph.py
    - Add detection patterns in lib/importance_scorer.py
    - Modify scoring weights
 
-3. TEST
-   python tests/test_cognitive_capture.py test
-   → Verify filter accuracy (should be 90%+)
+4. VERIFY FLOW
+   python tests/test_pipeline_health.py flow
+   → Confirm events flow through your change
 
-4. COMPARE
+5. VERIFY STORAGE
    python tests/test_cognitive_capture.py compare
-   → Check improvement in pass rate, cognitive density
+   → Check storage delta, not just scoring
 
-5. VALIDATE
-   - Manually review passed items
-   - Confirm they're genuinely useful
+6. VERIFY UTILIZATION
+   - Are stored learnings being retrieved?
+   - Are they leading to good outcomes?
 
-6. DOCUMENT
-   - Update changelog in META_RALPH.md
-   - Record what worked, what didn't
+7. DOCUMENT WITH EVIDENCE
+   - Pipeline health: PASSED
+   - Storage before/after: X → Y
+   - Utilization stats: Z retrievals, W outcomes
 ```
+
+**Anti-Hallucination Checkpoint:**
+- [ ] Pipeline health check passed?
+- [ ] Evidence from storage (not terminal)?
+- [ ] Changes in active data path?
+- [ ] Flow verified through change?
 
 ### Sample Output
 
