@@ -586,6 +586,122 @@ class MetaRalph:
         """Get recent roast results."""
         return self.roast_history[-limit:]
 
+    def get_session_summary(self, last_n: int = 50) -> Dict:
+        """
+        Generate end-of-session summary with suggestions.
+
+        Call this at session end to surface:
+        - What was learned (quality items)
+        - What could be improved (needs_work with suggestions)
+        - Patterns to watch out for (primitives seen)
+        - Recommendations for next session
+        """
+        recent = self.roast_history[-last_n:]
+
+        if not recent:
+            return {"message": "No activity this session"}
+
+        # Categorize
+        quality = []
+        needs_work_with_suggestions = []
+        primitives = []
+
+        for roast in recent:
+            result = roast.get("result", {})
+            verdict = result.get("verdict", "")
+            original = result.get("original", "")[:100]
+            suggestions = result.get("refinement_suggestions", [])
+            refined = result.get("refined_version")
+
+            if verdict == "quality":
+                quality.append(original)
+            elif verdict == "needs_work":
+                needs_work_with_suggestions.append({
+                    "learning": original,
+                    "suggestions": suggestions,
+                    "refined": refined
+                })
+            elif verdict == "primitive":
+                primitives.append(original[:60])
+
+        # Generate recommendations
+        recommendations = []
+
+        if len(needs_work_with_suggestions) > 3:
+            recommendations.append(
+                "Many borderline items detected. Try adding 'because...' to explain reasoning."
+            )
+
+        if len(primitives) > len(quality):
+            recommendations.append(
+                "More primitives than quality items. Focus on capturing 'why' not 'what'."
+            )
+
+        if not quality:
+            recommendations.append(
+                "No quality learnings captured. Try explicit statements like 'Remember this:' or 'I prefer X because Y'."
+            )
+
+        # Build summary
+        summary = {
+            "session_stats": {
+                "total_roasted": len(recent),
+                "quality_learned": len(quality),
+                "needs_improvement": len(needs_work_with_suggestions),
+                "primitives_filtered": len(primitives)
+            },
+            "quality_items": quality[:5],  # Top 5 learned
+            "improvement_opportunities": needs_work_with_suggestions[:3],  # Top 3 to improve
+            "recommendations": recommendations,
+            "next_session_tips": [
+                "Add reasoning with 'because' to boost quality scores",
+                "Be specific about context (project, domain, technology)",
+                "Use 'Remember this:' for critical insights"
+            ] if not quality else []
+        }
+
+        return summary
+
+    def print_session_summary(self) -> str:
+        """Print a human-readable session summary."""
+        summary = self.get_session_summary()
+
+        lines = [
+            "",
+            "=" * 60,
+            " META-RALPH SESSION SUMMARY",
+            "=" * 60,
+            "",
+            f"Quality learned: {summary['session_stats']['quality_learned']}",
+            f"Needs improvement: {summary['session_stats']['needs_improvement']}",
+            f"Primitives filtered: {summary['session_stats']['primitives_filtered']}",
+            "",
+        ]
+
+        if summary.get("quality_items"):
+            lines.append("LEARNED THIS SESSION:")
+            for item in summary["quality_items"]:
+                lines.append(f"  + {item}...")
+            lines.append("")
+
+        if summary.get("improvement_opportunities"):
+            lines.append("COULD BE IMPROVED:")
+            for opp in summary["improvement_opportunities"]:
+                lines.append(f"  - {opp['learning']}...")
+                if opp.get("suggestions"):
+                    lines.append(f"    Tip: {opp['suggestions'][0]}")
+            lines.append("")
+
+        if summary.get("recommendations"):
+            lines.append("RECOMMENDATIONS:")
+            for rec in summary["recommendations"]:
+                lines.append(f"  > {rec}")
+            lines.append("")
+
+        lines.append("=" * 60)
+
+        return "\n".join(lines)
+
     def analyze_tuneables(self) -> Dict:
         """Analyze current learning patterns and recommend tuneable adjustments."""
         analysis = {
