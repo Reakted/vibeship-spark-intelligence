@@ -34,6 +34,7 @@ from lib.resonance import get_resonance_display
 from lib.dashboard_project import get_active_project, get_project_memory_preview
 from lib.taste_api import add_from_dashboard
 from lib.diagnostics import setup_component_logging
+from lib.run_log import get_recent_runs, get_run_detail
 
 # Service control
 from lib.service_control import service_status
@@ -915,6 +916,7 @@ def get_mission_control_data() -> Dict[str, Any]:
         "minimal_mode": minimal_mode,
         "watchers": watcher_feed[:20],
         "escalations": escalations[-10:],
+        "runs": get_recent_runs(limit=6),
     }
 
 
@@ -3768,6 +3770,12 @@ def generate_mission_html() -> str:
     </section>
     <section class="grid">
       <div class="card">
+        <div class="card-header"><span class="card-title">Recent Runs</span><span class="muted">facade</span></div>
+        <div class="list" id="runs-list"></div>
+      </div>
+    </section>
+    <section class="grid">
+      <div class="card">
         <div class="card-header"><span class="card-title">Trace Drilldown</span><span class="muted">trace_id</span></div>
         <div class="actions">
           <input id="trace-input" class="input" placeholder="trace_id" />
@@ -3823,6 +3831,22 @@ def generate_mission_html() -> str:
       const traceButton = (tid) => {
         if (!tid) return "";
         return `<button class="btn" onclick="loadTrace('${tid}')">trace</button>`;
+      };
+      const runButton = (episodeId) => {
+        if (!episodeId) return "";
+        return `<button class="btn" onclick="loadRun('${episodeId}')">run</button>`;
+      };
+      const loadRun = async (episodeId) => {
+        const eid = (episodeId || "").trim();
+        if (!eid) return;
+        try {
+          const res = await fetch(`/api/run?episode_id=${encodeURIComponent(eid)}`, { cache: "no-store" });
+          const data = await res.json();
+          if (data && data.episode && data.trace_ids && data.trace_ids.length) {
+            const first = data.trace_ids[0];
+            loadTrace(first);
+          }
+        } catch (e) {}
       };
 
       const services = data.services || {};
@@ -3915,6 +3939,15 @@ def generate_mission_html() -> str:
           <span>${e.type || "escalation"}</span>
           <span class="muted">${e.summary || e.reason || ""}</span>
           <span class="mono">${new Date((e.timestamp || 0) * 1000).toLocaleTimeString()}</span>
+        </div>
+      `);
+
+      renderList("runs-list", data.runs || [], (r) => `
+        <div class="row">
+          <span>${r.goal}</span>
+          <span class="mono">${r.step_count}</span>
+          <span class="muted">${r.outcome}</span>
+          ${runButton(r.episode_id)}
         </div>
       `);
 
@@ -4266,6 +4299,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps(get_trace_timeline_data(trace_id), indent=2).encode())
+        elif path == '/api/run':
+            episode_id = ""
+            if "episode_id" in query and query["episode_id"]:
+                episode_id = query["episode_id"][0]
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(get_run_detail(episode_id), indent=2).encode())
         elif path == '/api/status/stream':
             self._serve_sse(get_mission_control_data)
         elif path == '/api/ops/stream':
