@@ -17,6 +17,46 @@ from urllib import request
 SPARK_DIR = Path(__file__).resolve().parent
 LOG_DIR = Path.home() / ".spark" / "logs"
 STATE_FILE = Path.home() / ".spark" / "watchdog_state.json"
+PID_FILE = Path.home() / ".spark" / "pids" / "watchdog.pid"
+
+
+def _check_single_instance() -> bool:
+    """Ensure only one watchdog runs. Returns True if we can proceed, False if another is running."""
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check if another watchdog is already running
+    if PID_FILE.exists():
+        try:
+            old_pid = int(PID_FILE.read_text().strip())
+            # Check if that process is still alive
+            if os.name == "nt":
+                out = subprocess.check_output(
+                    ["tasklist", "/FI", f"PID eq {old_pid}"],
+                    text=True,
+                    errors="ignore",
+                )
+                if str(old_pid) in out:
+                    return False  # Another watchdog is running
+            else:
+                try:
+                    os.kill(old_pid, 0)
+                    return False  # Another watchdog is running
+                except ProcessLookupError:
+                    pass  # Process doesn't exist, we can proceed
+        except Exception:
+            pass  # Couldn't read/parse PID, proceed anyway
+
+    # Write our PID
+    PID_FILE.write_text(str(os.getpid()))
+    return True
+
+
+def _cleanup_pid_file() -> None:
+    """Remove PID file on exit."""
+    try:
+        PID_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _ensure_log_dir() -> Path:
@@ -75,9 +115,12 @@ def _start_process(name: str, args: list[str]) -> bool:
         env["SPARK_LOG_DIR"] = str(LOG_DIR)
         creationflags = 0
         if os.name == "nt":
+            # CREATE_NO_WINDOW (0x08000000) prevents console windows from opening
+            # DETACHED_PROCESS alone is NOT enough on Windows
+            CREATE_NO_WINDOW = 0x08000000
             creationflags = (
                 getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-                | getattr(subprocess, "DETACHED_PROCESS", 0)
+                | CREATE_NO_WINDOW
             )
         with open(log_path, "a", encoding="utf-8", errors="replace") as log_f:
             subprocess.Popen(
@@ -110,6 +153,54 @@ def _save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
+# Restart limiter: prevent infinite restart loops
+MAX_RESTARTS_PER_HOUR = 5
+RESTART_COOLDOWN_S = 3600  # 1 hour cooldown after hitting max restarts
+
+
+def _can_restart(state: dict, service: str) -> bool:
+    """Check if we can restart a service (not hitting restart limits)."""
+    key = f"restarts_{service}"
+    cooldown_key = f"cooldown_{service}"
+    now = time.time()
+
+    # Check if in cooldown period
+    cooldown_until = state.get(cooldown_key, 0)
+    if now < cooldown_until:
+        return False
+
+    # Get restart history (list of timestamps)
+    restarts = state.get(key, [])
+
+    # Filter to only last hour
+    one_hour_ago = now - 3600
+    recent_restarts = [t for t in restarts if t > one_hour_ago]
+
+    return len(recent_restarts) < MAX_RESTARTS_PER_HOUR
+
+
+def _record_restart(state: dict, service: str) -> None:
+    """Record a restart attempt for rate limiting."""
+    key = f"restarts_{service}"
+    cooldown_key = f"cooldown_{service}"
+    now = time.time()
+
+    # Get restart history
+    restarts = state.get(key, [])
+
+    # Filter to only last hour and add new one
+    one_hour_ago = now - 3600
+    restarts = [t for t in restarts if t > one_hour_ago]
+    restarts.append(now)
+
+    state[key] = restarts
+
+    # If we hit the limit, set cooldown
+    if len(restarts) >= MAX_RESTARTS_PER_HOUR:
+        state[cooldown_key] = now + RESTART_COOLDOWN_S
+        _log(f"{service} hit max restarts ({MAX_RESTARTS_PER_HOUR}/hour), entering 1-hour cooldown")
+
+
 def _queue_counts() -> tuple[int, int]:
     sys.path.insert(0, str(SPARK_DIR))
     from lib.queue import count_events
@@ -133,10 +224,28 @@ def main() -> None:
     ap.add_argument("--bridge-stale-s", type=int, default=90, help="heartbeat stale threshold")
     ap.add_argument("--once", action="store_true", help="run one check and exit")
     ap.add_argument("--no-restart", action="store_true", help="only report, never restart")
+    ap.add_argument("--startup-delay", type=int, default=15, help="seconds to wait before first check (grace period for services to start)")
     args = ap.parse_args()
 
     _ensure_log_dir()
+
+    # Prevent multiple watchdogs from running simultaneously
+    if not _check_single_instance():
+        _log("another watchdog is already running, exiting")
+        sys.exit(0)
+
+    import atexit
+    atexit.register(_cleanup_pid_file)
+
     _log("watchdog started")
+
+    # Grace period: wait for other services to fully start before checking
+    # This prevents race condition where watchdog starts spawning services
+    # that are still initializing from `spark up`
+    if args.startup_delay > 0 and not args.once:
+        _log(f"waiting {args.startup_delay}s startup grace period...")
+        time.sleep(args.startup_delay)
+        _log("grace period complete, starting health checks")
 
     state = _load_state()
     over_since = float(state.get("queue_over_since") or 0.0)
@@ -148,32 +257,36 @@ def main() -> None:
         if not sparkd_ok:
             if _process_exists(["sparkd.py", "-m sparkd"]):
                 _log("sparkd unhealthy but process exists")
-            elif not args.no_restart:
-                _start_process("sparkd", [sys.executable, "-m", "sparkd"])
+            elif not args.no_restart and _can_restart(state, "sparkd"):
+                if _start_process("sparkd", [sys.executable, "-m", "sparkd"]):
+                    _record_restart(state, "sparkd")
 
         # dashboard
         dash_ok = _http_ok("http://127.0.0.1:8585/api/status")
         if not dash_ok:
             if _process_exists(["dashboard.py", "-m dashboard"]):
                 _log("dashboard unhealthy but process exists")
-            elif not args.no_restart:
-                _start_process("dashboard", [sys.executable, "-m", "dashboard"])
+            elif not args.no_restart and _can_restart(state, "dashboard"):
+                if _start_process("dashboard", [sys.executable, "-m", "dashboard"]):
+                    _record_restart(state, "dashboard")
 
         # spark pulse
         pulse_ok = _http_ok("http://127.0.0.1:8765/api/pulse")
         if not pulse_ok:
             if _process_exists(["spark_pulse.py"]):
                 _log("pulse unhealthy but process exists")
-            elif not args.no_restart:
-                _start_process("pulse", [sys.executable, str(SPARK_DIR / "spark_pulse.py")])
+            elif not args.no_restart and _can_restart(state, "pulse"):
+                if _start_process("pulse", [sys.executable, str(SPARK_DIR / "spark_pulse.py")]):
+                    _record_restart(state, "pulse")
 
         # meta-ralph dashboard
         meta_ok = _http_ok("http://127.0.0.1:8586/health")
         if not meta_ok:
             if _process_exists(["meta_ralph_dashboard.py"]):
                 _log("meta_ralph unhealthy but process exists")
-            elif not args.no_restart:
-                _start_process("meta_ralph", [sys.executable, str(SPARK_DIR / "meta_ralph_dashboard.py")])
+            elif not args.no_restart and _can_restart(state, "meta_ralph"):
+                if _start_process("meta_ralph", [sys.executable, str(SPARK_DIR / "meta_ralph_dashboard.py")]):
+                    _record_restart(state, "meta_ralph")
 
         # bridge_worker
         hb_age = _bridge_heartbeat_age()
@@ -181,11 +294,12 @@ def main() -> None:
         if not bridge_ok:
             if _process_exists(["bridge_worker.py", "-m bridge_worker"]):
                 _log("bridge_worker heartbeat stale but process exists")
-            elif not args.no_restart:
-                _start_process(
+            elif not args.no_restart and _can_restart(state, "bridge_worker"):
+                if _start_process(
                     "bridge_worker",
                     [sys.executable, "-m", "bridge_worker", "--interval", "30"],
-                )
+                ):
+                    _record_restart(state, "bridge_worker")
 
         # queue pressure warning
         try:

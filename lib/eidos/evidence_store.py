@@ -149,7 +149,8 @@ class EvidenceStore:
     def _init_db(self):
         """Initialize database schema."""
         with sqlite3.connect(self.db_path) as conn:
-            conn.executescript("""
+            # First, create table WITHOUT trace_id index (for compatibility with old DBs)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS evidence (
                     evidence_id TEXT PRIMARY KEY,
                     step_id TEXT,
@@ -169,8 +170,18 @@ class EvidenceStore:
                     created_at REAL DEFAULT (strftime('%s', 'now')),
                     expires_at REAL,
                     retention_reason TEXT
-                );
+                )
+            """)
 
+            # Migration: add trace_id column if missing (for old databases)
+            try:
+                if not self._column_exists(conn, "evidence", "trace_id"):
+                    conn.execute("ALTER TABLE evidence ADD COLUMN trace_id TEXT")
+            except Exception:
+                pass
+
+            # Now create all indexes (trace_id column guaranteed to exist)
+            conn.executescript("""
                 CREATE INDEX IF NOT EXISTS idx_evidence_step ON evidence(step_id);
                 CREATE INDEX IF NOT EXISTS idx_evidence_trace ON evidence(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_evidence_expires ON evidence(expires_at)
@@ -178,12 +189,6 @@ class EvidenceStore:
                 CREATE INDEX IF NOT EXISTS idx_evidence_type ON evidence(type);
                 CREATE INDEX IF NOT EXISTS idx_evidence_hash ON evidence(content_hash);
             """)
-            try:
-                if not self._column_exists(conn, "evidence", "trace_id"):
-                    conn.execute("ALTER TABLE evidence ADD COLUMN trace_id TEXT")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_trace ON evidence(trace_id)")
-            except Exception:
-                pass
             conn.commit()
 
     def _column_exists(self, conn: sqlite3.Connection, table: str, column: str) -> bool:

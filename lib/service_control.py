@@ -106,9 +106,12 @@ def _start_process(name: str, args: list[str]) -> Optional[int]:
 
     creationflags = 0
     if os.name == "nt":
+        # CREATE_NO_WINDOW (0x08000000) prevents console windows from opening
+        # DETACHED_PROCESS alone is NOT enough on Windows
+        CREATE_NO_WINDOW = 0x08000000
         creationflags = (
             getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            | getattr(subprocess, "DETACHED_PROCESS", 0)
+            | CREATE_NO_WINDOW
         )
 
     with open(log_path, "a", encoding="utf-8", errors="replace") as log_f:
