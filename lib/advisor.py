@@ -258,7 +258,7 @@ class SparkAdvisor:
         # 1. Query memory banks (fast local)
         advice_list.extend(self._get_bank_advice(context))
 
-        # 2. Query cognitive insights
+        # 2. Query cognitive insights (semantic + keyword fallback)
         advice_list.extend(self._get_cognitive_advice(tool_name, context))
 
         # 3. Query Mind if available
@@ -309,7 +309,59 @@ class SparkAdvisor:
         return advice_list
 
     def _get_cognitive_advice(self, tool_name: str, context: str) -> List[Advice]:
-        """Get advice from cognitive insights."""
+        """Get advice from cognitive insights (semantic-first with keyword fallback)."""
+        semantic = self._get_semantic_cognitive_advice(context)
+        keyword = self._get_cognitive_advice_keyword(tool_name, context)
+
+        if not semantic:
+            return keyword
+
+        # Merge, preferring semantic results
+        seen = {a.insight_key for a in semantic if a.insight_key}
+        merged = list(semantic)
+        for a in keyword:
+            if a.insight_key and a.insight_key in seen:
+                continue
+            merged.append(a)
+        return merged
+
+    def _get_semantic_cognitive_advice(self, context: str) -> List[Advice]:
+        """Semantic retrieval for cognitive insights (if enabled)."""
+        try:
+            from .semantic_retriever import get_semantic_retriever
+        except Exception:
+            return []
+
+        retriever = get_semantic_retriever()
+        if not retriever:
+            return []
+
+        results = retriever.retrieve(context, self.cognitive.insights, limit=10)
+        advice: List[Advice] = []
+        for r in results:
+            if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(r.insight_text):
+                continue
+            confidence = max(0.6, r.fusion_score)
+            if r.source_type == "trigger":
+                confidence = max(0.8, confidence)
+            context_match = max(r.semantic_sim, r.trigger_conf, 0.7)
+            source = "trigger" if r.source_type == "trigger" else "semantic"
+            reason = r.why or "Semantic match"
+
+            advice.append(Advice(
+                advice_id=self._generate_advice_id(r.insight_text),
+                insight_key=r.insight_key,
+                text=r.insight_text,
+                confidence=confidence,
+                source=source,
+                context_match=context_match,
+                reason=reason,
+            ))
+
+        return advice
+
+    def _get_cognitive_advice_keyword(self, tool_name: str, context: str) -> List[Advice]:
+        """Get advice from cognitive insights using keyword matching."""
         advice = []
 
         # Query insights relevant to this context
@@ -659,6 +711,8 @@ class SparkAdvisor:
             "cognitive": 1.0,       # Standard cognitive insights
             "mind": 1.0,            # Mind memories
             "bank": 0.9,            # Memory banks (less curated)
+            "semantic": 1.05,       # Semantic retrieval of cognitive insights
+            "trigger": 1.2,         # Explicit trigger rules
         }
 
         # Get insight-level effectiveness from Meta-Ralph (Task #11)

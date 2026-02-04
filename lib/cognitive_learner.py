@@ -824,6 +824,13 @@ class CognitiveLearner:
             except Exception:
                 pass  # Don't fail if exposure tracking unavailable
 
+        # Index for semantic retrieval (best-effort)
+        try:
+            from lib.semantic_retriever import index_insight
+            index_insight(key, insight, context)
+        except Exception:
+            pass  # Don't block writes if semantic indexing fails
+
         return self.insights[key]
 
     def purge_primitive_insights(self, dry_run: bool = False, max_preview: int = 20) -> Dict[str, Any]:

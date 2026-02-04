@@ -468,6 +468,36 @@ Tool + Context → Query Memory Banks + Cognitive Insights + Mind → Rank by Re
 | Advice is stale | Lower `ADVICE_CACHE_TTL_SECONDS` to 60 (already lowered to 120) |
 | Performance issues | Raise cache TTL to 600 (10 min) |
 
+### Semantic Retrieval (Optional)
+
+Semantic retrieval augments Advisor with embeddings + trigger rules. It is
+**disabled by default** unless enabled in `~/.spark/tuneables.json` or via
+`SPARK_SEMANTIC_ENABLED=1`.
+
+| Parameter | Default | Description |
+|----------|---------|-------------|
+| `semantic.enabled` | **false** | Enable semantic retrieval for cognitive insights |
+| `semantic.min_similarity` | **0.6** | Min cosine similarity to allow semantic candidates |
+| `semantic.min_fusion_score` | **0.5** | Final decision threshold after fusion |
+| `semantic.weight_recency` | **0.2** | Recency boost weight |
+| `semantic.weight_outcome` | **0.3** | Outcome effectiveness boost weight |
+| `semantic.mmr_lambda` | **0.5** | Diversity balance (1.0 = relevance only) |
+| `semantic.index_on_write` | **true** | Index embeddings on insight write |
+| `semantic.index_on_read` | **true** | Backfill missing embeddings at retrieval time |
+| `semantic.index_backfill_limit` | **300** | Max insights to backfill per run |
+| `semantic.index_cache_ttl_seconds` | **120** | Cache duration for vector index |
+
+Trigger rules (YAML):
+
+| Parameter | Default | Description |
+|----------|---------|-------------|
+| `triggers.enabled` | **false** | Enable explicit trigger rules |
+| `triggers.rules_file` | **~/.spark/trigger_rules.yaml** | YAML rules file |
+
+Environment overrides:
+- `SPARK_SEMANTIC_ENABLED=1`
+- `SPARK_TRIGGERS_ENABLED=1`
+
 ---
 
 ## 12. Memory Capture
