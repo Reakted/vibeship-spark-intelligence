@@ -863,7 +863,7 @@ When domain detected, chips should:
 <!-- SPARK_LEARNINGS_START -->
 ## Spark Bootstrap
 Auto-loaded high-confidence learnings from ~/.spark/cognitive_insights.json
-Last updated: 2026-02-04T17:19:15
+Last updated: 2026-02-05T01:08:01
 
 - [user_understanding] ## ðŸš¨ PRIMARY RULES
 
@@ -880,8 +880,8 @@ Last updated: 2026-02-04T17:19:15
 > **Consult Intelligence_Flow.md and Intelligence_Flow_Map.md to ensure changes align with actual data flow.**
 
 Witho... (100% reliable, 4 validations)
-- [self_awareness] I struggle with Bash fails with windows_path -> Fix: Use forward slashes (/) instead of backslas tasks (27% reliable, 1364 validations)
-- [self_awareness] I struggle with Bash fails with file_not_found -> Fix: Verify path exists with Read or ls first tasks (26% reliable, 2251 validations)
+- [self_awareness] I struggle with Bash fails with windows_path -> Fix: Use forward slashes (/) instead of backslas tasks (27% reliable, 1382 validations)
+- [self_awareness] I struggle with Bash fails with file_not_found -> Fix: Verify path exists with Read or ls first tasks (26% reliable, 2271 validations)
 - [self_awareness] I struggle with Bash fails with syntax_error -> Fix: Check syntax, look for missing quotes or br tasks (24% reliable, 1190 validations)
 - [self_awareness] I struggle with Bash fails with command_not_found -> Fix: Check command spelling or install requ tasks (12% reliable, 500 validations)
 - [self_awareness] I struggle with Bash fails with windows_encoding -> Fix: Use ASCII characters or set UTF-8 encod tasks (11% reliable, 431 validations)
