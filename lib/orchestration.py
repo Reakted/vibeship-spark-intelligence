@@ -209,6 +209,7 @@ class SparkOrchestrator:
                 "domain": "orchestration",
                 "agent_id": to_agent,
                 "handoff_id": handoff_id,
+                "trace_id": trace_id,
             }])
             self.update_agent_result(to_agent, success)
         return handoff_id

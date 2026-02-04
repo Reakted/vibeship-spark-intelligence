@@ -54,6 +54,7 @@ Dashboards and ops:
 - trace_id is attached at ingest (hooks/observe.py, sparkd.py, lib.queue.quick_capture).
 - trace_id is carried into pattern events and EIDOS Steps.
 - evidence is linked to steps; outcomes include trace_id when available.
+- trace binding enforcement: steps, evidence, and outcomes should record trace_id; TRACE_GAP watcher warns on missing bindings. Set `SPARK_TRACE_STRICT=1` to block actions on trace gaps.
 - dashboards should drill down by trace_id for audit and validation.
 
 ### 2.3 Context sync + promotion (docs + agent context)

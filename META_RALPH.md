@@ -104,6 +104,21 @@ python tests/test_cognitive_capture.py baseline
 python tests/test_learning_utilization.py quick
 ```
 
+### Operator Dashboards (Use Playbook)
+
+Use `DASHBOARD_PLAYBOOK.md` for full setup and usage (start commands, pages, drilldowns, and APIs).
+
+Quick start:
+1. `python -m spark.cli up`
+2. Or `python dashboard.py`
+
+Key pages:
+1. `http://localhost:8585/mission`
+2. `http://localhost:8585/learning`
+3. `http://localhost:8585/rabbit`
+4. `http://localhost:8585/acceptance`
+5. `http://localhost:8585/ops`
+
 ---
 
 ## Reality-Grounded Iteration Methodology
@@ -177,6 +192,7 @@ python tests/test_pipeline_health.py quick
 ```bash
 python -c "from lib.meta_ralph import get_meta_ralph; r=get_meta_ralph(); r.roast('Because this is critical, avoid X instead of Y, prefer Z when A then B.'); print(r.get_stats())"
 ```
+**Note:** This validates Meta-Ralph metrics plumbing, not the event ingestion pipeline.
 
 **Pass criteria:**
 - `get_stats()` shows a non-zero `quality_rate` (or `pass_rate`)

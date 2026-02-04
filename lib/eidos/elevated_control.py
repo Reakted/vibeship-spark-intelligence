@@ -18,6 +18,7 @@ This layer detects loss early and forces correction.
 
 import json
 import time
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -42,6 +43,7 @@ class WatcherType(Enum):
     BUDGET_HALF_NO_PROGRESS = "budget_half_no_progress"  # >50% budget, no progress
     SCOPE_CREEP = "scope_creep"              # Plan grows while progress doesn't
     VALIDATION_GAP = "validation_gap"        # >2 steps without validation evidence
+    TRACE_GAP = "trace_gap"                  # Missing trace_id bindings
 
 
 class WatcherSeverity(Enum):
@@ -176,6 +178,12 @@ def validate_step_envelope(step: Step, memories_exist: bool = False) -> StepEnve
     return result
 
 
+def _trace_gap_severity() -> WatcherSeverity:
+    if os.environ.get("SPARK_TRACE_STRICT", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return WatcherSeverity.BLOCK
+    return WatcherSeverity.WARNING
+
+
 # ===== WATCHERS =====
 
 class WatcherEngine:
@@ -241,6 +249,11 @@ class WatcherEngine:
 
         # Watcher H: Validation Gap
         alert = self._check_validation_gap(recent_steps)
+        if alert:
+            alerts.append(alert)
+
+        # Watcher I: Trace Gap
+        alert = self._check_trace_gap(step, recent_steps)
         if alert:
             alerts.append(alert)
 
@@ -378,6 +391,21 @@ class WatcherEngine:
                 forced_phase=Phase.VALIDATE,
                 required_output="validation-only step - verify current state"
             )
+
+    def _check_trace_gap(self, step: Step, recent_steps: List[Step]) -> Optional[WatcherAlert]:
+        """Watcher I: Missing trace_id bindings on steps."""
+        missing = [s for s in recent_steps[-5:] if not getattr(s, "trace_id", None)]
+        if not getattr(step, "trace_id", None) and step not in missing:
+            missing.append(step)
+        if not missing:
+            return None
+        severity = _trace_gap_severity()
+        return WatcherAlert(
+            watcher=WatcherType.TRACE_GAP,
+            severity=severity,
+            message=f"{len(missing)} step(s) missing trace_id",
+            required_output="bind trace_id to steps/evidence/outcomes",
+        )
 
     def get_blocking_alerts(self, alerts: List[WatcherAlert]) -> List[WatcherAlert]:
         """Get alerts that should block the action."""

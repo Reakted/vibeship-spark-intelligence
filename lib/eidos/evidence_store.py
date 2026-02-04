@@ -59,6 +59,7 @@ class Evidence:
     evidence_id: str
     step_id: str
     type: EvidenceType
+    trace_id: Optional[str] = None
     tool_name: str = ""
 
     # Content
@@ -94,6 +95,7 @@ class Evidence:
         return {
             "evidence_id": self.evidence_id,
             "step_id": self.step_id,
+            "trace_id": self.trace_id,
             "type": self.type.value,
             "tool_name": self.tool_name,
             "content": self.content,
@@ -113,6 +115,7 @@ class Evidence:
             evidence_id=data["evidence_id"],
             step_id=data["step_id"],
             type=EvidenceType(data["type"]),
+            trace_id=data.get("trace_id"),
             tool_name=data.get("tool_name", ""),
             content=data.get("content", ""),
             content_hash=data.get("content_hash", ""),
@@ -150,6 +153,7 @@ class EvidenceStore:
                 CREATE TABLE IF NOT EXISTS evidence (
                     evidence_id TEXT PRIMARY KEY,
                     step_id TEXT,
+                    trace_id TEXT,
 
                     type TEXT NOT NULL,
                     tool_name TEXT,
@@ -168,12 +172,26 @@ class EvidenceStore:
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_evidence_step ON evidence(step_id);
+                CREATE INDEX IF NOT EXISTS idx_evidence_trace ON evidence(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_evidence_expires ON evidence(expires_at)
                     WHERE expires_at IS NOT NULL;
                 CREATE INDEX IF NOT EXISTS idx_evidence_type ON evidence(type);
                 CREATE INDEX IF NOT EXISTS idx_evidence_hash ON evidence(content_hash);
             """)
+            try:
+                if not self._column_exists(conn, "evidence", "trace_id"):
+                    conn.execute("ALTER TABLE evidence ADD COLUMN trace_id TEXT")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_evidence_trace ON evidence(trace_id)")
+            except Exception:
+                pass
             conn.commit()
+
+    def _column_exists(self, conn: sqlite3.Connection, table: str, column: str) -> bool:
+        try:
+            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            return any(r[1] == column for r in rows)
+        except Exception:
+            return False
 
     def save(self, evidence: Evidence, compress_threshold: int = 10000) -> str:
         """
@@ -197,14 +215,15 @@ class EvidenceStore:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO evidence (
-                    evidence_id, step_id, type, tool_name,
+                    evidence_id, step_id, trace_id, type, tool_name,
                     content, content_hash, byte_size, compressed,
                     exit_code, duration_ms,
                     created_at, expires_at, retention_reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 evidence.evidence_id,
                 evidence.step_id,
+                evidence.trace_id,
                 evidence.type.value,
                 evidence.tool_name,
                 content,
@@ -280,6 +299,7 @@ class EvidenceStore:
             evidence_id=row["evidence_id"],
             step_id=row["step_id"],
             type=EvidenceType(row["type"]),
+            trace_id=row["trace_id"] if "trace_id" in row.keys() else None,
             tool_name=row["tool_name"] or "",
             content=content,
             content_hash=row["content_hash"] or "",
@@ -372,7 +392,8 @@ def create_evidence_from_tool(
     output: str,
     exit_code: Optional[int] = None,
     duration_ms: Optional[int] = None,
-    evidence_type: Optional[EvidenceType] = None
+    evidence_type: Optional[EvidenceType] = None,
+    trace_id: Optional[str] = None,
 ) -> Evidence:
     """
     Create evidence from tool output.
@@ -400,6 +421,7 @@ def create_evidence_from_tool(
     return Evidence(
         evidence_id="",
         step_id=step_id,
+        trace_id=trace_id,
         type=evidence_type,
         tool_name=tool_name,
         content=output,

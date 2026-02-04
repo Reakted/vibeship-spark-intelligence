@@ -407,7 +407,8 @@ def complete_step_after_action(
             step_id=step.step_id,
             tool_name=tool_name,
             output=error if error else result,
-            exit_code=0 if success else 1
+            exit_code=0 if success else 1,
+            trace_id=trace_id,
         )
         ev_store.save(evidence)
 

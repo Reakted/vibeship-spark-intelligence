@@ -13,6 +13,7 @@ Responsibilities:
 """
 
 import time
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,6 +28,7 @@ class WatcherType(Enum):
     DIFF_THRASH = "diff_thrash"             # Same file modified 3+ times
     CONFIDENCE_STAGNATION = "confidence_stagnation"  # Delta < 0.05 for 3 steps
     MEMORY_BYPASS = "memory_bypass"         # Action without citing memory
+    TRACE_GAP = "trace_gap"                 # Missing trace_id bindings
 
 
 class BlockType(Enum):
@@ -198,6 +200,10 @@ class ControlPlane:
             alerts.append(alert)
 
         # 5. Memory Bypass Watcher (already handled in check_before_action)
+        # 6. Trace Gap Watcher
+        alert = self._watch_trace_gap(step)
+        if alert:
+            alerts.append(alert)
 
         return alerts
 
@@ -329,6 +335,18 @@ class ControlPlane:
             )
 
         return None
+
+    def _watch_trace_gap(self, step: Step) -> Optional[WatcherAlert]:
+        """Detect missing trace_id on a step."""
+        if getattr(step, "trace_id", None):
+            return None
+        strict = os.environ.get("SPARK_TRACE_STRICT", "").strip().lower() in {"1", "true", "yes", "on"}
+        return WatcherAlert(
+            watcher_type=WatcherType.TRACE_GAP,
+            message="Step missing trace_id binding",
+            severity="blocking" if strict else "warning",
+            suggested_action="Bind trace_id to step/evidence/outcomes",
+        )
 
     def suggest_phase_transition(
         self,

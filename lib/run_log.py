@@ -100,6 +100,7 @@ def get_run_detail(episode_id: str) -> Dict[str, Any]:
                 evidence.append({
                     "evidence_id": ev.evidence_id,
                     "step_id": ev.step_id,
+                    "trace_id": ev.trace_id,
                     "type": ev.type.value if hasattr(ev.type, "value") else str(ev.type),
                     "tool": ev.tool_name,
                     "created_at": ev.created_at,

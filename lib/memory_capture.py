@@ -244,7 +244,13 @@ def normalize_memory_text(text: str) -> str:
     return t
 
 
-def commit_learning(text: str, category: CognitiveCategory, context: str = "", session_id: str = "") -> bool:
+def commit_learning(
+    text: str,
+    category: CognitiveCategory,
+    context: str = "",
+    session_id: str = "",
+    trace_id: Optional[str] = None,
+) -> bool:
     try:
         cog = get_cognitive_learner()
         clean = normalize_memory_text(text)
@@ -272,6 +278,7 @@ def commit_learning(text: str, category: CognitiveCategory, context: str = "", s
                     "created_at": time.time(),
                     "domain": "project",
                     "session_id": session_id or None,
+                    "trace_id": trace_id,
                 })
                 record_checkin_request(
                     session_id=session_id or "session",
@@ -317,6 +324,10 @@ def process_recent_memory_events(limit: int = 50) -> Dict[str, Any]:
         # We only understand SparkEventV1 shaped payloads via sparkd ingest
         payload = (e.data or {}).get("payload") or {}
 
+        trace_id = (e.data or {}).get("trace_id") if hasattr(e, "data") else None
+        if not trace_id and isinstance(payload, dict):
+            trace_id = payload.get("trace_id")
+
         # 1) Explicit intent events (best compatibility)
         if e.event_type == EventType.LEARNING and payload.get("intent") == "remember":
             txt = str(payload.get("text") or "").strip()
@@ -328,7 +339,13 @@ def process_recent_memory_events(limit: int = 50) -> Dict[str, Any]:
             except Exception:
                 category = infer_category(txt)
 
-            ok = commit_learning(txt, category, context="explicit remember intent", session_id=e.session_id)
+            ok = commit_learning(
+                txt,
+                category,
+                context="explicit remember intent",
+                session_id=e.session_id,
+                trace_id=trace_id,
+            )
             if ok:
                 explicit_saved += 1
             continue
@@ -373,7 +390,13 @@ def process_recent_memory_events(limit: int = 50) -> Dict[str, Any]:
         )
 
         if score >= AUTO_SAVE_THRESHOLD:
-            if commit_learning(norm_txt, category, context="auto-captured from conversation", session_id=e.session_id):
+            if commit_learning(
+                norm_txt,
+                category,
+                context="auto-captured from conversation",
+                session_id=e.session_id,
+                trace_id=trace_id,
+            ):
                 sug.status = "auto_saved"
                 auto_saved += 1
             else:

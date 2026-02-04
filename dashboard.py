@@ -9,6 +9,7 @@ Open: http://localhost:8585
 import json
 import time
 import sqlite3
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -399,6 +400,7 @@ def get_trace_timeline_data(trace_id: str) -> Dict[str, Any]:
                     evidence_rows.append({
                         "evidence_id": ev.evidence_id,
                         "step_id": ev.step_id,
+                        "trace_id": ev.trace_id,
                         "type": ev.type.value if hasattr(ev.type, "value") else str(ev.type),
                         "tool": ev.tool_name,
                         "created_at": ev.created_at,
@@ -711,8 +713,88 @@ def _derive_watcher_alerts(store, episodes: List) -> List[Dict[str, Any]]:
                 alerts.append(payload)
         except Exception:
             continue
+    try:
+        alerts.extend(_extract_trace_gaps(store))
+    except Exception:
+        pass
     alerts.sort(key=lambda a: a.get("timestamp", 0), reverse=True)
     return alerts
+
+
+def _extract_trace_gaps(store, limit: int = 12) -> List[Dict[str, Any]]:
+    alerts: List[Dict[str, Any]] = []
+    now = time.time()
+
+    def _alert(message: str, ts: Optional[float] = None, **extra) -> Dict[str, Any]:
+        strict = os.environ.get("SPARK_TRACE_STRICT", "").strip().lower() in {"1", "true", "yes", "on"}
+        payload = {
+            "watcher": WatcherType.TRACE_GAP.value,
+            "severity": (WatcherSeverity.BLOCK.value if strict else WatcherSeverity.WARNING.value),
+            "message": message,
+            "timestamp": ts or now,
+        }
+        payload.update(extra)
+        return payload
+
+    # Steps missing trace_id
+    try:
+        with sqlite3.connect(store.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT step_id, episode_id, created_at FROM steps WHERE trace_id IS NULL OR trace_id = '' ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        for row in rows:
+            alerts.append(_alert(
+                "Step missing trace_id",
+                ts=row["created_at"] if row["created_at"] else now,
+                step_id=row["step_id"],
+                episode_id=row["episode_id"],
+            ))
+    except Exception:
+        pass
+
+    # Evidence missing trace_id
+    try:
+        ev_store = get_evidence_store()
+        with sqlite3.connect(ev_store.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cols = conn.execute("PRAGMA table_info(evidence)").fetchall()
+            has_trace = any(c[1] == "trace_id" for c in cols)
+            if has_trace:
+                rows = conn.execute(
+                    "SELECT evidence_id, step_id, created_at FROM evidence WHERE trace_id IS NULL OR trace_id = '' ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+                for row in rows:
+                    alerts.append(_alert(
+                        "Evidence missing trace_id",
+                        ts=row["created_at"] if row["created_at"] else now,
+                        evidence_id=row["evidence_id"],
+                        step_id=row["step_id"],
+                    ))
+    except Exception:
+        pass
+
+    # Outcomes missing trace_id
+    try:
+        missing = 0
+        for row in _read_jsonl(OUTCOMES_FILE, limit=200):
+            if row.get("trace_id"):
+                continue
+            missing += 1
+            alerts.append(_alert(
+                "Outcome missing trace_id",
+                ts=row.get("created_at") or now,
+                outcome_id=row.get("outcome_id"),
+                event_type=row.get("event_type"),
+            ))
+            if missing >= limit:
+                break
+    except Exception:
+        pass
+
+    return alerts[:limit]
 
 
 def _extract_repeat_failures(store, limit: int = 10) -> List[Dict[str, Any]]:

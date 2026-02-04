@@ -28,6 +28,18 @@ def make_outcome_id(*parts: str) -> str:
     return _hash_id(*parts)
 
 
+def _ensure_trace_id(row: Dict[str, Any]) -> None:
+    if row.get("trace_id"):
+        return
+    try:
+        from .exposure_tracker import infer_latest_trace_id
+        trace_id = infer_latest_trace_id(row.get("session_id"))
+        if trace_id:
+            row["trace_id"] = trace_id
+    except Exception:
+        return
+
+
 def append_outcomes(rows: Iterable[Dict[str, Any]]) -> int:
     """Append outcome rows to the shared outcomes log. Returns count written."""
     if not rows:
@@ -38,6 +50,7 @@ def append_outcomes(rows: Iterable[Dict[str, Any]]) -> int:
         for row in rows:
             if not row:
                 continue
+            _ensure_trace_id(row)
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
             written += 1
     return written
@@ -53,6 +66,7 @@ def build_explicit_outcome(
     *,
     tool: Optional[str] = None,
     created_at: Optional[float] = None,
+    trace_id: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], str]:
     """Build an explicit outcome row from a user check-in."""
     res = (result or "").strip().lower()
@@ -75,6 +89,8 @@ def build_explicit_outcome(
         "result": res or "unknown",
         "created_at": now,
     }
+    if trace_id:
+        row["trace_id"] = trace_id
     return row, polarity
 
 
@@ -192,6 +208,7 @@ def build_chip_outcome(
     insight: str = "",
     data: Optional[Dict] = None,
     session_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Build an outcome row for a chip-specific event.
@@ -220,6 +237,8 @@ def build_chip_outcome(
 
     if session_id:
         row["session_id"] = session_id
+    if trace_id:
+        row["trace_id"] = trace_id
 
     return row
 

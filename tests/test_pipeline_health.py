@@ -26,6 +26,7 @@ Usage:
 import sys
 import json
 import time
+import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
@@ -215,11 +216,14 @@ class PipelineHealthChecker:
 
             total = stats.get('total_roasted', 0)
             active = total > 0
+            quality_rate = stats.get('quality_rate')
+            if quality_rate is None:
+                quality_rate = stats.get('pass_rate', 0)
 
             self._add_check(
                 "Meta-Ralph receiving events",
                 active,
-                f"Total roasted: {total}, Quality rate: {stats.get('quality_rate', 0):.1%}",
+                f"Total roasted: {total}, Quality rate: {quality_rate:.1%}",
                 "warning" if not active else "info",
                 stats
             )
@@ -232,6 +236,71 @@ class PipelineHealthChecker:
                 "warning"
             )
             return False, {}
+
+    def check_trace_binding(self) -> Tuple[bool, Dict]:
+        """Check if trace_id bindings exist on steps/evidence/outcomes."""
+        trace_info = {
+            "steps_missing": 0,
+            "evidence_missing": 0,
+            "outcomes_missing": 0,
+        }
+        ok = True
+        try:
+            from lib.eidos import get_store, get_evidence_store
+            store = get_store()
+            with sqlite3.connect(store.db_path) as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM steps WHERE trace_id IS NULL OR trace_id = ''"
+                ).fetchone()
+                trace_info["steps_missing"] = int(row[0] or 0)
+        except Exception:
+            ok = False
+
+        try:
+            from lib.eidos import get_evidence_store
+            ev_store = get_evidence_store()
+            with sqlite3.connect(ev_store.db_path) as conn:
+                cols = conn.execute("PRAGMA table_info(evidence)").fetchall()
+                has_trace = any(c[1] == "trace_id" for c in cols)
+                if has_trace:
+                    row = conn.execute(
+                        "SELECT COUNT(*) FROM evidence WHERE trace_id IS NULL OR trace_id = ''"
+                    ).fetchone()
+                    trace_info["evidence_missing"] = int(row[0] or 0)
+        except Exception:
+            ok = False
+
+        try:
+            from lib.outcome_log import OUTCOMES_FILE
+            if OUTCOMES_FILE.exists():
+                with OUTCOMES_FILE.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        if not line.strip():
+                            continue
+                        try:
+                            row = json.loads(line)
+                        except Exception:
+                            continue
+                        if not row.get("trace_id"):
+                            trace_info["outcomes_missing"] += 1
+        except Exception:
+            ok = False
+
+        missing_total = (
+            trace_info["steps_missing"]
+            + trace_info["evidence_missing"]
+            + trace_info["outcomes_missing"]
+        )
+        self._add_check(
+            "Trace binding",
+            ok and missing_total == 0,
+            f"Missing trace_id - steps: {trace_info['steps_missing']}, "
+            f"evidence: {trace_info['evidence_missing']}, "
+            f"outcomes: {trace_info['outcomes_missing']}",
+            "warning" if missing_total else "info",
+            trace_info,
+        )
+        return missing_total == 0, trace_info
 
     def check_cognitive_learner_storage(self) -> Tuple[bool, int]:
         """Check if cognitive insights are being stored."""
@@ -525,6 +594,7 @@ class PipelineHealthChecker:
         self.check_cognitive_learner_storage()
         self.check_pattern_aggregator()
         self.check_eidos_store()
+        self.check_trace_binding()
 
         # Layer 5: Output
         print("\n[LAYER 5: Output/Promotion]")

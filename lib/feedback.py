@@ -40,6 +40,13 @@ def update_skill_effectiveness(query: str, success: bool, limit: int = 2) -> Non
     if not skills:
         return
 
+    trace_id = None
+    try:
+        from .exposure_tracker import infer_latest_trace_id
+        trace_id = infer_latest_trace_id()
+    except Exception:
+        trace_id = None
+
     outcomes = []
     now = time.time()
     data = _load_json(SKILLS_EFFECTIVENESS_FILE)
@@ -63,6 +70,7 @@ def update_skill_effectiveness(query: str, success: bool, limit: int = 2) -> Non
             "domain": "skills",
             "skill_id": sid,
             "query": q[:200],
+            "trace_id": trace_id,
         })
 
     _save_json(SKILLS_EFFECTIVENESS_FILE, data)
