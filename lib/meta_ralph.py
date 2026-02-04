@@ -230,6 +230,7 @@ class MetaRalph:
                 self.quality_passed = data.get("quality_passed", 0)
                 self.primitive_rejected = data.get("primitive_rejected", 0)
                 self.duplicates_caught = data.get("duplicates_caught", 0)
+                self.refinements_made = data.get("refinements_made", 0)
             except Exception:
                 pass
 
@@ -275,6 +276,7 @@ class MetaRalph:
             "quality_passed": self.quality_passed,
             "primitive_rejected": self.primitive_rejected,
             "duplicates_caught": self.duplicates_caught,
+            "refinements_made": self.refinements_made,
             "last_updated": datetime.now().isoformat()
         }, indent=2))
 

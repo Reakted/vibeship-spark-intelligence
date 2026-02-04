@@ -751,6 +751,44 @@ curl http://localhost:8788/api/stats
 
 ## Session History
 
+### Session 10: 2026-02-04 (Ralph Loop - Refinement Counter & EIDOS Migration)
+
+**Goal:** Run Ralph Loop iteration to investigate and improve Meta-Ralph systems.
+
+**Issues Investigated:**
+
+1. **refinements_made = 0** despite 81 NEEDS_WORK items in history
+2. **Storage gap**: 186 quality_passed but only 53 learnings_stored
+3. **Pipeline health failures**: Pattern aggregator and EIDOS showing trace_id errors
+
+**Root Causes Found:**
+
+1. **refinements_made not persisted**: Counter was incremented in memory but never saved to `roast_history.json`. Added to both `_load_state()` and `_save_state()`.
+
+2. **Storage gap is deduplication**: 53 unique learnings roasted ~3.5 times each = 186 quality passes. This is correct behavior.
+
+3. **EIDOS trace_id migration needed**: Database schema didn't have `trace_id` column.
+
+**Fixes Applied:**
+
+| Fix | File | Change |
+|-----|------|--------|
+| Persist refinements_made | `lib/meta_ralph.py` | Added to _load_state() and _save_state() |
+| EIDOS migration | `~/.spark/eidos.db` | Added trace_id column to steps table |
+
+**Evidence (from storage per Rule 1):**
+| Metric | Before | After |
+|--------|--------|-------|
+| Pipeline health | 2 FAIL | All PASS |
+| refinements_made tracking | Not persisted | Persists correctly |
+| EIDOS get_stats() | Error | Working |
+
+**Files Changed:**
+- `lib/meta_ralph.py` (refinements_made persistence)
+- `ITERATION_PROJECTS.md` (documented findings)
+
+---
+
 ### Session 5: 2026-02-03 (Pattern Aggregator Fix & Documentation Rules)
 
 **Goal:** Investigate "0 events" in pattern aggregator stats, ensure META_RALPH.md sync rules are explicit.

@@ -34,7 +34,7 @@ from lib.resonance import get_resonance_display
 from lib.dashboard_project import get_active_project, get_project_memory_preview
 from lib.taste_api import add_from_dashboard
 from lib.diagnostics import setup_component_logging
-from lib.run_log import get_recent_runs, get_run_detail
+from lib.run_log import get_recent_runs, get_run_detail, get_run_kpis
 
 # Service control
 from lib.service_control import service_status
@@ -917,6 +917,7 @@ def get_mission_control_data() -> Dict[str, Any]:
         "watchers": watcher_feed[:20],
         "escalations": escalations[-10:],
         "runs": get_recent_runs(limit=6),
+        "run_kpis": get_run_kpis(limit=50),
     }
 
 
@@ -3773,6 +3774,23 @@ def generate_mission_html() -> str:
         <div class="card-header"><span class="card-title">Recent Runs</span><span class="muted">facade</span></div>
         <div class="list" id="runs-list"></div>
       </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Run KPIs</span><span class="muted">last 50</span></div>
+        <div class="list" id="run-kpis"></div>
+      </div>
+    </section>
+    <section class="grid">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Run Timeline</span><span class="muted">episode_id</span></div>
+        <div class="actions">
+          <input id="run-input" class="input" placeholder="episode_id" />
+          <button class="btn primary" id="run-load">Load</button>
+        </div>
+        <div class="list" id="run-summary"></div>
+        <div class="list" id="run-steps"></div>
+        <div class="list" id="run-evidence"></div>
+        <div class="list" id="run-outcomes"></div>
+      </div>
     </section>
     <section class="grid">
       <div class="card">
@@ -3828,6 +3846,38 @@ def generate_mission_html() -> str:
           renderTrace(data);
         } catch (e) {}
       };
+      const renderRun = (run) => {
+        if (!run) return;
+        const ep = run.episode || {};
+        const summary = [
+          `<div class="row"><span>episode</span><span class="mono">${ep.episode_id || "—"}</span></div>`,
+          `<div class="row"><span>goal</span><span class="muted">${ep.goal || ""}</span></div>`,
+          `<div class="row"><span>phase</span><span class="mono">${ep.phase || ""}</span></div>`,
+          `<div class="row"><span>outcome</span><span class="mono">${ep.outcome || ""}</span></div>`,
+          `<div class="row"><span>steps</span><span class="mono">${ep.step_count ?? 0}</span></div>`
+        ];
+        renderList("run-summary", summary, (x) => x);
+        renderList("run-steps", run.steps || [], (s) => `
+          <div class="row">
+            <span>${s.intent || "step"}</span>
+            <span class="pill ${s.evaluation === "pass" ? "ok" : s.evaluation === "fail" ? "danger" : "warn"}">${s.evaluation || "unknown"}</span>
+            <span class="mono">${s.step_id || ""}</span>
+          </div>
+        `);
+        renderList("run-evidence", run.evidence || [], (e) => `
+          <div class="row">
+            <span>${e.type || "evidence"}</span>
+            <span class="mono">${e.step_id || ""}</span>
+            <span class="muted">${e.tool || ""}</span>
+          </div>
+        `);
+        renderList("run-outcomes", run.outcomes || [], (o) => `
+          <div class="row">
+            <span>${o.polarity || "outcome"}</span>
+            <span class="muted">${(o.text || "").slice(0, 120)}</span>
+          </div>
+        `);
+      };
       const traceButton = (tid) => {
         if (!tid) return "";
         return `<button class="btn" onclick="loadTrace('${tid}')">trace</button>`;
@@ -3842,10 +3892,7 @@ def generate_mission_html() -> str:
         try {
           const res = await fetch(`/api/run?episode_id=${encodeURIComponent(eid)}`, { cache: "no-store" });
           const data = await res.json();
-          if (data && data.episode && data.trace_ids && data.trace_ids.length) {
-            const first = data.trace_ids[0];
-            loadTrace(first);
-          }
+          renderRun(data);
         } catch (e) {}
       };
 
@@ -3951,6 +3998,13 @@ def generate_mission_html() -> str:
         </div>
       `);
 
+      const kpis = data.run_kpis || {};
+      renderList("run-kpis", [
+        `<div class="row"><span>avg steps</span><span class="mono">${kpis.avg_steps ?? 0}</span></div>`,
+        `<div class="row"><span>escape rate</span><span class="mono">${(kpis.escape_rate ?? 0) * 100}%</span></div>`,
+        `<div class="row"><span>evidence ratio</span><span class="mono">${kpis.evidence_ratio ?? 0}</span></div>`
+      ], (x) => x);
+
       const traceBtn = document.getElementById("trace-load");
       if (traceBtn && !traceBtn.dataset.bound) {
         traceBtn.dataset.bound = "1";
@@ -3959,12 +4013,26 @@ def generate_mission_html() -> str:
           loadTrace(input ? input.value : "");
         };
       }
+      const runBtn = document.getElementById("run-load");
+      if (runBtn && !runBtn.dataset.bound) {
+        runBtn.dataset.bound = "1";
+        runBtn.onclick = () => {
+          const input = document.getElementById("run-input");
+          loadRun(input ? input.value : "");
+        };
+      }
       const qp = new URLSearchParams(window.location.search);
       const qpTrace = qp.get("trace_id");
       if (qpTrace) {
         const input = document.getElementById("trace-input");
         if (input) input.value = qpTrace;
         loadTrace(qpTrace);
+      }
+      const qpRun = qp.get("episode_id");
+      if (qpRun) {
+        const input = document.getElementById("run-input");
+        if (input) input.value = qpRun;
+        loadRun(qpRun);
       }
     """
     return _base_page("Mission Control", "mission", body, data, "/api/mission", page_js)

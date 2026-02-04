@@ -147,3 +147,26 @@ def get_run_detail(episode_id: str) -> Dict[str, Any]:
         "found": True,
         "step_ids": step_ids,
     }
+
+
+def get_run_kpis(limit: int = 50) -> Dict[str, Any]:
+    """Compute run KPIs from recent episodes."""
+    runs = get_recent_runs(limit=limit)
+    if not runs:
+        return {"avg_steps": 0, "escape_rate": 0.0, "evidence_ratio": 0.0, "runs": 0}
+
+    total_steps = sum(r.get("step_count", 0) for r in runs)
+    total_evidence = sum(r.get("evidence_count", 0) for r in runs)
+    escape_count = sum(1 for r in runs if r.get("escape_protocol_triggered"))
+    runs_count = len(runs)
+
+    avg_steps = total_steps / max(1, runs_count)
+    escape_rate = escape_count / max(1, runs_count)
+    evidence_ratio = total_evidence / max(1, total_steps)
+
+    return {
+        "avg_steps": round(avg_steps, 2),
+        "escape_rate": round(escape_rate, 3),
+        "evidence_ratio": round(evidence_ratio, 3),
+        "runs": runs_count,
+    }

@@ -117,8 +117,73 @@ class SparkAdvisor:
         }
 
     def _save_effectiveness(self):
-        """Save effectiveness data."""
-        EFFECTIVENESS_FILE.write_text(json.dumps(self.effectiveness, indent=2))
+        """Save effectiveness data with atomic write to prevent race conditions.
+
+        Uses read-modify-write pattern:
+        1. Read current disk state
+        2. Merge with in-memory deltas
+        3. Write atomically via temp file
+        """
+        import tempfile
+        import os
+
+        try:
+            # Read current disk state to merge (handles multiple processes)
+            disk_data = self._load_effectiveness()
+
+            # Merge: take max of counters (monotonically increasing)
+            merged = {
+                "total_advice_given": max(
+                    disk_data.get("total_advice_given", 0),
+                    self.effectiveness.get("total_advice_given", 0)
+                ),
+                "total_followed": max(
+                    disk_data.get("total_followed", 0),
+                    self.effectiveness.get("total_followed", 0)
+                ),
+                "total_helpful": max(
+                    disk_data.get("total_helpful", 0),
+                    self.effectiveness.get("total_helpful", 0)
+                ),
+                "by_source": {},
+                "by_category": {},
+            }
+
+            # Merge by_source
+            for src in set(list(disk_data.get("by_source", {}).keys()) +
+                          list(self.effectiveness.get("by_source", {}).keys())):
+                disk_src = disk_data.get("by_source", {}).get(src, {})
+                mem_src = self.effectiveness.get("by_source", {}).get(src, {})
+                merged["by_source"][src] = {
+                    "total": max(disk_src.get("total", 0), mem_src.get("total", 0)),
+                    "helpful": max(disk_src.get("helpful", 0), mem_src.get("helpful", 0)),
+                }
+
+            # Update in-memory state with merged values
+            self.effectiveness = merged
+
+            # Atomic write: write to temp file then rename
+            EFFECTIVENESS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            fd, temp_path = tempfile.mkstemp(
+                dir=EFFECTIVENESS_FILE.parent,
+                prefix=".effectiveness_",
+                suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(merged, f, indent=2)
+                # Atomic rename (on Windows, need to remove target first)
+                if EFFECTIVENESS_FILE.exists():
+                    EFFECTIVENESS_FILE.unlink()
+                os.rename(temp_path, EFFECTIVENESS_FILE)
+            except Exception:
+                # Clean up temp file on error
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                raise
+        except Exception:
+            # Fallback to simple write if atomic fails
+            EFFECTIVENESS_FILE.write_text(json.dumps(self.effectiveness, indent=2))
 
     def _generate_advice_id(self, context: str) -> str:
         """Generate unique advice ID."""

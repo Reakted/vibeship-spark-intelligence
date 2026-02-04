@@ -8,7 +8,7 @@ This document defines a series of projects designed to test, verify, and improve
 
 ## Master Learnings from Previous Sessions
 
-### Critical Discoveries (Sessions 2-9)
+### Critical Discoveries (Sessions 2-10)
 
 | Session | Discovery | Fix Applied |
 |---------|-----------|-------------|
@@ -21,6 +21,9 @@ This document defines a series of projects designed to test, verify, and improve
 | 7 | Task tool not linking to outcomes | Added task fallback for sub-agent tools |
 | 8 | Advice not actionable | Added actionability scoring |
 | 9 | Metadata patterns polluting advice | Added `_is_metadata_pattern()` filter |
+| 10 | `refinements_made` counter not persisted | Added to _load_state() and _save_state() |
+| 10 | EIDOS `trace_id` column missing | Ran database migration |
+| 10 | Storage gap (186 passed, 53 stored) | Explained by deduplication (correct behavior) |
 
 ### The Constitution Rules Applied
 
@@ -333,17 +336,17 @@ python tests/test_cognitive_capture.py compare
 
 ---
 
-## System Health Summary (2026-02-04)
+## System Health Summary (2026-02-04 Session 10)
 
 | System | Status | Key Metric |
 |--------|--------|------------|
-| Hooks | ✅ WORKING | 156 pre_tool events |
-| Cognitive | ✅ WORKING | 1,681 insights |
-| Meta-Ralph | ✅ WORKING | 47.0% quality rate |
-| Outcomes | ✅ WORKING | 1.8% acted-on rate |
-| Advisor | ✅ TRACKING | 13,400+ advice given |
-| EIDOS | ✅ ACTIVE | 7 distillations |
-| Chips | ✅ WORKING | 1M+ chip insights |
+| Hooks | ✅ WORKING | Pre/Post tool events flowing |
+| Cognitive | ✅ WORKING | 359 insights (deduplicated) |
+| Meta-Ralph | ✅ WORKING | 47.1% quality rate |
+| Refinement | ✅ FIXED | Counter now persisting |
+| Advisor | ✅ TRACKING | 13,273 advice given |
+| EIDOS | ✅ FIXED | 7 distillations, trace_id migrated |
+| Pattern Agg | ✅ WORKING | 639 patterns logged |
 
 ---
 
@@ -361,15 +364,22 @@ python tests/test_cognitive_capture.py compare
 
 6. **47% quality rate is optimal** - Meta-Ralph correctly filters primitive vs cognitive
 
+7. **Storage gap explained by deduplication** - 186 quality passes → 53 unique stored (same items roasted ~3.5x)
+
+8. **Refinements working but weren't tracked** - Fixed `refinements_made` counter persistence
+
+9. **Database migrations needed** - EIDOS `trace_id` column was missing from older databases
+
 ---
 
 ## Next Iteration Goals
 
-1. **Increase acted-on rate** - Currently 1.8%, target 10%+
+1. **Increase acted-on rate** - Currently ~0.06%, target 10%+
 2. **More EIDOS distillations** - Currently 7, capture more patterns
 3. **Mind API integration** - Start Mind Lite for cross-session memory
 4. **Advice diversity** - Reduce repetitive advice
+5. **Track refinement success rate** - Monitor how many NEEDS_WORK items become QUALITY
 
 ---
 
-*Last Updated: 2026-02-04T01:41*
+*Last Updated: 2026-02-04T02:30*
