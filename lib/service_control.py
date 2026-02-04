@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -12,11 +13,17 @@ from pathlib import Path
 from typing import Optional
 from urllib import request
 
+from lib.ports import (
+    SPARKD_HEALTH_URL,
+    DASHBOARD_STATUS_URL,
+    PULSE_STATUS_URL,
+    META_RALPH_HEALTH_URL,
+    DASHBOARD_URL,
+    PULSE_URL,
+    META_RALPH_URL,
+)
 
-SPARKD_URL = "http://127.0.0.1:8787/health"
-DASHBOARD_URL = "http://127.0.0.1:8585/api/status"
-PULSE_URL = "http://127.0.0.1:8765/api/pulse"
-META_RALPH_URL = "http://127.0.0.1:8586/health"
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
@@ -76,6 +83,69 @@ def _pid_alive(pid: Optional[int]) -> bool:
         return False
 
 
+def _process_snapshot() -> list[tuple[int, str]]:
+    if os.name == "nt":
+        try:
+            out = subprocess.check_output(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress",
+                ],
+                text=True,
+                errors="ignore",
+            )
+            data = json.loads(out) if out.strip() else []
+            if isinstance(data, dict):
+                data = [data]
+            snapshot = []
+            for row in data or []:
+                try:
+                    pid = int(row.get("ProcessId") or 0)
+                except Exception:
+                    pid = 0
+                cmd = row.get("CommandLine") or ""
+                if pid:
+                    snapshot.append((pid, cmd))
+            return snapshot
+        except Exception:
+            return []
+    try:
+        out = subprocess.check_output(
+            ["ps", "-ax", "-o", "pid=,command="],
+            text=True,
+            errors="ignore",
+        )
+        snapshot = []
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if not parts:
+                continue
+            try:
+                pid = int(parts[0])
+            except Exception:
+                continue
+            cmd = parts[1] if len(parts) > 1 else ""
+            snapshot.append((pid, cmd))
+        return snapshot
+    except Exception:
+        return []
+
+
+def _pid_matches(pid: Optional[int], keywords: list[str], snapshot: Optional[list[tuple[int, str]]] = None) -> bool:
+    if not pid:
+        return False
+    if snapshot is None:
+        snapshot = _process_snapshot()
+    for spid, cmd in snapshot:
+        if spid != pid:
+            continue
+        if all(k in cmd for k in keywords):
+            return True
+    return False
+
+
 def _http_ok(url: str, timeout: float = 1.5) -> bool:
     try:
         req = request.Request(url, method="GET")
@@ -131,14 +201,28 @@ def _terminate_pid(pid: int, timeout_s: float = 5.0) -> bool:
     if os.name == "nt":
         try:
             subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except Exception:
+            return False
+        end = time.time() + timeout_s
+        while time.time() < end:
+            if not _pid_alive(pid):
+                return True
+            time.sleep(0.2)
+        try:
+            subprocess.run(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
-            return True
         except Exception:
             return False
+        return not _pid_alive(pid)
 
     try:
         os.kill(pid, signal.SIGTERM)
@@ -184,10 +268,10 @@ def _service_cmds(
 
 
 def service_status(bridge_stale_s: int = 90) -> dict[str, dict]:
-    sparkd_ok = _http_ok(SPARKD_URL)
-    dash_ok = _http_ok(DASHBOARD_URL)
-    pulse_ok = _http_ok(PULSE_URL)
-    meta_ok = _http_ok(META_RALPH_URL)
+    sparkd_ok = _http_ok(SPARKD_HEALTH_URL)
+    dash_ok = _http_ok(DASHBOARD_STATUS_URL)
+    pulse_ok = _http_ok(PULSE_STATUS_URL)
+    meta_ok = _http_ok(META_RALPH_HEALTH_URL)
     hb_age = _bridge_heartbeat_age()
 
     sparkd_pid = _read_pid("sparkd")
@@ -197,12 +281,13 @@ def service_status(bridge_stale_s: int = 90) -> dict[str, dict]:
     bridge_pid = _read_pid("bridge_worker")
     watchdog_pid = _read_pid("watchdog")
 
-    sparkd_running = sparkd_ok or _pid_alive(sparkd_pid)
-    dash_running = dash_ok or _pid_alive(dash_pid)
-    pulse_running = pulse_ok or _pid_alive(pulse_pid)
-    meta_running = meta_ok or _pid_alive(meta_pid)
-    bridge_running = (hb_age is not None and hb_age <= bridge_stale_s) or _pid_alive(bridge_pid)
-    watchdog_running = _pid_alive(watchdog_pid)
+    snapshot = _process_snapshot()
+    sparkd_running = sparkd_ok or _pid_matches(sparkd_pid, ["sparkd.py", "-m sparkd"], snapshot)
+    dash_running = dash_ok or _pid_matches(dash_pid, ["dashboard.py", "-m dashboard"], snapshot)
+    pulse_running = pulse_ok or _pid_matches(pulse_pid, ["spark_pulse.py"], snapshot)
+    meta_running = meta_ok or _pid_matches(meta_pid, ["meta_ralph_dashboard.py"], snapshot)
+    bridge_running = (hb_age is not None and hb_age <= bridge_stale_s) or _pid_matches(bridge_pid, ["bridge_worker.py", "-m bridge_worker"], snapshot)
+    watchdog_running = _pid_matches(watchdog_pid, ["spark_watchdog.py", "-m spark_watchdog"], snapshot)
 
     return {
         "sparkd": {
@@ -301,12 +386,23 @@ def ensure_services(
 
 def stop_services() -> dict[str, str]:
     results: dict[str, str] = {}
+    snapshot = _process_snapshot()
     for name in ["watchdog", "meta_ralph", "pulse", "dashboard", "bridge_worker", "sparkd"]:
         pid = _read_pid(name)
         if not pid:
             results[name] = "no_pid"
             continue
-        if _pid_alive(pid):
+        keywords = {
+            "sparkd": ["sparkd.py", "-m sparkd"],
+            "bridge_worker": ["bridge_worker.py", "-m bridge_worker"],
+            "dashboard": ["dashboard.py", "-m dashboard"],
+            "pulse": ["spark_pulse.py"],
+            "meta_ralph": ["meta_ralph_dashboard.py"],
+            "watchdog": ["spark_watchdog.py", "-m spark_watchdog"],
+        }.get(name, [])
+        if keywords and not _pid_matches(pid, keywords, snapshot):
+            results[name] = "pid_mismatch"
+        elif _pid_alive(pid):
             ok = _terminate_pid(pid)
             results[name] = "stopped" if ok else "failed"
         else:
@@ -358,7 +454,7 @@ def format_status_lines(status: dict[str, dict], bridge_stale_s: int = 90) -> li
     log_dir = status.get("log_dir")
     if log_dir:
         lines.append(f"[spark] logs: {log_dir}")
-    lines.append("Dashboard: http://127.0.0.1:8585")
-    lines.append("Spark Pulse: http://127.0.0.1:8765")
-    lines.append("Meta-Ralph: http://127.0.0.1:8586")
+    lines.append(f"Dashboard: {DASHBOARD_URL}")
+    lines.append(f"Spark Pulse: {PULSE_URL}")
+    lines.append(f"Meta-Ralph: {META_RALPH_URL}")
     return lines

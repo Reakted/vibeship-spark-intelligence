@@ -25,7 +25,9 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
-PORT = 8080
+from lib.ports import MIND_PORT
+
+PORT = MIND_PORT
 DB_PATH = Path.home() / ".mind" / "lite" / "memories.db"
 TOKEN = os.environ.get("MIND_TOKEN")
 MAX_BODY_BYTES = int(os.environ.get("MIND_MAX_BODY_BYTES", "262144"))

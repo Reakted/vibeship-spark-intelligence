@@ -25,7 +25,8 @@ from lib.diagnostics import log_debug
 # ============= Configuration =============
 QUEUE_DIR = Path.home() / ".spark" / "queue"
 EVENTS_FILE = QUEUE_DIR / "events.jsonl"
-MAX_EVENTS = 10000  # Rotate after this many events
+MAX_EVENTS = int(os.environ.get("SPARK_QUEUE_MAX_EVENTS", "10000"))  # Rotate after this many events
+MAX_QUEUE_BYTES = int(os.environ.get("SPARK_QUEUE_MAX_BYTES", "10485760"))  # 10 MB
 LOCK_FILE = QUEUE_DIR / ".queue.lock"
 
 # Read the tail in chunks to avoid loading large files into memory.
@@ -202,15 +203,27 @@ def clear_events() -> int:
 
 def rotate_if_needed() -> bool:
     """Rotate queue if it's too large."""
-    count = count_events()
-    
-    if count <= MAX_EVENTS:
+    size_bytes = 0
+    if EVENTS_FILE.exists():
+        try:
+            size_bytes = EVENTS_FILE.stat().st_size
+        except Exception:
+            size_bytes = 0
+
+    over_size = MAX_QUEUE_BYTES > 0 and size_bytes > MAX_QUEUE_BYTES
+    count = count_events() if MAX_EVENTS > 0 else 0
+    over_count = MAX_EVENTS > 0 and count > MAX_EVENTS
+
+    if not over_size and not over_count:
         return False
     
     try:
         with _queue_lock():
-            # Keep only the last half
-            keep_count = MAX_EVENTS // 2
+            # Keep only the last half to evict oldest events.
+            if MAX_EVENTS > 0:
+                keep_count = max(1, MAX_EVENTS // 2)
+            else:
+                keep_count = max(1, count // 2) if count else 5000
             lines = _tail_lines(EVENTS_FILE, keep_count)
             with open(EVENTS_FILE, "w") as f:
                 for line in lines:
@@ -239,7 +252,8 @@ def get_queue_stats() -> Dict:
         "size_mb": round(size_bytes / (1024 * 1024), 2),
         "queue_file": str(EVENTS_FILE),
         "max_events": MAX_EVENTS,
-        "needs_rotation": count > MAX_EVENTS
+        "max_bytes": MAX_QUEUE_BYTES,
+        "needs_rotation": (MAX_EVENTS > 0 and count > MAX_EVENTS) or (MAX_QUEUE_BYTES > 0 and size_bytes > MAX_QUEUE_BYTES)
     }
 
 

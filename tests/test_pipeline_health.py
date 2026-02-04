@@ -27,6 +27,7 @@ import sys
 import json
 import time
 import sqlite3
+import os
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
@@ -472,12 +473,13 @@ class PipelineHealthChecker:
         """Check connection to Mind API."""
         try:
             import requests
-            response = requests.get("http://localhost:8080/health", timeout=2)
+            port = os.environ.get("SPARK_MIND_PORT", "8080")
+            response = requests.get(f"http://localhost:{port}/health", timeout=2)
             healthy = response.status_code == 200
 
             if healthy:
                 # Get stats too
-                stats_response = requests.get("http://localhost:8080/v1/stats", timeout=2)
+                stats_response = requests.get(f"http://localhost:{port}/v1/stats", timeout=2)
                 if stats_response.status_code == 200:
                     stats = stats_response.json()
                     self._add_check(

@@ -29,8 +29,9 @@ from lib.bridge_cycle import read_bridge_heartbeat, run_bridge_cycle, write_brid
 from lib.pattern_detection.worker import get_pattern_backlog
 from lib.validation_loop import get_validation_backlog
 from lib.diagnostics import setup_component_logging
+from lib.ports import SPARKD_PORT
 
-PORT = 8787
+PORT = SPARKD_PORT
 TOKEN = os.environ.get("SPARKD_TOKEN")
 MAX_BODY_BYTES = int(os.environ.get("SPARKD_MAX_BODY_BYTES", "262144"))
 INVALID_EVENTS_FILE = Path.home() / ".spark" / "invalid_events.jsonl"
@@ -247,10 +248,26 @@ def main():
     setup_component_logging("sparkd")
     print(f"sparkd listening on http://127.0.0.1:{PORT}")
     server = HTTPServer(("127.0.0.1", PORT), Handler)
+    stop_event = False
+
+    def _shutdown(signum=None, frame=None):
+        nonlocal stop_event
+        if stop_event:
+            return
+        stop_event = True
+        print("\n[SPARK] sparkd shutting down...")
+        server.shutdown()
+
+    try:
+        import signal
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+    except Exception:
+        pass
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
-        server.shutdown()
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

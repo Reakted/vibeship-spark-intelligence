@@ -27,3 +27,5 @@ Create `.vscode/tasks.json` in your project:
 ```
 
 Then run the tasks from Cursor/VSCode command palette.
+
+If you override ports, replace `8787` or set `SPARKD_URL` and update the task command.

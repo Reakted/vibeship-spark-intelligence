@@ -715,7 +715,16 @@ System-wide configuration via environment variables.
 | `SPARK_OUTCOME_AUTO_LINK` | `true` | **Auto-link outcomes.** Automatically link outcomes to their originating Steps. |
 | `SPARK_AGENT_CONTEXT_LIMIT` | `8000` | **Agent context tokens.** Maximum tokens for agent context injection. |
 | `SPARK_DEBUG` | `false` | **Debug mode.** Enables verbose logging across all components. |
-| `SPARK_MIND_URL` | `localhost:8080` | **Mind API endpoint.** URL for Mind persistent memory service. |
+| `SPARK_MIND_PORT` | `8080` | **Mind API port.** Port for Mind persistent memory service. |
+| `SPARKD_PORT` | `8787` | **sparkd port.** Port for ingest/health. |
+| `SPARK_DASHBOARD_PORT` | `8585` | **Spark Lab dashboard port.** |
+| `SPARK_PULSE_PORT` | `8765` | **Spark Pulse port.** |
+| `SPARK_META_RALPH_PORT` | `8586` | **Meta-Ralph dashboard port.** |
+| `SPARK_LOG_DIR` | `~/.spark/logs` | **Log directory.** Overrides log output directory. |
+| `SPARK_LOG_MAX_BYTES` | `10485760` | **Log rotation size.** Bytes before rotating. |
+| `SPARK_LOG_BACKUPS` | `5` | **Log rotation backups.** Number of rotated files to keep. |
+| `SPARK_QUEUE_MAX_EVENTS` | `10000` | **Queue event cap.** Rotate after this many events. |
+| `SPARK_QUEUE_MAX_BYTES` | `10485760` | **Queue size cap.** Rotate after this many bytes. |
 
 ### Usage
 
@@ -726,8 +735,8 @@ export SPARK_NO_WATCHDOG=true
 # Enable debug logging
 export SPARK_DEBUG=true
 
-# Connect to remote Mind
-export SPARK_MIND_URL=https://mind.example.com:8080
+# Use non-default Mind port
+export SPARK_MIND_PORT=8081
 ```
 
 ---

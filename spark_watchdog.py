@@ -9,15 +9,26 @@ import os
 import subprocess
 import sys
 import time
+import threading
 from pathlib import Path
 from typing import Optional
 from urllib import request
+
+from lib.ports import (
+    SPARKD_HEALTH_URL,
+    DASHBOARD_STATUS_URL,
+    PULSE_STATUS_URL,
+    META_RALPH_HEALTH_URL,
+)
 
 
 SPARK_DIR = Path(__file__).resolve().parent
 LOG_DIR = Path.home() / ".spark" / "logs"
 STATE_FILE = Path.home() / ".spark" / "watchdog_state.json"
 PID_FILE = Path.home() / ".spark" / "pids" / "watchdog.pid"
+
+LOG_MAX_BYTES = int(os.environ.get("SPARK_LOG_MAX_BYTES", "10485760"))
+LOG_BACKUPS = int(os.environ.get("SPARK_LOG_BACKUPS", "5"))
 
 
 def _check_single_instance() -> bool:
@@ -69,7 +80,9 @@ def _log(msg: str) -> None:
     line = f"[watchdog] {ts} {msg}"
     try:
         _ensure_log_dir()
-        with open(LOG_DIR / "watchdog.log", "a", encoding="utf-8", errors="replace") as f:
+        log_path = LOG_DIR / "watchdog.log"
+        _rotate_log(log_path, LOG_MAX_BYTES, LOG_BACKUPS)
+        with open(log_path, "a", encoding="utf-8", errors="replace") as f:
             f.write(line + "\n")
     except Exception:
         pass
@@ -85,26 +98,111 @@ def _http_ok(url: str, timeout: float = 1.5) -> bool:
         return False
 
 
-def _process_exists(keywords: list[str]) -> bool:
+def _rotate_log(path: Path, max_bytes: int, backups: int) -> None:
+    if max_bytes <= 0 or backups <= 0:
+        return
     try:
-        if os.name == "nt":
-            out = subprocess.check_output(
-                ["wmic", "process", "get", "CommandLine,ProcessId"],
-                text=True,
-                errors="ignore",
-            )
-        else:
-            out = subprocess.check_output(
-                ["ps", "-ax", "-o", "pid=,command="],
-                text=True,
-                errors="ignore",
-            )
-        for line in out.splitlines():
-            if any(k in line for k in keywords):
-                return True
-        return False
+        if not path.exists() or path.stat().st_size < max_bytes:
+            return
     except Exception:
-        return False
+        return
+
+    try:
+        for i in range(backups - 1, 0, -1):
+            src = path.with_name(f"{path.name}.{i}")
+            dst = path.with_name(f"{path.name}.{i + 1}")
+            if src.exists():
+                if dst.exists():
+                    dst.unlink(missing_ok=True)
+                src.replace(dst)
+        first = path.with_name(f"{path.name}.1")
+        if first.exists():
+            first.unlink(missing_ok=True)
+        path.replace(first)
+    except Exception:
+        return
+
+
+def _process_snapshot() -> list[tuple[int, str]]:
+    if os.name == "nt":
+        try:
+            out = subprocess.check_output(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress",
+                ],
+                text=True,
+                errors="ignore",
+            )
+            data = json.loads(out) if out.strip() else []
+            if isinstance(data, dict):
+                data = [data]
+            snapshot = []
+            for row in data or []:
+                try:
+                    pid = int(row.get("ProcessId") or 0)
+                except Exception:
+                    pid = 0
+                cmd = row.get("CommandLine") or ""
+                if pid:
+                    snapshot.append((pid, cmd))
+            return snapshot
+        except Exception:
+            return []
+    try:
+        out = subprocess.check_output(
+            ["ps", "-ax", "-o", "pid=,command="],
+            text=True,
+            errors="ignore",
+        )
+        snapshot = []
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if not parts:
+                continue
+            try:
+                pid = int(parts[0])
+            except Exception:
+                continue
+            cmd = parts[1] if len(parts) > 1 else ""
+            snapshot.append((pid, cmd))
+        return snapshot
+    except Exception:
+        return []
+
+
+def _find_pids_by_keywords(keywords: list[str], snapshot: Optional[list[tuple[int, str]]] = None) -> list[int]:
+    if not keywords:
+        return []
+    if snapshot is None:
+        snapshot = _process_snapshot()
+    matches = []
+    for pid, cmd in snapshot:
+        if all(k in cmd for k in keywords):
+            matches.append(pid)
+    return matches
+
+
+def _process_exists(keywords: list[str], snapshot: Optional[list[tuple[int, str]]] = None) -> bool:
+    return bool(_find_pids_by_keywords(keywords, snapshot))
+
+
+def _terminate_pids(pids: list[int]) -> None:
+    for pid in pids:
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+            else:
+                os.kill(pid, 15)
+        except Exception:
+            continue
 
 
 def _start_process(name: str, args: list[str]) -> bool:
@@ -222,6 +320,7 @@ def main() -> None:
     ap.add_argument("--max-queue", type=int, default=500, help="warn if queue exceeds this")
     ap.add_argument("--queue-warn-mins", type=int, default=5, help="minutes before warning")
     ap.add_argument("--bridge-stale-s", type=int, default=90, help="heartbeat stale threshold")
+    ap.add_argument("--fail-threshold", type=int, default=3, help="consecutive failed checks before restart")
     ap.add_argument("--once", action="store_true", help="run one check and exit")
     ap.add_argument("--no-restart", action="store_true", help="only report, never restart")
     ap.add_argument("--startup-delay", type=int, default=15, help="seconds to wait before first check (grace period for services to start)")
@@ -250,56 +349,103 @@ def main() -> None:
     state = _load_state()
     over_since = float(state.get("queue_over_since") or 0.0)
     last_warn = float(state.get("queue_last_warn") or 0.0)
+    failures = state.get("failures", {})
 
-    while True:
+    stop_event = threading.Event()
+
+    def _shutdown(signum=None, frame=None):
+        stop_event.set()
+
+    try:
+        import signal
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+    except Exception:
+        pass
+
+    while not stop_event.is_set():
+        snapshot = _process_snapshot()
+
+        def _bump_fail(name: str, ok: bool) -> int:
+            if ok:
+                failures[name] = 0
+            else:
+                failures[name] = int(failures.get(name, 0)) + 1
+            return failures.get(name, 0)
+
         # sparkd
-        sparkd_ok = _http_ok("http://127.0.0.1:8787/health")
+        sparkd_ok = _http_ok(SPARKD_HEALTH_URL)
+        sparkd_fail = _bump_fail("sparkd", sparkd_ok)
         if not sparkd_ok:
-            if _process_exists(["sparkd.py", "-m sparkd"]):
-                _log("sparkd unhealthy but process exists")
+            sparkd_pids = _find_pids_by_keywords(["sparkd.py", "-m sparkd"], snapshot)
+            if sparkd_pids and sparkd_fail < args.fail_threshold:
+                _log(f"sparkd unhealthy (fail {sparkd_fail}/{args.fail_threshold}) but process exists")
             elif not args.no_restart and _can_restart(state, "sparkd"):
+                if sparkd_pids:
+                    _terminate_pids(sparkd_pids)
                 if _start_process("sparkd", [sys.executable, "-m", "sparkd"]):
                     _record_restart(state, "sparkd")
+                    failures["sparkd"] = 0
 
         # dashboard
-        dash_ok = _http_ok("http://127.0.0.1:8585/api/status")
+        dash_ok = _http_ok(DASHBOARD_STATUS_URL)
+        dash_fail = _bump_fail("dashboard", dash_ok)
         if not dash_ok:
-            if _process_exists(["dashboard.py", "-m dashboard"]):
-                _log("dashboard unhealthy but process exists")
+            dash_pids = _find_pids_by_keywords(["dashboard.py", "-m dashboard"], snapshot)
+            if dash_pids and dash_fail < args.fail_threshold:
+                _log(f"dashboard unhealthy (fail {dash_fail}/{args.fail_threshold}) but process exists")
             elif not args.no_restart and _can_restart(state, "dashboard"):
+                if dash_pids:
+                    _terminate_pids(dash_pids)
                 if _start_process("dashboard", [sys.executable, "-m", "dashboard"]):
                     _record_restart(state, "dashboard")
+                    failures["dashboard"] = 0
 
         # spark pulse
-        pulse_ok = _http_ok("http://127.0.0.1:8765/api/pulse")
+        pulse_ok = _http_ok(PULSE_STATUS_URL)
+        pulse_fail = _bump_fail("pulse", pulse_ok)
         if not pulse_ok:
-            if _process_exists(["spark_pulse.py"]):
-                _log("pulse unhealthy but process exists")
+            pulse_pids = _find_pids_by_keywords(["spark_pulse.py"], snapshot)
+            if pulse_pids and pulse_fail < args.fail_threshold:
+                _log(f"pulse unhealthy (fail {pulse_fail}/{args.fail_threshold}) but process exists")
             elif not args.no_restart and _can_restart(state, "pulse"):
+                if pulse_pids:
+                    _terminate_pids(pulse_pids)
                 if _start_process("pulse", [sys.executable, str(SPARK_DIR / "spark_pulse.py")]):
                     _record_restart(state, "pulse")
+                    failures["pulse"] = 0
 
         # meta-ralph dashboard
-        meta_ok = _http_ok("http://127.0.0.1:8586/health")
+        meta_ok = _http_ok(META_RALPH_HEALTH_URL)
+        meta_fail = _bump_fail("meta_ralph", meta_ok)
         if not meta_ok:
-            if _process_exists(["meta_ralph_dashboard.py"]):
-                _log("meta_ralph unhealthy but process exists")
+            meta_pids = _find_pids_by_keywords(["meta_ralph_dashboard.py"], snapshot)
+            if meta_pids and meta_fail < args.fail_threshold:
+                _log(f"meta_ralph unhealthy (fail {meta_fail}/{args.fail_threshold}) but process exists")
             elif not args.no_restart and _can_restart(state, "meta_ralph"):
+                if meta_pids:
+                    _terminate_pids(meta_pids)
                 if _start_process("meta_ralph", [sys.executable, str(SPARK_DIR / "meta_ralph_dashboard.py")]):
                     _record_restart(state, "meta_ralph")
+                    failures["meta_ralph"] = 0
 
         # bridge_worker
         hb_age = _bridge_heartbeat_age()
         bridge_ok = hb_age is not None and hb_age <= args.bridge_stale_s
+        bridge_fail = _bump_fail("bridge_worker", bridge_ok)
         if not bridge_ok:
-            if _process_exists(["bridge_worker.py", "-m bridge_worker"]):
-                _log("bridge_worker heartbeat stale but process exists")
+            bridge_pids = _find_pids_by_keywords(["bridge_worker.py", "-m bridge_worker"], snapshot)
+            if bridge_pids and bridge_fail < args.fail_threshold:
+                _log(f"bridge_worker heartbeat stale (fail {bridge_fail}/{args.fail_threshold}) but process exists")
             elif not args.no_restart and _can_restart(state, "bridge_worker"):
+                if bridge_pids:
+                    _terminate_pids(bridge_pids)
                 if _start_process(
                     "bridge_worker",
                     [sys.executable, "-m", "bridge_worker", "--interval", "30"],
                 ):
                     _record_restart(state, "bridge_worker")
+                    failures["bridge_worker"] = 0
 
         # queue pressure warning
         try:
@@ -319,11 +465,12 @@ def main() -> None:
 
         state["queue_over_since"] = over_since
         state["queue_last_warn"] = last_warn
+        state["failures"] = failures
         _save_state(state)
 
         if args.once:
             break
-        time.sleep(max(10, int(args.interval)))
+        stop_event.wait(max(10, int(args.interval)))
 
 
 if __name__ == "__main__":

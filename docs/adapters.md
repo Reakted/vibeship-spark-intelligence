@@ -83,8 +83,11 @@ without needing a platform-specific adapter.
 Example:
 ```bash
 echo '{"v":1,"source":"stdin","kind":"message","ts":1730000000,"session_id":"demo","payload":{"role":"user","text":"hello"}}' | \
-  python3 adapters/stdin_ingest.py --sparkd http://127.0.0.1:8787
+  python3 adapters/stdin_ingest.py --sparkd ${SPARKD_URL:-http://127.0.0.1:${SPARKD_PORT:-8787}}
 ```
+
+Notes:
+- `adapters/stdin_ingest.py` defaults to `SPARKD_URL` or `SPARKD_PORT`.
 
 ## Cursor / VS Code integration (recommended approach)
 

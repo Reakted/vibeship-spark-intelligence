@@ -27,8 +27,9 @@ We intentionally **do not auto-merge** settings.json to avoid clobbering custom 
 
 ## 4) Confirm
 
-- Dashboard: http://127.0.0.1:8585
-- sparkd health: http://127.0.0.1:8787/health
+Defaults (override via env; see `lib/ports.py`):
+- Dashboard: http://127.0.0.1:${SPARK_DASHBOARD_PORT:-8585}
+- sparkd health: http://127.0.0.1:${SPARKD_PORT:-8787}/health
 
 If you want richer capture (chat text), ensure `UserPromptSubmit` is enabled.
 Spark normalizes hook names to runtime event types used by chips:

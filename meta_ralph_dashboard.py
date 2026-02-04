@@ -15,7 +15,7 @@ Features:
 - Recent roasts browser
 
 Run with: python meta_ralph_dashboard.py
-Open: http://localhost:8586
+Open: http://localhost:<meta-ralph-port>
 """
 
 import json
@@ -40,7 +40,10 @@ ADVICE_LOG_FILE = ADVISOR_DIR / "advice_log.jsonl"
 EFFECTIVENESS_FILE = ADVISOR_DIR / "effectiveness.json"
 RECENT_ADVICE_FILE = ADVISOR_DIR / "recent_advice.jsonl"
 
-PORT = 8586
+from lib.ports import DASHBOARD_PORT, META_RALPH_PORT
+from lib.diagnostics import setup_component_logging
+
+PORT = META_RALPH_PORT
 
 
 def load_json(path: Path) -> Dict:
@@ -876,7 +879,7 @@ HTML_TEMPLATE = """
                 for (const roast of r.recent_roasts) {
                     const verdictClass = roast.verdict || 'unknown';
                     const scores = roast.scores;
-                    const traceLink = roast.trace_id ? `<a href="http://localhost:8585/mission?trace_id=${roast.trace_id}" target="_blank">trace</a>` : '-';
+                    const traceLink = roast.trace_id ? `<a href="__SPARK_DASHBOARD_URL__/mission?trace_id=${roast.trace_id}" target="_blank">trace</a>` : '-';
                     tbody += `
                         <tr>
                             <td>${formatTime(roast.timestamp)}</td>
@@ -929,7 +932,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            self.wfile.write(HTML_TEMPLATE.encode())
+            html = HTML_TEMPLATE.replace(
+                "__SPARK_DASHBOARD_URL__",
+                f"http://localhost:{DASHBOARD_PORT}",
+            )
+            self.wfile.write(html.encode())
 
         elif parsed.path == "/api/data":
             self.send_response(200)
@@ -954,6 +961,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
 def main():
     """Start the dashboard server."""
+    setup_component_logging("meta_ralph")
     print(f"""
 ================================================================
         META RALPH QUALITY ANALYZER DASHBOARD
@@ -966,6 +974,21 @@ def main():
 """)
 
     server = ThreadingHTTPServer(("0.0.0.0", PORT), DashboardHandler)
+    stop_event = threading.Event()
+
+    def _shutdown(signum=None, frame=None):
+        if stop_event.is_set():
+            return
+        stop_event.set()
+        print("\nBye bye! My cat's breath smells like cat food.")
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    try:
+        import signal
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+    except Exception:
+        pass
 
     # Open browser
     def open_browser():
@@ -976,9 +999,8 @@ def main():
 
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
-        print("\nBye bye! My cat's breath smells like cat food.")
-        server.shutdown()
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

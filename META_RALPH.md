@@ -123,20 +123,20 @@ Use `DASHBOARD_PLAYBOOK.md` for full setup and usage (start commands, pages, dri
 Quick start:
 1. `python -m spark.cli up`
 2. Or `python dashboard.py` (Spark Lab only)
-3. Pulse: `python spark_pulse.py` (port 8765)
-4. **Meta-Ralph Quality Analyzer:** `python meta_ralph_dashboard.py` (port 8586)
+3. Pulse: `python spark_pulse.py` (port `SPARK_PULSE_PORT`, default 8765)
+4. **Meta-Ralph Quality Analyzer:** `python meta_ralph_dashboard.py` (port `SPARK_META_RALPH_PORT`, default 8586)
 
 `spark up` starts Spark Lab + Pulse + Meta-Ralph by default (use `--no-pulse` / `--no-meta-ralph` to skip).
 
 Key pages:
-1. `http://localhost:8585/mission` - Mission Control
-2. `http://localhost:8585/learning` - Learning Factory
-3. `http://localhost:8585/rabbit` - Rabbit Hole Recovery
-4. `http://localhost:8585/acceptance` - Acceptance Board
-5. `http://localhost:8585/ops` - Ops Overview
-6. `http://localhost:8585/dashboards` - Dashboards Index
-7. **`http://localhost:8765`** - Spark Pulse (chips + tuneables)
-8. **`http://localhost:8586`** - Meta-Ralph Quality Analyzer (dedicated dashboard)
+1. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/mission` - Mission Control
+2. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/learning` - Learning Factory
+3. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/rabbit` - Rabbit Hole Recovery
+4. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/acceptance` - Acceptance Board
+5. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/ops` - Ops Overview
+6. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/dashboards` - Dashboards Index
+7. **`http://localhost:${SPARK_PULSE_PORT:-8765}`** - Spark Pulse (chips + tuneables)
+8. **`http://localhost:${SPARK_META_RALPH_PORT:-8586}`** - Meta-Ralph Quality Analyzer (dedicated dashboard)
 
 **Meta-Ralph Dashboard Features:**
 - Real-time advice quality metrics (from roast_history.json)
@@ -754,7 +754,7 @@ curl http://localhost:8788/api/stats
 
 | Date | Change | Reason | Outcome |
 |------|--------|--------|---------|
-| 2026-02-04 | Built meta_ralph_dashboard.py (port 8586) | Need dedicated tool for advice quality analysis | Real-time quality metrics from storage |
+| 2026-02-04 | Built meta_ralph_dashboard.py (port `SPARK_META_RALPH_PORT`, default 8586) | Need dedicated tool for advice quality analysis | Real-time quality metrics from storage |
 | 2026-02-04 | Updated META_RALPH.md architecture sections | Documentation was outdated vs actual code | Docs now match implemented feedback loop |
 | 2026-02-04 | Fixed advisor atomic writes | Race conditions on effectiveness file | Safe read-modify-write pattern |
 | 2026-02-04 | Restarted stale bridge worker | Heartbeat was 39050s old | Pipeline processing resumed |
@@ -830,7 +830,7 @@ curl http://localhost:8788/api/stats
 
 **New Tools Built:**
 
-1. **meta_ralph_dashboard.py** (port 8586)
+1. **meta_ralph_dashboard.py** (port `SPARK_META_RALPH_PORT`, default 8586)
    - Dedicated dashboard for advice quality analysis
    - Reads from persistent storage (roast_history.json, outcome_tracking.json)
    - Shows 5-dimension scoring breakdown
@@ -848,7 +848,7 @@ curl http://localhost:8788/api/stats
 | advisor → meta_ralph | CONNECTED | track_retrieval/track_outcome integrated |
 | meta_ralph → cognitive | CONNECTED | Feedback loop closes |
 | EIDOS hooks integration | PARTIAL | eidos/integration.py exists but needs verification |
-| mind_bridge | OPTIONAL | Requires Mind Lite running on 8080 |
+| mind_bridge | OPTIONAL | Requires Mind Lite running on `SPARK_MIND_PORT` (default 8080) |
 
 **Documentation Updates:**
 - Updated "The Real Data Flow" section in META_RALPH.md
@@ -1012,7 +1012,7 @@ Added `_is_metadata_pattern()` to filter non-actionable patterns from bank memor
 
 **Mind Source Investigation:**
 
-Mind returns 0 advice because Mind API isn't running (localhost:8080). This is **expected graceful degradation**. When Mind Lite is started with `start_mind_lite.bat`, it will contribute advice. Not a bug.
+Mind returns 0 advice because Mind API isn't running (default `localhost:8080`). This is **expected graceful degradation**. When Mind Lite is started with `start_mind_lite.bat`, it will contribute advice. Not a bug.
 
 **Audit Results:**
 
@@ -1430,14 +1430,14 @@ The goal isn't to block things - it's to **evolve** the entire system until ever
 | **Aggregator Stats** | **Fixed** | Now shows persistent counts |
 | **Bank Metadata Filter** | **Working** | Filters key-value patterns |
 | **Advisor Feedback Loop** | **CONNECTED** | track_retrieval → track_outcome → reliability |
-| **Meta-Ralph Dashboard** | **NEW** | Port 8586, dedicated quality analyzer |
+| **Meta-Ralph Dashboard** | **NEW** | Port `SPARK_META_RALPH_PORT` (default 8586), dedicated quality analyzer |
 | **Bridge Worker** | **RUNNING** | Heartbeat fresh (verified Session 11) |
 
 ### Session 11 Summary
 
 **Completed:**
 - Architecture verification (all documented components traced to code)
-- Meta-Ralph Quality Analyzer dashboard built (port 8586)
+- Meta-Ralph Quality Analyzer dashboard built (port `SPARK_META_RALPH_PORT`, default 8586)
 - Bridge worker restarted (was stale 39050s → now fresh)
 - Documentation aligned with actual implementation
 - 9 files committed (atomic advisor writes, etc.)
@@ -1574,7 +1574,7 @@ r"tool timeout"                       # New pattern
 1. ✅ **Advisor feedback loop verified** - track_retrieval → track_outcome connected
 2. ✅ **Bridge worker running** - Heartbeat fresh, pipeline processing
 3. ✅ **Hooks installed** - All 3 hooks in ~/.claude/settings.json
-4. ✅ **Meta-Ralph dashboard** - Dedicated quality analyzer on port 8586
+4. ✅ **Meta-Ralph dashboard** - Dedicated quality analyzer on port `SPARK_META_RALPH_PORT` (default 8586)
 5. ✅ **Architecture documentation** - META_RALPH.md aligned with code
 
 ### Remaining Opportunities

@@ -21,12 +21,20 @@ Stop services:
 1. `python -m spark.cli down`
 2. Or `spark down`
 
-Ports:
-1. Spark Lab dashboard: `http://localhost:8585`
-2. Spark Pulse (chips/tuneables): `http://localhost:8765`
-3. sparkd health: `http://127.0.0.1:8787/health`
-4. Mind server health (if running): `http://127.0.0.1:8080/health`
-5. Meta-Ralph Quality Analyzer: `http://localhost:8586`
+Ports (defaults; override via env, see `lib/ports.py`):
+1. Spark Lab dashboard: `http://localhost:${SPARK_DASHBOARD_PORT:-8585}`
+2. Spark Pulse (chips/tuneables): `http://localhost:${SPARK_PULSE_PORT:-8765}`
+3. Meta-Ralph Quality Analyzer: `http://localhost:${SPARK_META_RALPH_PORT:-8586}`
+4. sparkd health: `http://127.0.0.1:${SPARKD_PORT:-8787}/health`
+5. Mind server health (if running): `http://127.0.0.1:${SPARK_MIND_PORT:-8080}/health`
+
+Port overrides (env):
+1. `SPARKD_PORT`
+2. `SPARK_DASHBOARD_PORT`
+3. `SPARK_PULSE_PORT`
+4. `SPARK_META_RALPH_PORT`
+5. `SPARK_MIND_PORT`
+6. Adapters can also set `SPARKD_URL` directly.
 
 **Dashboards (Spark Lab)**
 Mission Control (default):
@@ -54,8 +62,8 @@ Dashboards Index:
 2. Links + start commands + data sources.
 
 **Dashboards (Separate Apps)**
-1. Meta-Ralph Quality Analyzer: `http://localhost:8586`
-2. Spark Pulse (chips/tuneables): `http://localhost:8765`
+1. Meta-Ralph Quality Analyzer: `http://localhost:${SPARK_META_RALPH_PORT:-8586}`
+2. Spark Pulse (chips/tuneables): `http://localhost:${SPARK_PULSE_PORT:-8765}`
 
 **CLI Dashboards (No Server)**
 1. EIDOS quick health: `python scripts/eidos_dashboard.py`
@@ -85,6 +93,24 @@ Dashboards Index:
 
 **Known Gaps**
 1. Legacy Meta-Ralph roast records without `trace_id` won't deep-link; new records include it.
+
+**Logging & Rotation**
+Defaults (override via env):
+1. Log directory: `SPARK_LOG_DIR` (default `~/.spark/logs`)
+2. Rotation size: `SPARK_LOG_MAX_BYTES` (default 10 MB)
+3. Backups: `SPARK_LOG_BACKUPS` (default 5)
+4. Tee to console: `SPARK_LOG_TEE` (default on)
+
+**Queue Limits**
+Defaults (override via env):
+1. `SPARK_QUEUE_MAX_EVENTS` (default 10000)
+2. `SPARK_QUEUE_MAX_BYTES` (default 10 MB)
+
+**Watchdog Settings**
+Key flags:
+1. `--fail-threshold` (default 3 consecutive failures before restart)
+2. `--bridge-stale-s` (default 90 seconds heartbeat staleness)
+3. `--startup-delay` (default 15 seconds grace period)
 
 **Per-change checklist (before and after edits)**
 1. Run pipeline health check: `python tests/test_pipeline_health.py`

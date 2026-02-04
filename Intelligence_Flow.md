@@ -37,8 +37,8 @@ Mind integration:
 
 Dashboards and ops:
 - dashboard.py (status + UI)
-- meta_ralph_dashboard.py (quality analyzer, port 8586)
-- spark_pulse.py (chips + tuneables, port 8765)
+- meta_ralph_dashboard.py (quality analyzer, port SPARK_META_RALPH_PORT, default 8586)
+- spark_pulse.py (chips + tuneables, port SPARK_PULSE_PORT, default 8765)
 - spark_watchdog.py + lib/service_control.py (monitor/restart services)
 
 ## 2) Primary workflows (end-to-end)
@@ -203,8 +203,8 @@ Mind:
 ## 4) Key tuneables (curated, high leverage)
 
 Ingest + servers:
-- sparkd.py PORT=8787, SPARKD_MAX_BODY_BYTES=262144 (max /ingest payload).
-- mind_server.py PORT=8080, MIND_MAX_BODY_BYTES=262144, MIND_MAX_CONTENT_CHARS=4000, MIND_MAX_QUERY_CHARS=1000.
+- sparkd.py uses SPARKD_PORT (default 8787), SPARKD_MAX_BODY_BYTES=262144 (max /ingest payload).
+- mind_server.py uses SPARK_MIND_PORT (default 8080), MIND_MAX_BODY_BYTES=262144, MIND_MAX_CONTENT_CHARS=4000, MIND_MAX_QUERY_CHARS=1000.
 - mind_server.py RRF_K=60 (rank fusion constant).
 
 Queue:
@@ -249,7 +249,7 @@ Advisor / skills:
 - skills_router scoring weights (query/name/desc/owns/etc) and limit clamp to 1..10
 
 Mind bridge:
-- MIND_API_URL default http://localhost:8080
+- MIND_API_URL default from SPARK_MIND_PORT (default 8080)
 - request timeout 5s, health timeout 2s
 - salience clamp 0.5..0.95, retrieve limit 5
 - offline queue and sync state kept under ~/.spark
@@ -313,8 +313,8 @@ Moltbook adapter:
 
 ## 6) Known gaps / mismatches
 
-- spark_pulse.py is present and serves Spark Pulse on port 8765 (chips + tuneables).
-- Some docs mention SPARK_MIND_URL; code uses a fixed MIND_API_URL constant instead (lib/mind_bridge.py).
+- spark_pulse.py is present and serves Spark Pulse on SPARK_PULSE_PORT (default 8765).
+- Mind host is fixed to localhost; port override supported via `SPARK_MIND_PORT` (see `lib/ports.py`).
 - build/ contains duplicated code artifacts; excluded from analysis.
 
 ## 7) Auto-generated sections below
@@ -746,7 +746,7 @@ Moltbook adapter:
 
 ### dashboard.py
 - constants:
-  - PORT = 8585 line=46 ctx=PORT = 8585
+  - PORT = DASHBOARD_PORT line=46 ctx=PORT = DASHBOARD_PORT
   - SPARK_DIR = 'Path.home() / ".spark"' line=47 ctx=SPARK_DIR = Path.home() / ".spark"
   - SKILLS_INDEX_FILE = 'SPARK_DIR / "skills_index.json"' line=80 ctx=SKILLS_INDEX_FILE = SPARK_DIR / "skills_index.json"
   - SKILLS_EFFECTIVENESS_FILE = 'SPARK_DIR / "skills_effectiveness.json"' line=81 ctx=SKILLS_EFFECTIVENESS_FILE = SPARK_DIR / "skills_effectiveness.json"
@@ -1573,7 +1573,7 @@ Moltbook adapter:
 
 ### lib\mind_bridge.py
 - constants:
-  - MIND_API_URL = 'http://localhost:8080' line=33 ctx=MIND_API_URL = "http://localhost:8080"
+  - MIND_API_URL = 'MIND_URL' line=34 ctx=MIND_API_URL = MIND_URL
   - SYNC_STATE_FILE = 'Path.home() / ".spark" / "mind_sync_state.json"' line=34 ctx=SYNC_STATE_FILE = Path.home() / ".spark" / "mind_sync_state.json"
   - OFFLINE_QUEUE_FILE = 'Path.home() / ".spark" / "mind_offline_queue.jsonl"' line=35 ctx=OFFLINE_QUEUE_FILE = Path.home() / ".spark" / "mind_offline_queue.jsonl"
   - DEFAULT_USER_ID = '550e8400-e29b-41d4-a716-446655440000' line=36 ctx=DEFAULT_USER_ID = "550e8400-e29b-41d4-a716-446655440000"
@@ -1902,9 +1902,9 @@ Moltbook adapter:
 - env:
   - SPARK_LOG_DIR default=None line=27 ctx=env_dir = os.environ.get("SPARK_LOG_DIR")
 - constants:
-  - SPARKD_URL = 'http://127.0.0.1:8787/health' line=16 ctx=SPARKD_URL = "http://127.0.0.1:8787/health"
-  - DASHBOARD_URL = 'http://127.0.0.1:8585/api/status' line=17 ctx=DASHBOARD_URL = "http://127.0.0.1:8585/api/status"
-  - PULSE_URL = 'http://127.0.0.1:8765/api/pulse' line=18 ctx=PULSE_URL = "http://127.0.0.1:8765/api/pulse"
+  - SPARKD_HEALTH_URL = 'SPARKD_HEALTH_URL' line=20 ctx=SPARKD_HEALTH_URL = f"{SPARKD_URL}/health"
+  - DASHBOARD_STATUS_URL = 'DASHBOARD_STATUS_URL' line=21 ctx=DASHBOARD_STATUS_URL = f"{DASHBOARD_URL}/api/status"
+  - PULSE_STATUS_URL = 'PULSE_STATUS_URL' line=22 ctx=PULSE_STATUS_URL = f"{PULSE_URL}/api/pulse"
   - ROOT_DIR = 'Path(__file__).resolve().parents[1]' line=19 ctx=ROOT_DIR = Path(__file__).resolve().parents[1]
 - func_defaults:
   - _http_ok(timeout) = 1.5 line=78 ctx=def _http_ok(url: str, timeout: float = 1.5) -> bool:
@@ -2000,7 +2000,7 @@ Moltbook adapter:
   - MIND_MAX_QUERY_CHARS default='1000' cast=int line=33 ctx=MAX_QUERY_CHARS = int(os.environ.get("MIND_MAX_QUERY_CHARS", "1000"))
   - MIND_TOKEN default=None line=30 ctx=TOKEN = os.environ.get("MIND_TOKEN")
 - constants:
-  - PORT = 8080 line=28 ctx=PORT = 8080
+  - PORT = MIND_PORT line=30 ctx=PORT = MIND_PORT
   - DB_PATH = 'Path.home() / ".mind" / "lite" / "memories.db"' line=29 ctx=DB_PATH = Path.home() / ".mind" / "lite" / "memories.db"
   - TOKEN = 'os.environ.get("MIND_TOKEN")' line=30 ctx=TOKEN = os.environ.get("MIND_TOKEN")
   - MAX_BODY_BYTES = 'int(os.environ.get("MIND_MAX_BODY_BYTES", "262144"))' line=31 ctx=MAX_BODY_BYTES = int(os.environ.get("MIND_MAX_BODY_BYTES", "262144"))
@@ -2045,7 +2045,7 @@ Moltbook adapter:
   - SPARKD_MAX_BODY_BYTES default='262144' cast=int line=35 ctx=MAX_BODY_BYTES = int(os.environ.get("SPARKD_MAX_BODY_BYTES", "262144"))
   - SPARKD_TOKEN default=None line=34 ctx=TOKEN = os.environ.get("SPARKD_TOKEN")
 - constants:
-  - PORT = 8787 line=33 ctx=PORT = 8787
+  - PORT = SPARKD_PORT line=35 ctx=PORT = SPARKD_PORT
   - TOKEN = 'os.environ.get("SPARKD_TOKEN")' line=34 ctx=TOKEN = os.environ.get("SPARKD_TOKEN")
   - MAX_BODY_BYTES = 'int(os.environ.get("SPARKD_MAX_BODY_BYTES", "262144"))' line=35 ctx=MAX_BODY_BYTES = int(os.environ.get("SPARKD_MAX_BODY_BYTES", "262144"))
   - INVALID_EVENTS_FILE = 'Path.home() / ".spark" / "invalid_events.jsonl"' line=36 ctx=INVALID_EVENTS_FILE = Path.home() / ".spark" / "invalid_events.jsonl"

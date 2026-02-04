@@ -19,9 +19,10 @@ Optional:
 
 import argparse
 import time
+import threading
 
 from lib.bridge_cycle import run_bridge_cycle, write_bridge_heartbeat
-from lib.diagnostics import setup_component_logging
+from lib.diagnostics import setup_component_logging, log_exception
 
 
 def main():
@@ -33,18 +34,33 @@ def main():
 
     setup_component_logging("bridge_worker")
 
-    while True:
-        stats = run_bridge_cycle(
-            query=args.query,
-            memory_limit=60,
-            pattern_limit=200,
-        )
-        write_bridge_heartbeat(stats)
+    stop_event = threading.Event()
+
+    def _shutdown(signum=None, frame=None):
+        stop_event.set()
+
+    try:
+        import signal
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+    except Exception:
+        pass
+
+    while not stop_event.is_set():
+        try:
+            stats = run_bridge_cycle(
+                query=args.query,
+                memory_limit=60,
+                pattern_limit=200,
+            )
+            write_bridge_heartbeat(stats)
+        except Exception as e:
+            log_exception("bridge_worker", "bridge cycle failed", e)
 
         if args.once:
             break
 
-        time.sleep(max(10, int(args.interval)))
+        stop_event.wait(max(10, int(args.interval)))
 
 
 if __name__ == "__main__":

@@ -27,10 +27,11 @@ except ImportError:
     print("[SPARK] requests not installed - Mind sync disabled")
 
 from .cognitive_learner import CognitiveInsight, CognitiveCategory, get_cognitive_learner
+from .ports import MIND_URL
 
 
 # ============= Configuration =============
-MIND_API_URL = "http://localhost:8080"
+MIND_API_URL = MIND_URL
 SYNC_STATE_FILE = Path.home() / ".spark" / "mind_sync_state.json"
 OFFLINE_QUEUE_FILE = Path.home() / ".spark" / "mind_offline_queue.jsonl"
 DEFAULT_USER_ID = "550e8400-e29b-41d4-a716-446655440000"

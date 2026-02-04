@@ -7,9 +7,9 @@
 ## STEP 1: Verify Spark Status
 
 Before starting work, check Spark is running:
-- Spark Dashboard: http://localhost:8585
-- Spark Pulse: http://localhost:8765
-- Mind API: http://localhost:8080
+- Spark Dashboard: http://localhost:${SPARK_DASHBOARD_PORT:-8585}
+- Spark Pulse: http://localhost:${SPARK_PULSE_PORT:-8765}
+- Mind API: http://localhost:${SPARK_MIND_PORT:-8080}
 
 If not running, start with: `python -m spark.cli up` from vibeship-spark-intelligence
 
@@ -219,9 +219,9 @@ spark learnings --query "topic"
 
 | Dashboard | URL | Purpose |
 |-----------|-----|---------|
-| Spark Lab | http://localhost:8585 | Main dashboard, insights, queue |
-| Spark Pulse | http://localhost:8765 | Neural visualization + chips rail |
-| Mind API | http://localhost:8080/docs | Memory API docs |
+| Spark Lab | http://localhost:${SPARK_DASHBOARD_PORT:-8585} | Main dashboard, insights, queue |
+| Spark Pulse | http://localhost:${SPARK_PULSE_PORT:-8765} | Neural visualization + chips rail |
+| Mind API | http://localhost:${SPARK_MIND_PORT:-8080}/docs | Memory API docs |
 
 ---
 

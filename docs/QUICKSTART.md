@@ -76,10 +76,18 @@ python3 -m spark.cli down
 
 ### Dashboards
 
-- Spark Lab (overview + orchestration): http://localhost:8585
-- Dashboards Index: http://localhost:8585/dashboards
-- Spark Pulse (chips + tuneables rail): http://localhost:8765
-- Meta-Ralph Quality Analyzer: http://localhost:8586
+Defaults (override via env; see `lib/ports.py`):
+- Spark Lab (overview + orchestration): http://localhost:${SPARK_DASHBOARD_PORT:-8585}
+- Dashboards Index: http://localhost:${SPARK_DASHBOARD_PORT:-8585}/dashboards
+- Spark Pulse (chips + tuneables rail): http://localhost:${SPARK_PULSE_PORT:-8765}
+- Meta-Ralph Quality Analyzer: http://localhost:${SPARK_META_RALPH_PORT:-8586}
+
+Port overrides:
+- `SPARKD_PORT`
+- `SPARK_DASHBOARD_PORT`
+- `SPARK_PULSE_PORT`
+- `SPARK_META_RALPH_PORT`
+- `SPARK_MIND_PORT`
 
 Tip: `spark up` starts Spark Lab + Spark Pulse + Meta-Ralph by default. Use `--no-pulse` or `--no-meta-ralph` to skip.
 

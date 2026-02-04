@@ -6,7 +6,7 @@ It reads what Clawdbot already writes (session transcripts) and emits normalized
 SparkEventV1 events.
 
 Usage:
-  python3 adapters/clawdbot_tailer.py --sparkd http://127.0.0.1:8787 --agent main
+  python3 adapters/clawdbot_tailer.py --sparkd http://127.0.0.1:<sparkd-port> --agent main
 
 Notes:
 - This is intentionally simple: it tails the latest session file for an agent.
@@ -20,6 +20,8 @@ import time
 import hashlib
 from pathlib import Path
 from urllib.request import Request, urlopen
+
+DEFAULT_SPARKD = os.environ.get("SPARKD_URL") or f"http://127.0.0.1:{os.environ.get('SPARKD_PORT', '8787')}"
 
 
 STATE_DIR = Path.home() / ".spark" / "adapters"
@@ -53,7 +55,7 @@ def _hash(s: str) -> str:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sparkd", default="http://127.0.0.1:8787", help="sparkd base URL")
+    ap.add_argument("--sparkd", default=DEFAULT_SPARKD, help="sparkd base URL")
     ap.add_argument("--agent", default="main", help="Clawdbot agent id")
     ap.add_argument("--poll", type=float, default=2.0, help="Poll interval seconds (default: 2.0)")
     ap.add_argument("--max-per-tick", type=int, default=50, help="Max lines to ingest per tick (default: 50)")

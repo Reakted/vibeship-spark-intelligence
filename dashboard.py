@@ -3,7 +3,7 @@
 Spark Dashboard - True Vibeship Style
 
 Run with: python3 dashboard.py
-Open: http://localhost:8585
+Open: http://localhost:<dashboard-port>
 """
 
 import json
@@ -34,7 +34,8 @@ from lib.growth_tracker import GrowthTracker
 from lib.resonance import get_resonance_display
 from lib.dashboard_project import get_active_project, get_project_memory_preview
 from lib.taste_api import add_from_dashboard
-from lib.diagnostics import setup_component_logging
+from lib.diagnostics import setup_component_logging, log_exception
+from lib.ports import DASHBOARD_PORT, PULSE_PORT, META_RALPH_PORT, MIND_HEALTH_URL
 from lib.run_log import get_recent_runs, get_run_detail, get_run_kpis
 
 # Service control
@@ -64,7 +65,7 @@ try:
 except ImportError:
     HAS_EIDOS = False
 
-PORT = 8585
+PORT = DASHBOARD_PORT
 SPARK_DIR = Path.home() / ".spark"
 QUEUE_FILE = SPARK_DIR / "queue" / "events.jsonl"
 QUEUE_LOCK_FILE = SPARK_DIR / "queue" / ".queue.lock"
@@ -114,6 +115,15 @@ ORCH_DIR = SPARK_DIR / "orchestration"
 ORCH_AGENTS_FILE = ORCH_DIR / "agents.json"
 ORCH_HANDOFFS_FILE = ORCH_DIR / "handoffs.jsonl"
 LOGO_FILE = Path(__file__).parent / "logo.png"
+
+
+def _get_process_memory_mb() -> Optional[float]:
+    try:
+        import psutil  # type: ignore
+        rss = psutil.Process(os.getpid()).memory_info().rss
+        return round(rss / (1024 * 1024), 2)
+    except Exception:
+        return None
 
 def get_dashboard_data():
     """Gather all status data - fresh from disk each time for real-time updates."""
@@ -407,8 +417,8 @@ def get_trace_timeline_data(trace_id: str) -> Dict[str, Any]:
                         "expires_at": ev.expires_at,
                         "bytes": ev.byte_size,
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            log_exception("dashboard", "evidence load failed", e)
 
     if OUTCOMES_FILE.exists():
         for row in _read_jsonl(OUTCOMES_FILE, limit=400):
@@ -449,7 +459,8 @@ def _queue_oldest_event_age_s() -> Optional[float]:
                         return max(0.0, time.time() - ts)
                 except Exception:
                     continue
-    except Exception:
+    except Exception as e:
+        log_exception("dashboard", "queue age check failed", e)
         return None
     return None
 
@@ -711,12 +722,13 @@ def _derive_watcher_alerts(store, episodes: List) -> List[Dict[str, Any]]:
                 if getattr(last_step, "trace_id", None):
                     payload["trace_id"] = last_step.trace_id
                 alerts.append(payload)
-        except Exception:
+        except Exception as e:
+            log_exception("dashboard", "watcher alert check failed", e)
             continue
     try:
         alerts.extend(_extract_trace_gaps(store))
-    except Exception:
-        pass
+    except Exception as e:
+        log_exception("dashboard", "trace gap extract failed", e)
     alerts.sort(key=lambda a: a.get("timestamp", 0), reverse=True)
     return alerts
 
@@ -751,8 +763,8 @@ def _extract_trace_gaps(store, limit: int = 12) -> List[Dict[str, Any]]:
                 step_id=row["step_id"],
                 episode_id=row["episode_id"],
             ))
-    except Exception:
-        pass
+    except Exception as e:
+        log_exception("dashboard", "trace gap step scan failed", e)
 
     # Evidence missing trace_id
     try:
@@ -773,8 +785,8 @@ def _extract_trace_gaps(store, limit: int = 12) -> List[Dict[str, Any]]:
                         evidence_id=row["evidence_id"],
                         step_id=row["step_id"],
                     ))
-    except Exception:
-        pass
+    except Exception as e:
+        log_exception("dashboard", "trace gap evidence scan failed", e)
 
     # Outcomes missing trace_id
     try:
@@ -791,8 +803,8 @@ def _extract_trace_gaps(store, limit: int = 12) -> List[Dict[str, Any]]:
             ))
             if missing >= limit:
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        log_exception("dashboard", "trace gap outcome scan failed", e)
 
     return alerts[:limit]
 
@@ -892,12 +904,13 @@ def _extract_no_evidence_streaks(store, limit: int = 10) -> List[Dict[str, Any]]
 def get_mission_control_data() -> Dict[str, Any]:
     funnel = get_funnel_kpis()
     services = service_status()
-    mind_ok = _http_ok("http://127.0.0.1:8080/health")
+    mind_ok = _http_ok(MIND_HEALTH_URL)
     services["mind_server"] = {
         "running": mind_ok,
         "healthy": mind_ok,
         "pid": None,
     }
+    mem_mb = _get_process_memory_mb()
 
     queue_stats = get_queue_stats()
     oldest_age = _queue_oldest_event_age_s()
@@ -990,6 +1003,7 @@ def get_mission_control_data() -> Dict[str, Any]:
         "timestamp": datetime.now().strftime("%H:%M:%S"),
         "funnel": funnel,
         "services": services,
+        "process_memory_mb": mem_mb,
         "queue": queue_health,
         "bridge": bridge_health,
         "eidos": eidos_block,
@@ -2395,8 +2409,8 @@ def generate_html():
             <a class="nav-link active" href="/">Overview</a>
             <a class="nav-link" href="/ops">Orchestration</a>
             <a class="nav-link" href="/dashboards">Dashboards</a>
-            <a class="nav-link" href="http://localhost:8765">Pulse</a>
-            <a class="nav-link" href="http://localhost:8586">Meta-Ralph</a>
+            <a class="nav-link" href="http://localhost:{PULSE_PORT}">Pulse</a>
+            <a class="nav-link" href="http://localhost:{META_RALPH_PORT}">Meta-Ralph</a>
         </div>
     </nav>
     
@@ -3394,8 +3408,8 @@ def generate_ops_html():
             <a class="nav-link" href="/">Overview</a>
             <a class="nav-link active" href="/ops">Orchestration</a>
             <a class="nav-link" href="/dashboards">Dashboards</a>
-            <a class="nav-link" href="http://localhost:8765">Pulse</a>
-            <a class="nav-link" href="http://localhost:8586">Meta-Ralph</a>
+            <a class="nav-link" href="http://localhost:{PULSE_PORT}">Pulse</a>
+            <a class="nav-link" href="http://localhost:{META_RALPH_PORT}">Meta-Ralph</a>
         </div>
     </nav>
 
@@ -3524,8 +3538,8 @@ def _nav_html(active: str) -> str:
         ("acceptance", "/acceptance", "Acceptance Board"),
         ("ops", "/ops", "Ops"),
         ("dashboards", "/dashboards", "Dashboards"),
-        ("pulse", "http://localhost:8765", "Pulse"),
-        ("meta_ralph", "http://localhost:8586", "Meta-Ralph"),
+        ("pulse", f"http://localhost:{PULSE_PORT}", "Pulse"),
+        ("meta_ralph", f"http://localhost:{META_RALPH_PORT}", "Meta-Ralph"),
     ]
     items = []
     for key, href, label in links:
@@ -4370,9 +4384,9 @@ def generate_dashboards_html() -> str:
       <div class="card">
         <div class="card-header"><span class="card-title">Web Dashboards</span></div>
         <div class="list">
-          <div class="row"><span>Spark Lab (Mission/learning/rabbit/acceptance/ops)</span><span class="mono"><a href="http://localhost:8585">:8585</a></span></div>
-          <div class="row"><span>Meta-Ralph Quality Analyzer</span><span class="mono"><a href="http://localhost:8586">:8586</a></span></div>
-          <div class="row"><span>Spark Pulse (chips + tuneables)</span><span class="mono"><a href="http://localhost:8765">:8765</a></span></div>
+          <div class="row"><span>Spark Lab (Mission/learning/rabbit/acceptance/ops)</span><span class="mono"><a href="http://localhost:{PORT}">:{PORT}</a></span></div>
+          <div class="row"><span>Meta-Ralph Quality Analyzer</span><span class="mono"><a href="http://localhost:{META_RALPH_PORT}">:{META_RALPH_PORT}</a></span></div>
+          <div class="row"><span>Spark Pulse (chips + tuneables)</span><span class="mono"><a href="http://localhost:{PULSE_PORT}">:{PULSE_PORT}</a></span></div>
         </div>
       </div>
       <div class="card">
@@ -4581,7 +4595,22 @@ def main():
     print("  Press Ctrl+C to stop")
     print()
     
-    server = ThreadingHTTPServer(('localhost', PORT), DashboardHandler)
+    server = ThreadingHTTPServer(("localhost", PORT), DashboardHandler)
+    stop_event = threading.Event()
+
+    def _shutdown(signum=None, frame=None):
+        if stop_event.is_set():
+            return
+        stop_event.set()
+        print("\n  Shutting down...")
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    try:
+        import signal
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+    except Exception:
+        pass
     
     def open_browser():
         time.sleep(1)
@@ -4591,9 +4620,8 @@ def main():
     
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n  Shutting down...")
-        server.shutdown()
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

@@ -171,11 +171,12 @@ def test_mind_integration():
     import requests
 
     try:
-        r = requests.get("http://localhost:8080/health", timeout=2)
+        port = os.environ.get("SPARK_MIND_PORT", "8080")
+        r = requests.get(f"http://localhost:{port}/health", timeout=2)
         health = r.json()
         print(f"  Mind API: {health['status']}")
 
-        r = requests.get("http://localhost:8080/v1/stats", timeout=2)
+        r = requests.get(f"http://localhost:{port}/v1/stats", timeout=2)
         stats = r.json()
         print(f"  Total memories: {stats['total_memories']:,}")
         print(f"  Tier: {stats['tier']}")

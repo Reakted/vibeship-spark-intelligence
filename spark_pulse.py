@@ -5,7 +5,7 @@ Spark Pulse Dashboard (Chips + Tuneables)
 Live, storage-backed view into chips and tuning signals.
 
 Run with: python spark_pulse.py
-Open: http://localhost:8765
+Open: http://localhost:<pulse-port>
 """
 
 from __future__ import annotations
@@ -19,8 +19,11 @@ from typing import Dict, Any
 import threading
 import webbrowser
 
+from lib.ports import DASHBOARD_PORT, META_RALPH_PORT, PULSE_PORT
+from lib.diagnostics import setup_component_logging
+
 SPARK_DIR = Path.home() / ".spark"
-PORT = 8765
+PORT = PULSE_PORT
 
 
 def _chip_stats() -> Dict[str, Any]:
@@ -157,8 +160,8 @@ HTML = """<!doctype html>
   <div class="nav">
     <div class="brand">spark pulse</div>
     <div class="links">
-      <a href="http://localhost:8585">Spark Lab</a>
-      <a href="http://localhost:8586">Meta-Ralph</a>
+      <a href="__SPARK_DASHBOARD_URL__">Spark Lab</a>
+      <a href="__SPARK_META_RALPH_URL__">Meta-Ralph</a>
     </div>
   </div>
   <div class="wrap">
@@ -252,7 +255,9 @@ class PulseHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            self.wfile.write(HTML.encode("utf-8"))
+            html = HTML.replace("__SPARK_DASHBOARD_URL__", f"http://localhost:{DASHBOARD_PORT}")
+            html = html.replace("__SPARK_META_RALPH_URL__", f"http://localhost:{META_RALPH_PORT}")
+            self.wfile.write(html.encode("utf-8"))
             return
         if parsed.path == "/health":
             self.send_response(200)
@@ -271,6 +276,7 @@ class PulseHandler(SimpleHTTPRequestHandler):
 
 
 def main():
+    setup_component_logging("spark_pulse")
     print("\n" + "=" * 64)
     print("  SPARK PULSE - CHIPS + TUNEABLES")
     print("=" * 64)
@@ -279,6 +285,21 @@ def main():
     print("=" * 64 + "\n")
 
     server = ThreadingHTTPServer(("0.0.0.0", PORT), PulseHandler)
+    stop_event = threading.Event()
+
+    def _shutdown(signum=None, frame=None):
+        if stop_event.is_set():
+            return
+        stop_event.set()
+        print("\n  Shutting down...")
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    try:
+        import signal
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+    except Exception:
+        pass
 
     def _open_browser():
         time.sleep(0.5)
@@ -288,8 +309,8 @@ def main():
 
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
-        server.shutdown()
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

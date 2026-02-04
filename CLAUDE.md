@@ -150,20 +150,20 @@ Use `DASHBOARD_PLAYBOOK.md` for full setup and usage (start commands, pages, dri
 Quick start:
 1. `python -m spark.cli up`
 2. Or `python dashboard.py` (Spark Lab only)
-3. Pulse: `python spark_pulse.py` (port 8765)
-4. **Meta-Ralph Quality Analyzer:** `python meta_ralph_dashboard.py` (port 8586)
+3. Pulse: `python spark_pulse.py` (port `SPARK_PULSE_PORT`, default 8765)
+4. **Meta-Ralph Quality Analyzer:** `python meta_ralph_dashboard.py` (port `SPARK_META_RALPH_PORT`, default 8586)
 
 `spark up` starts Spark Lab + Pulse + Meta-Ralph by default (use `--no-pulse` / `--no-meta-ralph` to skip).
 
 Key pages:
-1. `http://localhost:8585/mission` - Mission Control
-2. `http://localhost:8585/learning` - Learning Factory
-3. `http://localhost:8585/rabbit` - Rabbit Hole Recovery
-4. `http://localhost:8585/acceptance` - Acceptance Board
-5. `http://localhost:8585/ops` - Ops Overview
-6. `http://localhost:8585/dashboards` - Dashboards Index
-7. **`http://localhost:8765`** - Spark Pulse (chips + tuneables)
-8. **`http://localhost:8586`** - Meta-Ralph Quality Analyzer (advice quality metrics)
+1. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/mission` - Mission Control
+2. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/learning` - Learning Factory
+3. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/rabbit` - Rabbit Hole Recovery
+4. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/acceptance` - Acceptance Board
+5. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/ops` - Ops Overview
+6. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}/dashboards` - Dashboards Index
+7. **`http://localhost:${SPARK_PULSE_PORT:-8765}`** - Spark Pulse (chips + tuneables)
+8. **`http://localhost:${SPARK_META_RALPH_PORT:-8586}`** - Meta-Ralph Quality Analyzer (advice quality metrics)
 
 ---
 
@@ -332,7 +332,9 @@ print(get_aggregator().get_stats())
 
 # Mind stats
 import requests
-print(requests.get("http://localhost:8080/v1/stats").json())
+import os
+port = os.environ.get("SPARK_MIND_PORT", "8080")
+print(requests.get(f"http://localhost:{port}/v1/stats").json())
 
 # Verify storage (not just scoring)
 from pathlib import Path
@@ -369,7 +371,9 @@ print(get_aggregator().get_stats())
 
 # Mind stats
 import requests
-print(requests.get("http://localhost:8080/v1/stats").json())
+import os
+port = os.environ.get("SPARK_MIND_PORT", "8080")
+print(requests.get(f"http://localhost:{port}/v1/stats").json())
 
 # Verify storage (not just scoring)
 from pathlib import Path
@@ -859,7 +863,7 @@ When domain detected, chips should:
 <!-- SPARK_LEARNINGS_START -->
 ## Spark Bootstrap
 Auto-loaded high-confidence learnings from ~/.spark/cognitive_insights.json
-Last updated: 2026-02-04T16:05:38
+Last updated: 2026-02-04T17:19:15
 
 - [user_understanding] ## ðŸš¨ PRIMARY RULES
 
@@ -876,29 +880,17 @@ Last updated: 2026-02-04T16:05:38
 > **Consult Intelligence_Flow.md and Intelligence_Flow_Map.md to ensure changes align with actual data flow.**
 
 Witho... (100% reliable, 4 validations)
-- [self_awareness] I struggle with Bash fails with windows_path -> Fix: Use forward slashes (/) instead of backslas tasks (27% reliable, 1359 validations)
-- [self_awareness] I struggle with Bash fails with file_not_found -> Fix: Verify path exists with Read or ls first tasks (25% reliable, 2135 validations)
-- [self_awareness] I struggle with Bash fails with syntax_error -> Fix: Check syntax, look for missing quotes or br tasks (24% reliable, 1185 validations)
-- [self_awareness] I struggle with Bash fails with command_not_found -> Fix: Check command spelling or install requ tasks (12% reliable, 495 validations)
-- [self_awareness] I struggle with Bash fails with windows_encoding -> Fix: Use ASCII characters or set UTF-8 encod tasks (11% reliable, 426 validations)
-- [self_awareness] I struggle with Bash fails with connection_error -> Fix: Check if service is running on expected tasks (10% reliable, 421 validations)
-- [self_awareness] I struggle with Bash fails with permission_denied -> Fix: Check file permissions or run with ele tasks (10% reliable, 320 validations)
-- [self_awareness] I struggle with Bash fails with json_error -> Fix: Verify JSON format is valid (recovered 100%) tasks (10% reliable, 334 validations)
-- [self_awareness] I struggle with Bash fails with timeout -> Fix: Reduce scope or increase timeout tasks (24% reliable, 1316 validations)
-- [context] **Always verify:** Is bridge_worker running? Is the queue being processed?
-
-### Rule 3: Pipeline Health Before Tuning
-
-**CRITICAL:** Before ANY tuning or iteration session:
-
-> **Run `python tests/test_pipeline_health.py` FIRST. Scoring metrics are meaningless if the pipeline isn't operational.**
-
-Session 2 lesson: Meta-Ralph showed 39.4% quality rate, but `learnings_stored=0`. Perfect scoring, broken pipeline = zero learning.
-
-### Rule 4: Anti-Hallucination
-
-**CRITICAL:** Never claim improvement... (100% reliable, 29 validations)
-- [user_understanding] Now, can we actually do this in this way? After we do these upgrades too for the next iteration, can you actually give me a project prompt so that I can run that using Spark and we can see in real-time what is really happening - what is being saved into the memory and what are the gaps? Instead of trying to just do these through these tests, because in real-time, we may be able to achieve even more understanding - not maybe, but even more understanding - about what is working and what is not. If... (99% reliable, 89 validations)
+- [self_awareness] I struggle with Bash fails with windows_path -> Fix: Use forward slashes (/) instead of backslas tasks (27% reliable, 1364 validations)
+- [self_awareness] I struggle with Bash fails with file_not_found -> Fix: Verify path exists with Read or ls first tasks (26% reliable, 2251 validations)
+- [self_awareness] I struggle with Bash fails with syntax_error -> Fix: Check syntax, look for missing quotes or br tasks (24% reliable, 1190 validations)
+- [self_awareness] I struggle with Bash fails with command_not_found -> Fix: Check command spelling or install requ tasks (12% reliable, 500 validations)
+- [self_awareness] I struggle with Bash fails with windows_encoding -> Fix: Use ASCII characters or set UTF-8 encod tasks (11% reliable, 431 validations)
+- [self_awareness] I struggle with Bash fails with connection_error -> Fix: Check if service is running on expected tasks (10% reliable, 426 validations)
+- [self_awareness] I struggle with Bash fails with permission_denied -> Fix: Check file permissions or run with ele tasks (10% reliable, 325 validations)
+- [self_awareness] I struggle with Bash fails with json_error -> Fix: Verify JSON format is valid (recovered 100%) tasks (10% reliable, 339 validations)
+- [self_awareness] I struggle with Bash fails with timeout -> Fix: Reduce scope or increase timeout tasks (24% reliable, 1321 validations)
+- [user_understanding] Now, can we actually do this in this way? After we do these upgrades too for the next iteration, can you actually give me a project prompt so that I can run that using Spark and we can see in real-time what is really happening - what is being saved into the memory and what are the gaps? Instead of trying to just do these through these tests, because in real-time, we may be able to achieve even more understanding - not maybe, but even more understanding - about what is working and what is not. If... (99% reliable, 103 validations)
+- [user_understanding] User prefers 'I think we gotta do it better over here for things to look more serious' over 'gonna lie. And we can bring maybe a GLB format, or maybe we can do this through steps. I don't know, just recommend me something' (76% reliable, 112 validations)
 
 ## Project Focus
 - Phase: discovery
