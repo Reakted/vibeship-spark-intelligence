@@ -56,13 +56,23 @@ function Test-Port {
     }
 }
 
+function Test-MindProcess {
+    # Check if a Mind process is already running (backup check)
+    $procs = Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object {
+        $_.CommandLine -match "lite_tier|mind_server|mind\.serve"
+    }
+    return ($procs.Count -gt 0)
+}
+
 function Test-Mind {
     param([int]$Port)
     try {
-        $resp = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 2
+        # Increased timeout from 2s to 10s - Mind has cold start latency of 4-6s
+        $resp = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 10
         return $resp.StatusCode -ge 200 -and $resp.StatusCode -lt 300
     } catch {
-        return $false
+        # Health check failed, but check if process exists (might just be slow)
+        return Test-MindProcess
     }
 }
 

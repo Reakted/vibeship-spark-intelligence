@@ -287,7 +287,8 @@ def _load_json(path: Path) -> Dict:
         return {}
 
 
-def _http_ok(url: str, timeout: float = 1.5) -> bool:
+def _http_ok(url: str, timeout: float = 3.0) -> bool:
+    """Check if URL returns 2xx. Timeout increased from 1.5s to reduce false negatives."""
     try:
         req = request.Request(url, method="GET")
         with request.urlopen(req, timeout=timeout) as resp:

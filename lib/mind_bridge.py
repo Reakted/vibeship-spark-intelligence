@@ -38,11 +38,15 @@ SYNC_STATE_FILE = Path.home() / ".spark" / "mind_sync_state.json"
 OFFLINE_QUEUE_FILE = Path.home() / ".spark" / "mind_offline_queue.jsonl"
 DEFAULT_USER_ID = "550e8400-e29b-41d4-a716-446655440000"
 MAX_CONTENT_CHARS = int(os.environ.get("MIND_MAX_CONTENT_CHARS", "4000"))
-MIND_HEALTH_TIMEOUT_S = float(os.environ.get("MIND_HEALTH_TIMEOUT_S", "0.6"))
-MIND_POST_TIMEOUT_S = float(os.environ.get("MIND_POST_TIMEOUT_S", "3.0"))
-MIND_RETRIEVE_TIMEOUT_S = float(os.environ.get("MIND_RETRIEVE_TIMEOUT_S", "1.5"))
-MIND_HEALTH_CACHE_TTL_S = float(os.environ.get("MIND_HEALTH_CACHE_TTL_S", "5.0"))
-MIND_HEALTH_BACKOFF_MAX_S = float(os.environ.get("MIND_HEALTH_BACKOFF_MAX_S", "30.0"))
+# Increased timeouts to reduce false "offline" status from transient slowness
+# Mind has cold-start latency (first requests can take 4-6s), so we need generous timeout
+MIND_HEALTH_TIMEOUT_S = float(os.environ.get("MIND_HEALTH_TIMEOUT_S", "8.0"))  # was 0.6
+MIND_POST_TIMEOUT_S = float(os.environ.get("MIND_POST_TIMEOUT_S", "5.0"))  # was 3.0
+MIND_RETRIEVE_TIMEOUT_S = float(os.environ.get("MIND_RETRIEVE_TIMEOUT_S", "3.0"))  # was 1.5
+# Longer cache to reduce health check frequency
+MIND_HEALTH_CACHE_TTL_S = float(os.environ.get("MIND_HEALTH_CACHE_TTL_S", "30.0"))  # was 5.0
+# Shorter max backoff so recovery is faster when Mind comes back
+MIND_HEALTH_BACKOFF_MAX_S = float(os.environ.get("MIND_HEALTH_BACKOFF_MAX_S", "15.0"))  # was 30.0
 
 
 class SyncStatus(Enum):
