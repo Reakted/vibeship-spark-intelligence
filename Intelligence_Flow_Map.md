@@ -6,7 +6,7 @@ This file provides a high-level visual map of Spark Intelligence data flow.
 For exhaustive tuneables and file interactions, see Intelligence_Flow.md.
 
 Brief overview:
-Spark Intelligence captures events (hooks/adapters/sparkd) into a queue, runs a bridge cycle to extract signals, stores learnings (cognitive insights, memory banks, EIDOS distillations), and surfaces guidance via Advisor and context sync. Outcomes and Meta-Ralph feedback close the loop, while optional semantic retrieval adds intent-based matching on top of embeddings and trigger rules.
+Spark Intelligence captures events (hooks/adapters/sparkd) into a queue, runs a bridge cycle to extract signals, and turns them into learnings (cognitive insights, memory bank entries, EIDOS distillations). Meta-Ralph quality-gates what is stored, outcomes feed back into reliability, and Advisor/Context Sync surface those learnings before actions. When semantic retrieval is enabled, Advisor extracts intent from the current task, matches triggers, runs embedding search over stored insights, fuses scores (similarity + recency + outcome), and returns the top guidance with "why" so learnings are actually used in real work.
 
 ```mermaid
 flowchart LR
