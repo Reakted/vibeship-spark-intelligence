@@ -31,6 +31,8 @@ def test_quick_capture_and_read_recent_events(tmp_path, monkeypatch):
 def test_rotate_if_needed(tmp_path, monkeypatch):
     _patch_queue_paths(tmp_path, monkeypatch)
     monkeypatch.setattr(queue, "MAX_EVENTS", 4)
+    # Reset the rotation throttle so count_events() runs immediately
+    monkeypatch.setattr(queue, "_last_count_check", 0.0)
 
     queue.QUEUE_DIR.mkdir(parents=True, exist_ok=True)
     with queue.EVENTS_FILE.open("w", encoding="utf-8") as f:

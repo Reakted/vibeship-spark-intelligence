@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
@@ -128,6 +129,54 @@ class Budget:
         )
 
 
+def _load_eidos_config() -> Dict[str, Any]:
+    """Load EIDOS budget tuneables from ~/.spark/tuneables.json.
+
+    Checks the "eidos" section first, then falls back to top-level "values"
+    for keys like max_steps, max_retries_per_error, max_file_touches,
+    no_evidence_steps (mapped to no_evidence_limit).
+    """
+    try:
+        tuneables = Path.home() / ".spark" / "tuneables.json"
+        if not tuneables.exists():
+            return {}
+        data = json.loads(tuneables.read_text(encoding="utf-8"))
+        # Prefer dedicated "eidos" section
+        cfg = data.get("eidos") or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+        # Fall back to top-level "values" for shared keys
+        values = data.get("values") or {}
+        if isinstance(values, dict):
+            for key in ("max_steps", "max_retries_per_error", "max_file_touches"):
+                if key not in cfg and key in values:
+                    cfg[key] = values[key]
+            # Map no_evidence_steps → no_evidence_limit
+            if "no_evidence_limit" not in cfg and "no_evidence_steps" in values:
+                cfg["no_evidence_limit"] = values["no_evidence_steps"]
+        return cfg
+    except Exception:
+        return {}
+
+
+_EIDOS_CFG = _load_eidos_config()
+
+
+def default_budget() -> "Budget":
+    """Create a Budget with tuneable-aware defaults.
+
+    Reads overrides from ~/.spark/tuneables.json → "eidos" section.
+    Falls back to hard-coded defaults for any missing key.
+    """
+    return Budget(
+        max_steps=int(_EIDOS_CFG.get("max_steps", 25)),
+        max_time_seconds=int(_EIDOS_CFG.get("max_time_seconds", 720)),
+        max_retries_per_error=int(_EIDOS_CFG.get("max_retries_per_error", 2)),
+        max_file_touches=int(_EIDOS_CFG.get("max_file_touches", 3)),
+        no_evidence_limit=int(_EIDOS_CFG.get("no_evidence_limit", 5)),
+    )
+
+
 @dataclass
 class Episode:
     """
@@ -143,7 +192,7 @@ class Episode:
     goal: str
     success_criteria: str
     constraints: List[str] = field(default_factory=list)
-    budget: Budget = field(default_factory=Budget)
+    budget: Budget = field(default_factory=default_budget)
     phase: Phase = Phase.EXPLORE
     outcome: Outcome = Outcome.IN_PROGRESS
     final_evaluation: str = ""

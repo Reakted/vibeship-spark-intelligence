@@ -50,11 +50,49 @@ RECENT_ADVICE_MAX_AGE_S = 1200  # 20 min (was 15 min) - Ralph Loop tuning for be
 RECENT_ADVICE_MAX_LINES = 200
 
 # Thresholds (Improvement #8: Advisor Integration tuneables)
+# Defaults — overridden by ~/.spark/tuneables.json → "advisor" section at module load.
 MIN_RELIABILITY_FOR_ADVICE = 0.5  # Lowered from 0.6 for more advice coverage
 MIN_VALIDATIONS_FOR_STRONG_ADVICE = 2
 MAX_ADVICE_ITEMS = 8  # Raised from 5 for complex tasks
 ADVICE_CACHE_TTL_SECONDS = 120  # 2 minutes (lowered from 5 for fresher advice)
 MIN_RANK_SCORE = 0.35  # Drop advice below this after ranking — prefer fewer, higher-quality items
+
+
+def _load_advisor_config() -> None:
+    """Load advisor tuneables from ~/.spark/tuneables.json → "advisor" section.
+
+    Overrides module-level constants so all existing code picks up the values
+    without any other changes.  Called once at module load.
+    """
+    global MIN_RELIABILITY_FOR_ADVICE, MIN_VALIDATIONS_FOR_STRONG_ADVICE
+    global MAX_ADVICE_ITEMS, ADVICE_CACHE_TTL_SECONDS, MIN_RANK_SCORE
+    try:
+        tuneables = Path.home() / ".spark" / "tuneables.json"
+        if not tuneables.exists():
+            return
+        data = json.loads(tuneables.read_text(encoding="utf-8"))
+        cfg = data.get("advisor") or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+        # Fall back to top-level "values" for advice_cache_ttl (backward compat)
+        values = data.get("values") or {}
+        if isinstance(values, dict) and "advice_cache_ttl" in values and "cache_ttl" not in cfg:
+            cfg["cache_ttl"] = values["advice_cache_ttl"]
+        if "min_reliability" in cfg:
+            MIN_RELIABILITY_FOR_ADVICE = float(cfg["min_reliability"])
+        if "min_validations_strong" in cfg:
+            MIN_VALIDATIONS_FOR_STRONG_ADVICE = int(cfg["min_validations_strong"])
+        if "max_items" in cfg:
+            MAX_ADVICE_ITEMS = int(cfg["max_items"])
+        if "cache_ttl" in cfg:
+            ADVICE_CACHE_TTL_SECONDS = int(cfg["cache_ttl"])
+        if "min_rank_score" in cfg:
+            MIN_RANK_SCORE = float(cfg["min_rank_score"])
+    except Exception:
+        pass  # Fail silently — keep hard-coded defaults
+
+
+_load_advisor_config()
 
 
 # ============= Data Classes =============

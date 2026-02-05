@@ -196,11 +196,11 @@ These are **circuit breakers** - when tripped, they force the system to stop and
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `max_steps` | **25** | **Step limit per episode.** After 25 actions without completing the goal, force DIAGNOSE phase. Prevents endless looping. |
-| `max_time_seconds` | **720** | **Time limit (12 minutes).** Episodes taking longer than this are force-stopped. Protects against infinite loops and runaway processes. |
-| `max_retries_per_error` | **2** | **Error retry limit.** After failing the same way twice, stop retrying and diagnose. Prevents "try harder" loops. |
-| `max_file_touches` | **3** | **File modification limit.** Can only modify the same file three times per episode. Fourth touch triggers DIAGNOSE. Raised from 2 to allow legitimate iteration. |
-| `no_evidence_limit` | **5** | **Evidence requirement.** After 5 steps without gathering new evidence (file reads, test runs, etc.), force DIAGNOSE. Prevents blind flailing. |
+| `max_steps` | **25** (code) / **40** (tuneables) | **Step limit per episode.** After N actions without completing the goal, force DIAGNOSE phase. Wired to `tuneables.json` → `eidos.max_steps` (also reads `values.max_steps`). |
+| `max_time_seconds` | **720** (code) / **1200** (tuneables) | **Time limit.** Episodes taking longer than this are force-stopped. Wired to `eidos.max_time_seconds`. |
+| `max_retries_per_error` | **2** (code) / **3** (tuneables) | **Error retry limit.** Wired to `eidos.max_retries_per_error` (also reads `values.max_retries_per_error`). |
+| `max_file_touches` | **3** (code) / **5** (tuneables) | **File modification limit.** Wired to `eidos.max_file_touches` (also reads `values.max_file_touches`). |
+| `no_evidence_limit` | **5** (code) / **6** (tuneables) | **Evidence requirement.** After N steps without new evidence, force DIAGNOSE. Wired to `eidos.no_evidence_limit` (also reads `values.no_evidence_steps`). |
 
 ### What Happens When Limits Hit
 
@@ -443,10 +443,11 @@ Tool + Context → Query Memory Banks + Cognitive Insights + Mind → Rank by Re
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `MIN_RELIABILITY_FOR_ADVICE` | **0.6** | **Quality filter.** Only include insights with 60%+ reliability in advice. Lower than promotion threshold because advice is just suggestions. |
-| `MIN_VALIDATIONS_FOR_STRONG_ADVICE` | **2** | **Strong advice threshold.** Insights validated 2+ times are marked as "strong" advice. |
-| `MAX_ADVICE_ITEMS` | **5** | **Advice limit.** Maximum advice items returned per query. More advice = more context but slower decisions. |
-| `ADVICE_CACHE_TTL_SECONDS` | **120** | **Cache duration (2 min).** Same query within 2 minutes returns cached advice. Lowered from 5 min for fresher context. |
+| `MIN_RELIABILITY_FOR_ADVICE` | **0.5** | **Quality filter.** Only include insights with 50%+ reliability in advice. Lowered from 0.6 for more advice coverage. Wired to `tuneables.json` → `advisor.min_reliability`. |
+| `MIN_VALIDATIONS_FOR_STRONG_ADVICE` | **2** | **Strong advice threshold.** Insights validated 2+ times are marked as "strong" advice. Wired to `advisor.min_validations_strong`. |
+| `MAX_ADVICE_ITEMS` | **8** | **Advice limit.** Maximum advice items returned per query. Raised from 5 for complex tasks. Wired to `advisor.max_items`. |
+| `ADVICE_CACHE_TTL_SECONDS` | **120** | **Cache duration (2 min).** Same query within 2 minutes returns cached advice. Wired to `advisor.cache_ttl` (also reads `values.advice_cache_ttl`). |
+| `MIN_RANK_SCORE` | **0.35** | **Rank cutoff.** Drop advice below this score after ranking — prefer fewer, higher-quality items. Wired to `advisor.min_rank_score`. |
 
 ### Advice Sources
 
@@ -938,9 +939,9 @@ Total = actionability + novelty + reasoning + specificity + outcome_linked
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `quality_threshold` | **5** | Items scoring >= 5 pass as QUALITY. Lowered from 7 (2026-02-03) after over-filtering detected. |
-| `needs_work_threshold` | **3** | Items scoring 3-4 are NEEDS_WORK (refinable). |
-| `primitive_threshold` | **<3** | Items scoring < 3 are PRIMITIVE (rejected). |
+| `quality_threshold` | **4** | Items scoring >= 4 pass as QUALITY. Lowered from 7→5→4 after over-filtering detected. Wired to `tuneables.json` → `meta_ralph.quality_threshold`. |
+| `needs_work_threshold` | **2** | Items scoring 2-3 are NEEDS_WORK (refinable). Wired to `meta_ralph.needs_work_threshold`. |
+| `primitive_threshold` | **<2** | Items scoring < 2 are PRIMITIVE (rejected). |
 
 ### Scoring Dimensions
 
@@ -1014,6 +1015,8 @@ Meta-Ralph continuously analyzes its own filter performance and recommends adjus
 | Date | Change | Reason |
 |------|--------|--------|
 | 2026-02-03 | quality_threshold 7→5 | Over-filtering (2.8% pass rate) blocking valuable insights like OAuth/PKCE advice |
+| 2026-02-04 | quality_threshold 5→4 | Still over-filtering after iterative Ralph loop analysis |
+| 2026-02-05 | All tuneables wired to `tuneables.json` | Audit found most constants were hard-coded and ignored config |
 
 ### Monitoring
 
@@ -1027,3 +1030,48 @@ python -c "from lib.meta_ralph import get_meta_ralph; import json; print(json.du
 # Dashboard (if running)
 curl http://localhost:8788/api/stats
 ```
+
+---
+
+## Tuneable Wiring Summary
+
+All tuneables are now loaded from `~/.spark/tuneables.json` at module import time.
+Components fall back to hard-coded defaults when a key is absent.
+
+### tuneables.json Section Map
+
+| JSON Section | Component | Keys |
+|-------------|-----------|------|
+| `values` | Pattern distiller, memory gate, EIDOS (fallback) | `min_occurrences`, `confidence_threshold`, `gate_threshold`, `max_steps`, `max_retries_per_error`, `max_file_touches`, `no_evidence_steps`, `queue_batch_size`, `advice_cache_ttl` |
+| `semantic` | Semantic retriever | `enabled`, `min_similarity`, `min_fusion_score`, `weight_recency`, `weight_outcome`, `mmr_lambda`, `category_caps`, etc. |
+| `triggers` | Trigger rules | `enabled`, `rules_file` |
+| `promotion` | Promoter | `adapter_budgets`, `confidence_floor`, `min_age_hours` |
+| `advisor` | Advisor | `min_reliability`, `min_validations_strong`, `max_items`, `cache_ttl`, `min_rank_score` |
+| `meta_ralph` | Meta-Ralph quality gate | `quality_threshold`, `needs_work_threshold`, `needs_work_close_delta`, `min_outcome_samples`, `min_tuneable_samples` |
+| `eidos` | EIDOS Budget defaults | `max_steps`, `max_time_seconds`, `max_retries_per_error`, `max_file_touches`, `no_evidence_limit` |
+
+### Backward Compatibility
+
+Some keys exist in both the legacy `values` section and the new dedicated sections.
+The dedicated section always takes precedence:
+
+- `values.max_steps` → `eidos.max_steps` (EIDOS reads both, prefers `eidos`)
+- `values.max_retries_per_error` → `eidos.max_retries_per_error`
+- `values.max_file_touches` → `eidos.max_file_touches`
+- `values.no_evidence_steps` → `eidos.no_evidence_limit` (key renamed)
+- `values.advice_cache_ttl` → `advisor.cache_ttl`
+- `values.queue_batch_size` → pipeline `DEFAULT_BATCH_SIZE`
+
+### Config Load Pattern
+
+Each component follows the same pattern:
+
+```python
+def _load_X_config():
+    tuneables = Path.home() / ".spark" / "tuneables.json"
+    data = json.loads(tuneables.read_text())
+    cfg = data.get("section_name") or {}
+    # Override module-level constants from cfg
+```
+
+Config is loaded once at module import — no runtime file reads.

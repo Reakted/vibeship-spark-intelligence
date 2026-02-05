@@ -28,9 +28,14 @@ EVENTS_FILE = QUEUE_DIR / "events.jsonl"
 MAX_EVENTS = int(os.environ.get("SPARK_QUEUE_MAX_EVENTS", "10000"))  # Rotate after this many events
 MAX_QUEUE_BYTES = int(os.environ.get("SPARK_QUEUE_MAX_BYTES", "10485760"))  # 10 MB
 LOCK_FILE = QUEUE_DIR / ".queue.lock"
+OVERFLOW_FILE = QUEUE_DIR / "events.overflow.jsonl"
 
 # Read the tail in chunks to avoid loading large files into memory.
 TAIL_CHUNK_BYTES = 64 * 1024
+
+# Throttle the O(n) count_events() call inside rotate_if_needed.
+_last_count_check: float = 0.0
+_COUNT_CHECK_INTERVAL: float = 60.0
 
 
 class EventType(Enum):
@@ -77,7 +82,7 @@ def quick_capture(event_type: EventType, session_id: str, data: Dict[str, Any],
     Capture an event as fast as possible.
     
     Target: < 10ms
-    Method: Append-only file write, no locking, minimal processing
+    Method: Append-only file write with short lock, overflow sidecar on contention.
     """
     try:
         if not isinstance(event_type, EventType):
@@ -88,7 +93,7 @@ def quick_capture(event_type: EventType, session_id: str, data: Dict[str, Any],
             raise ValueError("invalid_data")
 
         QUEUE_DIR.mkdir(parents=True, exist_ok=True)
-        
+
         event_ts = time.time()
         data_out = dict(data)
         trace_hint = ""
@@ -110,15 +115,24 @@ def quick_capture(event_type: EventType, session_id: str, data: Dict[str, Any],
             tool_input=tool_input,
             error=error
         )
-        
-        with open(EVENTS_FILE, "a") as f:
-            f.write(json.dumps(event.to_dict()) + "\n")
+
+        line = json.dumps(event.to_dict()) + "\n"
+        lock = _queue_lock(timeout_s=0.05)
+        with lock:
+            if lock.acquired:
+                with open(EVENTS_FILE, "a") as f:
+                    f.write(line)
+            else:
+                # Lock busy (consumer/rotator active) -- write to overflow
+                # sidecar so no events are lost. Merged on next consume.
+                with open(OVERFLOW_FILE, "a") as f:
+                    f.write(line)
 
         # Best-effort rotation so the queue doesn't grow unbounded.
         rotate_if_needed()
 
         return True
-        
+
     except Exception as e:
         # Never fail - just drop the event silently
         log_debug("queue", "quick_capture failed", e)
@@ -203,6 +217,8 @@ def clear_events() -> int:
 
 def rotate_if_needed() -> bool:
     """Rotate queue if it's too large."""
+    global _last_count_check
+
     size_bytes = 0
     if EVENTS_FILE.exists():
         try:
@@ -211,8 +227,16 @@ def rotate_if_needed() -> bool:
             size_bytes = 0
 
     over_size = MAX_QUEUE_BYTES > 0 and size_bytes > MAX_QUEUE_BYTES
-    count = count_events() if MAX_EVENTS > 0 else 0
-    over_count = MAX_EVENTS > 0 and count > MAX_EVENTS
+
+    # Throttle the O(n) count_events() call -- only check every 60s
+    # unless the byte-size check already shows we're over limit.
+    now = time.time()
+    count = 0
+    over_count = False
+    if MAX_EVENTS > 0 and (over_size or now - _last_count_check >= _COUNT_CHECK_INTERVAL):
+        count = count_events()
+        _last_count_check = now
+        over_count = count > MAX_EVENTS
 
     if not over_size and not over_count:
         return False
@@ -255,6 +279,17 @@ def consume_processed(up_to_offset: int) -> int:
 
     try:
         with _queue_lock():
+            # Merge any overflow events written during lock contention.
+            if OVERFLOW_FILE.exists():
+                try:
+                    overflow_data = OVERFLOW_FILE.read_text(encoding="utf-8")
+                    if overflow_data.strip():
+                        with open(EVENTS_FILE, "a", encoding="utf-8") as f:
+                            f.write(overflow_data)
+                    OVERFLOW_FILE.unlink()
+                except Exception as e:
+                    log_debug("queue", "overflow merge failed", e)
+
             # Read all remaining lines after the offset.
             remaining: List[str] = []
             removed = 0
@@ -457,6 +492,7 @@ class _queue_lock:
     def __init__(self, timeout_s: float = 0.5):
         self.timeout_s = timeout_s
         self.fd = None
+        self.acquired = False
 
     def __enter__(self):
         QUEUE_DIR.mkdir(parents=True, exist_ok=True)
@@ -464,10 +500,11 @@ class _queue_lock:
         while True:
             try:
                 self.fd = os.open(str(LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                self.acquired = True
                 return self
             except FileExistsError:
                 if time.time() - start >= self.timeout_s:
-                    return self
+                    return self  # self.acquired stays False
                 time.sleep(0.01)
             except Exception as e:
                 log_debug("queue", "lock acquire failed", e)
@@ -477,8 +514,10 @@ class _queue_lock:
         try:
             if self.fd is not None:
                 os.close(self.fd)
-            if LOCK_FILE.exists():
-                LOCK_FILE.unlink()
+                self.fd = None
+                # Only delete the lock file if WE acquired it.
+                if LOCK_FILE.exists():
+                    LOCK_FILE.unlink()
         except Exception as e:
             log_debug("queue", "lock release failed", e)
-            pass
+        self.acquired = False

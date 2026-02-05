@@ -23,7 +23,6 @@ from lib.chips import process_chip_events
 from lib.chip_merger import merge_chip_insights
 from lib.context_sync import sync_context
 from lib.diagnostics import log_debug
-from lib.advisor import report_outcome
 
 
 BRIDGE_HEARTBEAT_FILE = Path.home() / ".spark" / "bridge_worker_heartbeat.json"
@@ -85,8 +84,11 @@ def run_bridge_cycle(
             stats["errors"].append("patterns_fallback")
             log_debug("bridge_worker", "fallback pattern detection failed", e2)
 
-    # --- Tastebank (use recent events for taste extraction) ---
-    events = read_recent_events(40)
+    # --- Use events from the pipeline to avoid starvation after consume ---
+    if pipeline_metrics and getattr(pipeline_metrics, "processed_events", None):
+        events = pipeline_metrics.processed_events
+    else:
+        events = read_recent_events(40)
     try:
         for e in reversed(events[-10:]):
             if e.event_type != EventType.USER_PROMPT:
@@ -151,24 +153,32 @@ def run_bridge_cycle(
         stats["errors"].append("content_learning")
         log_debug("bridge_worker", "content learning failed", e)
 
-    # --- Outcome reporting ---
+    # Outcome reporting removed -- the hook (observe.py) handles this
+    # with better context (recovery detection, advice attribution).
+
+    # --- Cognitive signal extraction (moved from hook for performance) ---
     try:
-        outcome_count = 0
+        from lib.cognitive_signals import extract_cognitive_signals
         for ev in events:
-            tool = (ev.tool_name or "").strip()
-            if not tool:
-                continue
-            trace_id = (ev.data or {}).get("trace_id")
-            if ev.event_type == EventType.POST_TOOL:
-                report_outcome(tool, success=True, advice_helped=False, trace_id=trace_id)
-                outcome_count += 1
-            elif ev.event_type == EventType.POST_TOOL_FAILURE:
-                report_outcome(tool, success=False, advice_helped=False, trace_id=trace_id)
-                outcome_count += 1
-        stats["outcomes_reported"] = outcome_count
+            # Extract from user prompts
+            if ev.event_type == EventType.USER_PROMPT:
+                payload = (ev.data or {}).get("payload") or {}
+                txt = str(payload.get("text") or "").strip()
+                if txt and len(txt) >= 10:
+                    ev_trace = (ev.data or {}).get("trace_id")
+                    extract_cognitive_signals(txt, ev.session_id, trace_id=ev_trace)
+            # Extract from Write/Edit content
+            elif ev.event_type == EventType.POST_TOOL:
+                tool = (ev.tool_name or "").strip()
+                if tool in ("Write", "Edit"):
+                    ti = ev.tool_input or {}
+                    content = ti.get("content") or ti.get("new_string") or ""
+                    if content and len(content) > 50:
+                        ev_trace = (ev.data or {}).get("trace_id")
+                        extract_cognitive_signals(content, ev.session_id, trace_id=ev_trace)
     except Exception as e:
-        stats["errors"].append("outcome_reporting")
-        log_debug("bridge_worker", "outcome reporting failed", e)
+        stats["errors"].append("cognitive_signals")
+        log_debug("bridge_worker", "cognitive signal extraction failed", e)
 
     # --- Chip processing ---
     try:

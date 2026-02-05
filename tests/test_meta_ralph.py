@@ -10,12 +10,25 @@ Usage:
 """
 
 import sys
+import pytest
 from pathlib import Path
 
 # Add lib to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lib.meta_ralph import MetaRalph, RoastVerdict, QualityScore
+
+
+@pytest.fixture(autouse=True)
+def _isolate_meta_ralph(tmp_path, monkeypatch):
+    """Redirect MetaRalph's persistent state to a temp directory so tests
+    don't leak across runs or pick up stale roast history from ~/.spark/."""
+    data_dir = tmp_path / "meta_ralph"
+    monkeypatch.setattr(MetaRalph, "DATA_DIR", data_dir)
+    monkeypatch.setattr(MetaRalph, "ROAST_HISTORY_FILE", data_dir / "roast_history.json")
+    monkeypatch.setattr(MetaRalph, "OUTCOME_TRACKING_FILE", data_dir / "outcome_tracking.json")
+    monkeypatch.setattr(MetaRalph, "LEARNINGS_STORE_FILE", data_dir / "learnings_store.json")
+    monkeypatch.setattr(MetaRalph, "SELF_ROAST_FILE", data_dir / "self_roast.json")
 
 
 def test_primitive_detection():

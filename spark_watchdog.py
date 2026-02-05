@@ -413,17 +413,39 @@ def main() -> None:
                     _record_restart(state, "dashboard")
                     failures["dashboard"] = 0
 
-        # spark pulse
+        # spark pulse -- unified startup via service_control
         pulse_ok = _http_ok(PULSE_STATUS_URL)
         pulse_fail = _bump_fail("pulse", pulse_ok)
         if not pulse_ok:
-            pulse_pids = _find_pids_by_keywords(["spark_pulse.py"], snapshot)
-            if pulse_pids and pulse_fail < args.fail_threshold:
+            # Check PID file first (covers external pulse started by service_control)
+            try:
+                from lib.service_control import _read_pid, _pid_alive, _get_pulse_command
+                pulse_pid_from_file = _read_pid("pulse")
+                pid_file_alive = _pid_alive(pulse_pid_from_file)
+            except Exception:
+                pulse_pid_from_file = None
+                pid_file_alive = False
+
+            # Also search by keyword for both internal and external pulse
+            pulse_pids = (
+                _find_pids_by_keywords(["spark_pulse.py"], snapshot)
+                + _find_pids_by_keywords(["vibeship-spark-pulse"], snapshot)
+            )
+            pulse_running = pid_file_alive or bool(pulse_pids)
+
+            if pulse_running and pulse_fail < args.fail_threshold:
                 _log(f"pulse unhealthy (fail {pulse_fail}/{args.fail_threshold}) but process exists")
             elif not args.no_restart and _can_restart(state, "pulse"):
-                if pulse_pids:
-                    _terminate_pids(pulse_pids)
-                if _start_process("pulse", [sys.executable, str(SPARK_DIR / "spark_pulse.py")]):
+                all_pulse_pids = set(pulse_pids)
+                if pulse_pid_from_file and _pid_alive(pulse_pid_from_file):
+                    all_pulse_pids.add(pulse_pid_from_file)
+                if all_pulse_pids:
+                    _terminate_pids(list(all_pulse_pids))
+                try:
+                    pulse_cmd = _get_pulse_command()
+                except Exception:
+                    pulse_cmd = [sys.executable, str(SPARK_DIR / "spark_pulse.py")]
+                if _start_process("pulse", pulse_cmd):
                     _record_restart(state, "pulse")
                     failures["pulse"] = 0
 

@@ -173,7 +173,7 @@ def test_6_domain_detection():
     print_header("6. SKILL DOMAIN COVERAGE")
 
     try:
-        from hooks.observe import detect_domain, DOMAIN_TRIGGERS
+        from lib.cognitive_signals import detect_domain, DOMAIN_TRIGGERS
 
         print(f"  Domains configured: {len(DOMAIN_TRIGGERS)}")
 

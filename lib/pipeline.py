@@ -43,9 +43,30 @@ from lib.diagnostics import log_debug
 # ============= Configuration =============
 
 # Batch size bounds for auto-tuning
+# DEFAULT_BATCH_SIZE is overridden by tuneables.json → values.queue_batch_size
 MIN_BATCH_SIZE = 50
 MAX_BATCH_SIZE = 1000
 DEFAULT_BATCH_SIZE = 200
+
+
+def _load_pipeline_config() -> None:
+    """Load pipeline tuneables from ~/.spark/tuneables.json → "values" section."""
+    global DEFAULT_BATCH_SIZE
+    try:
+        from pathlib import Path
+        tuneables = Path.home() / ".spark" / "tuneables.json"
+        if not tuneables.exists():
+            return
+        data = json.loads(tuneables.read_text(encoding="utf-8"))
+        values = data.get("values") or {}
+        if isinstance(values, dict) and "queue_batch_size" in values:
+            batch = int(values["queue_batch_size"])
+            DEFAULT_BATCH_SIZE = max(MIN_BATCH_SIZE, min(MAX_BATCH_SIZE, batch))
+    except Exception:
+        pass
+
+
+_load_pipeline_config()
 
 # Backpressure thresholds
 QUEUE_HEALTHY = 200       # Below this, normal processing
@@ -87,6 +108,11 @@ class ProcessingMetrics:
     backpressure_level: str = "healthy"
 
     errors: List[str] = field(default_factory=list)
+
+    # The actual events processed this cycle.  Used by bridge_cycle to feed
+    # downstream subsystems without re-reading the (now consumed) queue.
+    # Intentionally excluded from to_dict() to keep serialized metrics small.
+    processed_events: List[Any] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -588,6 +614,13 @@ def run_processing_cycle(
     )
 
     # 5. Run pattern detection (existing system) with priority ordering
+    # Map hook_event names to aggregator "type" values for EIDOS step-wrapping.
+    _HOOK_TO_AGG_TYPE = {
+        "UserPromptSubmit": "user_message",
+        "PostToolUse": "action_complete",
+        "PostToolUseFailure": "failure",
+    }
+
     try:
         from lib.pattern_detection.aggregator import get_aggregator
         aggregator = get_aggregator()
@@ -602,6 +635,18 @@ def run_processing_cycle(
                 "tool_input": event.tool_input,
                 "payload": payload,
             }
+
+            # Provide the "type" key the aggregator expects for EIDOS
+            agg_type = _HOOK_TO_AGG_TYPE.get(hook_event, "")
+            if agg_type:
+                pattern_event["type"] = agg_type
+
+            # For user messages, map content so aggregator can create Steps
+            if hook_event == "UserPromptSubmit" and isinstance(payload, dict):
+                user_text = payload.get("text", "")
+                if user_text:
+                    pattern_event["content"] = user_text
+
             trace_id = (event.data or {}).get("trace_id")
             if trace_id:
                 pattern_event["trace_id"] = trace_id
@@ -614,6 +659,7 @@ def run_processing_cycle(
                 metrics.patterns_detected += len(patterns)
 
         metrics.events_processed = len(events)
+        metrics.processed_events = list(events)
     except Exception as e:
         metrics.errors.append(f"pattern_detection: {str(e)[:100]}")
         log_debug("pipeline", "pattern detection failed", e)

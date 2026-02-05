@@ -21,6 +21,7 @@ PROPOSE → ROAST → REFINE → TEST → VERIFY → META-ROAST → repeat
 
 import json
 import hashlib
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -28,7 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import re
 
-# Tuneables (kept in sync with META_RALPH.md)
+# Tuneables — defaults overridden by ~/.spark/tuneables.json → "meta_ralph" section.
 QUALITY_THRESHOLD = 4
 NEEDS_WORK_THRESHOLD = 2
 NEEDS_WORK_CLOSE_DELTA = 0.5
@@ -36,6 +37,40 @@ MIN_OUTCOME_SAMPLES = 5
 MIN_TUNEABLE_SAMPLES = 50
 MIN_NEEDS_WORK_SAMPLES = 5
 MIN_SOURCE_SAMPLES = 15
+
+
+def _load_meta_ralph_config() -> None:
+    """Load meta_ralph tuneables from ~/.spark/tuneables.json → "meta_ralph" section."""
+    global QUALITY_THRESHOLD, NEEDS_WORK_THRESHOLD, NEEDS_WORK_CLOSE_DELTA
+    global MIN_OUTCOME_SAMPLES, MIN_TUNEABLE_SAMPLES, MIN_NEEDS_WORK_SAMPLES
+    global MIN_SOURCE_SAMPLES
+    try:
+        tuneables = Path.home() / ".spark" / "tuneables.json"
+        if not tuneables.exists():
+            return
+        data = json.loads(tuneables.read_text(encoding="utf-8"))
+        cfg = data.get("meta_ralph") or {}
+        if not isinstance(cfg, dict):
+            return
+        if "quality_threshold" in cfg:
+            QUALITY_THRESHOLD = int(cfg["quality_threshold"])
+        if "needs_work_threshold" in cfg:
+            NEEDS_WORK_THRESHOLD = int(cfg["needs_work_threshold"])
+        if "needs_work_close_delta" in cfg:
+            NEEDS_WORK_CLOSE_DELTA = float(cfg["needs_work_close_delta"])
+        if "min_outcome_samples" in cfg:
+            MIN_OUTCOME_SAMPLES = int(cfg["min_outcome_samples"])
+        if "min_tuneable_samples" in cfg:
+            MIN_TUNEABLE_SAMPLES = int(cfg["min_tuneable_samples"])
+        if "min_needs_work_samples" in cfg:
+            MIN_NEEDS_WORK_SAMPLES = int(cfg["min_needs_work_samples"])
+        if "min_source_samples" in cfg:
+            MIN_SOURCE_SAMPLES = int(cfg["min_source_samples"])
+    except Exception:
+        pass
+
+
+_load_meta_ralph_config()
 
 
 class QualityDimension(Enum):
