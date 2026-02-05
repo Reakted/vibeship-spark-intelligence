@@ -760,7 +760,7 @@ class CognitiveLearner:
             tech_keywords = ["function", "class", "import", "error", "bug", "api",
                              "database", "auth", "deploy", "test", "config", "server",
                              "client", "endpoint", "query", "schema", "type"]
-            has_tech = any(kw in tl for kw in tech_keywords)
+            has_tech = any(re.search(rf"\b{kw}\b", tl) for kw in tech_keywords)
             if filler_count >= 2 and not has_tech:
                 return True
 
