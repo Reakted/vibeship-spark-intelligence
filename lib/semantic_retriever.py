@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .embeddings import embed_text, embed_texts
+from .diagnostics import log_debug
 
 
 DEFAULT_CONFIG = {
@@ -31,6 +32,7 @@ DEFAULT_CONFIG = {
     "weight_recency": 0.2,
     "weight_outcome": 0.3,
     "mmr_lambda": 0.5,
+    "dedupe_similarity": 0.92,
     "max_results": 8,
     "index_on_write": True,
     "index_on_read": True,
@@ -43,6 +45,7 @@ DEFAULT_CONFIG = {
         "default": 2,
     },
     "triggers_enabled": False,
+    "log_retrievals": True,
 }
 
 
@@ -256,6 +259,30 @@ class SemanticIndex:
     def add(self, key: str, text: str) -> bool:
         return self.add_many([(key, text)]) > 0
 
+    def upsert(self, key: str, vector: List[float]) -> bool:
+        """Upsert a precomputed vector directly (no embedding)."""
+        if not key or not vector:
+            return False
+        now = time.time()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO insights_vec (insight_key, content_hash, dim, vector, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (key, None, len(vector), self._vector_to_blob(vector), now),
+            )
+            conn.commit()
+        self._invalidate_cache()
+        return True
+
+    def get(self, key: str) -> Optional[List[float]]:
+        """Return a vector for a given insight_key if present."""
+        if not key:
+            return None
+        items = self._load_cache()
+        for k, vec, _ in items:
+            if k == key:
+                return vec
+        return None
+
     def ensure_index(self, insights: Dict[str, Any], max_items: int = 300) -> int:
         if not insights:
             return 0
@@ -305,13 +332,18 @@ class SemanticRetriever:
         if not context:
             return []
 
+        start_ts = time.time()
         query = self._extract_intent(context)
         results: List[SemanticResult] = []
         seen: set[str] = set()
+        trigger_matches: List[TriggerMatch] = []
+        semantic_candidates: List[Tuple[str, float]] = []
+        embedding_available = False
 
         # Trigger rules (optional)
         if self.config.get("triggers_enabled", False):
-            for match in self.trigger_matcher.match(context):
+            trigger_matches = self.trigger_matcher.match(context)
+            for match in trigger_matches:
                 for text in match.surface_text or []:
                     key = f"trigger:{match.rule_name}:{hashlib.sha1(text.encode()).hexdigest()[:8]}"
                     if key in seen:
@@ -375,8 +407,9 @@ class SemanticRetriever:
         # Semantic search
         qvec = embed_text(query)
         if qvec:
-            candidates = self.index.search(qvec, limit=limit * 3)
-            for key, sim in candidates:
+            embedding_available = True
+            semantic_candidates = self.index.search(qvec, limit=limit * 3)
+            for key, sim in semantic_candidates:
                 if key in seen:
                     continue
                 insight = insights.get(key)
@@ -420,11 +453,28 @@ class SemanticRetriever:
         # Sort by fusion score
         results.sort(key=lambda r: r.fusion_score, reverse=True)
 
+        # Dedupe by embedding similarity (cheap, prevents near-duplicates)
+        dedupe_sim = float(self.config.get("dedupe_similarity", 0.0) or 0.0)
+        if dedupe_sim > 0:
+            results = self._dedupe_by_embedding(results, dedupe_sim)
+
         # Diversity
         results = self._diversify_mmr(results, lambda_=float(self.config.get("mmr_lambda", 0.5)))
         results = self._cap_by_category(results)
 
-        return results[:limit]
+        final_results = results[:limit]
+
+        self._log_retrieval(
+            context=context,
+            intent=query,
+            semantic_candidates_count=len(semantic_candidates),
+            trigger_hits=len(trigger_matches),
+            results=final_results,
+            embedding_available=embedding_available,
+            elapsed_ms=int((time.time() - start_ts) * 1000),
+        )
+
+        return final_results
 
     def _compute_fusion(self, r: SemanticResult) -> float:
         w_out = float(self.config.get("weight_outcome", 0.3))
@@ -505,6 +555,53 @@ class SemanticRetriever:
             return 0.0
         return len(aw & bw) / max(1, len(aw | bw))
 
+    def _cosine_sim(self, a: List[float], b: List[float]) -> float:
+        if not a or not b:
+            return 0.0
+        dot = 0.0
+        an = 0.0
+        bn = 0.0
+        for x, y in zip(a, b):
+            dot += x * y
+            an += x * x
+            bn += y * y
+        denom = math.sqrt(an) * math.sqrt(bn) or 1.0
+        return dot / denom
+
+    def _dedupe_by_embedding(self, results: List[SemanticResult], threshold: float) -> List[SemanticResult]:
+        if not results or threshold <= 0:
+            return results
+        kept: List[SemanticResult] = []
+        kept_vecs: Dict[str, List[float]] = {}
+        seen_text: set[str] = set()
+        for r in results:
+            text_key = (r.insight_text or "").strip().lower()
+            if text_key and text_key in seen_text:
+                continue
+            rvec = self.index.get(r.insight_key)
+            too_similar = False
+            for s in kept:
+                if not rvec:
+                    sim = self._text_similarity(r.insight_text, s.insight_text)
+                else:
+                    svec = kept_vecs.get(s.insight_key)
+                    if not svec:
+                        svec = self.index.get(s.insight_key)
+                        if svec:
+                            kept_vecs[s.insight_key] = svec
+                    sim = self._cosine_sim(rvec, svec) if svec else self._text_similarity(r.insight_text, s.insight_text)
+                if sim >= threshold:
+                    too_similar = True
+                    break
+            if too_similar:
+                continue
+            kept.append(r)
+            if rvec:
+                kept_vecs[r.insight_key] = rvec
+            if text_key:
+                seen_text.add(text_key)
+        return kept
+
     def _diversify_mmr(self, results: List[SemanticResult], lambda_: float = 0.5) -> List[SemanticResult]:
         selected: List[SemanticResult] = []
         remaining = list(results)
@@ -531,6 +628,53 @@ class SemanticRetriever:
             if counts[cat] <= caps.get(cat, caps.get("default", 2)):
                 capped.append(r)
         return capped
+
+    def _log_retrieval(
+        self,
+        *,
+        context: str,
+        intent: str,
+        semantic_candidates_count: int,
+        trigger_hits: int,
+        results: List[SemanticResult],
+        embedding_available: bool,
+        elapsed_ms: int,
+    ) -> None:
+        if not self.config.get("log_retrievals", True):
+            return
+        try:
+            log_dir = Path.home() / ".spark" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            path = log_dir / "semantic_retrieval.jsonl"
+            payload = {
+                "ts": time.time(),
+                "intent": intent[:200],
+                "context_preview": (context or "")[:200],
+                "semantic_candidates_count": int(semantic_candidates_count),
+                "trigger_hits": int(trigger_hits),
+                "embedding_available": bool(embedding_available),
+                "elapsed_ms": int(elapsed_ms),
+                "final_results": [
+                    {
+                        "key": r.insight_key,
+                        "fusion": round(r.fusion_score, 4),
+                        "sim": round(r.semantic_sim, 4),
+                        "outcome": round(r.outcome_score, 4),
+                        "recency": round(r.recency_score, 4),
+                        "why": r.why,
+                        "source": r.source_type,
+                    }
+                    for r in results
+                ],
+            }
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            log_debug(
+                "semantic",
+                f"intent='{intent[:80]}' candidates={semantic_candidates_count} triggers={trigger_hits} final={len(results)}",
+            )
+        except Exception as e:
+            log_debug("semantic", "log_retrieval failed", e)
 
 
 def _load_config() -> Dict[str, Any]:

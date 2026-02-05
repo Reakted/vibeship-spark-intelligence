@@ -44,6 +44,7 @@ except ImportError:
 ADVISOR_DIR = Path.home() / ".spark" / "advisor"
 ADVICE_LOG = ADVISOR_DIR / "advice_log.jsonl"
 EFFECTIVENESS_FILE = ADVISOR_DIR / "effectiveness.json"
+ADVISOR_METRICS = ADVISOR_DIR / "metrics.json"
 RECENT_ADVICE_LOG = ADVISOR_DIR / "recent_advice.jsonl"
 RECENT_ADVICE_MAX_AGE_S = 1200  # 20 min (was 15 min) - Ralph Loop tuning for better acted-on rate
 RECENT_ADVICE_MAX_LINES = 200
@@ -115,6 +116,70 @@ class SparkAdvisor:
             "by_source": {},
             "by_category": {},
         }
+
+    def _load_metrics(self) -> Dict[str, Any]:
+        if ADVISOR_METRICS.exists():
+            try:
+                return json.loads(ADVISOR_METRICS.read_text())
+            except Exception:
+                pass
+        return {
+            "total_retrievals": 0,
+            "cognitive_retrievals": 0,
+            "cognitive_surface_rate": 0.0,
+            "cognitive_helpful_known": 0,
+            "cognitive_helpful_true": 0,
+            "cognitive_helpful_rate": None,
+        }
+
+    def _save_metrics(self, metrics: Dict[str, Any]) -> None:
+        try:
+            ADVISOR_METRICS.parent.mkdir(parents=True, exist_ok=True)
+            ADVISOR_METRICS.write_text(json.dumps(metrics, indent=2))
+        except Exception:
+            pass
+
+    def _record_cognitive_surface(self, advice_list: List["Advice"]) -> None:
+        try:
+            metrics = self._load_metrics()
+            total = int(metrics.get("total_retrievals", 0)) + 1
+            cognitive_sources = {"cognitive", "semantic", "trigger"}
+            has_cognitive = any(a.source in cognitive_sources for a in advice_list)
+            cognitive = int(metrics.get("cognitive_retrievals", 0)) + (1 if has_cognitive else 0)
+            metrics["total_retrievals"] = total
+            metrics["cognitive_retrievals"] = cognitive
+            metrics["cognitive_surface_rate"] = round(cognitive / max(total, 1), 4)
+            metrics["last_updated"] = datetime.now().isoformat()
+            self._save_metrics(metrics)
+        except Exception:
+            pass
+
+    def _record_cognitive_helpful(self, advice_id: str, was_helpful: Optional[bool]) -> None:
+        if was_helpful is None:
+            return
+        try:
+            entry = self._find_recent_advice_by_id(advice_id)
+            if not entry:
+                return
+            advice_ids = entry.get("advice_ids") or []
+            sources = entry.get("sources") or []
+            idx = advice_ids.index(advice_id) if advice_id in advice_ids else -1
+            source = sources[idx] if 0 <= idx < len(sources) else None
+            if source not in {"cognitive", "semantic", "trigger"}:
+                return
+
+            metrics = self._load_metrics()
+            metrics["cognitive_helpful_known"] = int(metrics.get("cognitive_helpful_known", 0)) + 1
+            if was_helpful is True:
+                metrics["cognitive_helpful_true"] = int(metrics.get("cognitive_helpful_true", 0)) + 1
+            known = max(1, int(metrics.get("cognitive_helpful_known", 0)))
+            metrics["cognitive_helpful_rate"] = round(
+                int(metrics.get("cognitive_helpful_true", 0)) / known, 4
+            )
+            metrics["last_updated"] = datetime.now().isoformat()
+            self._save_metrics(metrics)
+        except Exception:
+            pass
 
     def _save_effectiveness(self):
         """Save effectiveness data with atomic write to prevent race conditions.
@@ -245,7 +310,9 @@ class SparkAdvisor:
             context_parts.append(str(tool_input)[:200])
         if task_context:
             context_parts.append(task_context)
-        context = " ".join(context_parts).lower()
+        context_raw = " ".join(context_parts).strip()
+        context = context_raw.lower()
+        semantic_context = f"{tool_name} {task_context}".strip() if task_context else context_raw
 
         # Check cache
         cache_key = self._cache_key(tool_name, context)
@@ -259,7 +326,7 @@ class SparkAdvisor:
         advice_list.extend(self._get_bank_advice(context))
 
         # 2. Query cognitive insights (semantic + keyword fallback)
-        advice_list.extend(self._get_cognitive_advice(tool_name, context))
+        advice_list.extend(self._get_cognitive_advice(tool_name, context, semantic_context))
 
         # 3. Query Mind if available
         if include_mind and HAS_REQUESTS:
@@ -286,6 +353,7 @@ class SparkAdvisor:
 
         # Log advice given (only for operational use, not sampling)
         if track_retrieval:
+            self._record_cognitive_surface(advice_list)
             self._log_advice(advice_list, tool_name, context)
 
             # Track retrievals in Meta-Ralph for outcome tracking
@@ -308,9 +376,9 @@ class SparkAdvisor:
 
         return advice_list
 
-    def _get_cognitive_advice(self, tool_name: str, context: str) -> List[Advice]:
+    def _get_cognitive_advice(self, tool_name: str, context: str, semantic_context: Optional[str] = None) -> List[Advice]:
         """Get advice from cognitive insights (semantic-first with keyword fallback)."""
-        semantic = self._get_semantic_cognitive_advice(context)
+        semantic = self._get_semantic_cognitive_advice(semantic_context or context)
         keyword = self._get_cognitive_advice_keyword(tool_name, context)
 
         if not semantic:
@@ -890,6 +958,7 @@ class SparkAdvisor:
             self.effectiveness["total_helpful"] += 1
 
         self._save_effectiveness()
+        self._record_cognitive_helpful(advice_id, was_helpful)
 
         # Track outcome in Meta-Ralph
         try:

@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from lib.semantic_retriever import SemanticIndex  # noqa: E402
+from lib.semantic_index import SemanticIndex  # noqa: E402
 from lib.cognitive_learner import get_cognitive_learner  # noqa: E402
 
 

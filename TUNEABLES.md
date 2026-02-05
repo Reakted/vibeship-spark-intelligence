@@ -482,10 +482,12 @@ Semantic retrieval augments Advisor with embeddings + trigger rules. It is
 | `semantic.weight_recency` | **0.2** | Recency boost weight |
 | `semantic.weight_outcome` | **0.3** | Outcome effectiveness boost weight |
 | `semantic.mmr_lambda` | **0.5** | Diversity balance (1.0 = relevance only) |
+| `semantic.dedupe_similarity` | **0.92** | Dedupe near-duplicate results by embedding cosine |
 | `semantic.index_on_write` | **true** | Index embeddings on insight write |
 | `semantic.index_on_read` | **true** | Backfill missing embeddings at retrieval time |
 | `semantic.index_backfill_limit` | **300** | Max insights to backfill per run |
 | `semantic.index_cache_ttl_seconds` | **120** | Cache duration for vector index |
+| `semantic.log_retrievals` | **true** | Log semantic retrieval events to `~/.spark/logs/semantic_retrieval.jsonl` |
 
 Trigger rules (YAML):
 
