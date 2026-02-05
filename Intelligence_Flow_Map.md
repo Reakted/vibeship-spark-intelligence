@@ -5,6 +5,9 @@ Generated: 2026-02-04
 This file provides a high-level visual map of Spark Intelligence data flow.
 For exhaustive tuneables and file interactions, see Intelligence_Flow.md.
 
+Brief overview:
+Spark Intelligence captures events (hooks/adapters/sparkd) into a queue, runs a bridge cycle to extract signals, stores learnings (cognitive insights, memory banks, EIDOS distillations), and surfaces guidance via Advisor and context sync. Outcomes and Meta-Ralph feedback close the loop, while optional semantic retrieval adds intent-based matching on top of embeddings and trigger rules.
+
 ```mermaid
 flowchart LR
   %% ===== Sources =====
