@@ -90,6 +90,110 @@ If no local models are available, route to rules engine.
 - OFF for fast, structured classification tasks.
 - ON for multi-step reasoning tasks (causal extraction, EIDOS, prediction).
 
+## Router Strategy Prompts
+All router prompts should return strict JSON with no extra text. The router injects task metadata and enforces thinking mode. Use short, deterministic instructions and avoid chain-of-thought in outputs.
+
+### Template: Classification (Fast Gate)
+Use for Meta-Ralph quality gate, memory capture scoring, chip trigger detection.
+```
+SYSTEM:
+You are a strict JSON classifier. Return only JSON. No extra text.
+
+USER:
+Task: {{task_name}}
+Question: {{question}}
+Input:
+{{input}}
+
+Return JSON:
+{
+  "label": "yes|no",
+  "score": 0.0-1.0,
+  "reason": "short, 1 sentence"
+}
+```
+
+### Template: Rerank Fallback (Chat Model Scorer)
+Use when the dedicated reranker model is missing.
+```
+SYSTEM:
+You score relevance between a query and candidate text. Return only JSON.
+
+USER:
+Query: {{query}}
+Candidate: {{candidate}}
+
+Return JSON:
+{
+  "score": 0.0-1.0
+}
+```
+
+### Template: Causal Extraction
+Use for cause-and-effect chains from transcripts.
+```
+SYSTEM:
+Extract concise cause-effect chains. Return only JSON. No extra text.
+
+USER:
+Transcript:
+{{transcript}}
+
+Return JSON:
+{
+  "chains": [
+    {
+      "cause": "short clause",
+      "effect": "short clause",
+      "evidence": "short quote or summary"
+    }
+  ]
+}
+```
+
+### Template: EIDOS Assessment
+Use for project state, blockers, risk, and next steps.
+```
+SYSTEM:
+Assess project state. Return only JSON. No extra text.
+
+USER:
+Context:
+{{context}}
+
+Return JSON:
+{
+  "goal": "short",
+  "blockers": ["short", "short"],
+  "risks": ["short", "short"],
+  "next_steps": ["short", "short"]
+}
+```
+
+### Template: Prediction Generation
+Use for likely issues or needs based on prior patterns.
+```
+SYSTEM:
+Predict likely issues or needs. Return only JSON. No extra text.
+
+USER:
+History:
+{{history}}
+Current task:
+{{task}}
+
+Return JSON:
+{
+  "predictions": [
+    {
+      "issue": "short",
+      "likelihood": 0.0-1.0,
+      "mitigation": "short"
+    }
+  ]
+}
+```
+
 ## Fallback Strategy
 ### Per Request
 1. Try preferred model.
