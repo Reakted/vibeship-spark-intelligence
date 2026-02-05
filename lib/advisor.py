@@ -312,7 +312,21 @@ class SparkAdvisor:
             context_parts.append(task_context)
         context_raw = " ".join(context_parts).strip()
         context = context_raw.lower()
-        semantic_context = f"{tool_name} {task_context}".strip() if task_context else context_raw
+
+        # Build semantic context: include key tool_input values so trigger
+        # rules can match against actual commands/paths, not just task_context.
+        _input_hint = ""
+        if tool_input:
+            for _k in ("command", "file_path", "url", "pattern", "query"):
+                if _k in tool_input:
+                    _input_hint = str(tool_input[_k])[:200]
+                    break
+        semantic_parts = [tool_name]
+        if _input_hint:
+            semantic_parts.append(_input_hint)
+        if task_context:
+            semantic_parts.append(task_context)
+        semantic_context = " ".join(semantic_parts).strip() if (task_context or _input_hint) else context_raw
 
         # Check cache
         cache_key = self._cache_key(tool_name, context)
