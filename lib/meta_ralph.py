@@ -222,23 +222,74 @@ class MetaRalph:
         """Ensure data directory exists."""
         self.DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+    def _read_json_safe(self, path: Path) -> Optional[Dict]:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            # Possible concurrent write; retry once.
+            time.sleep(0.05)
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+        except Exception:
+            return None
+
+    def _atomic_write_json(self, path: Path, payload: Dict) -> None:
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)
+
+    def _recompute_totals_from_history(self, history: List[Dict]) -> Dict[str, int]:
+        totals = {
+            "total_roasted": 0,
+            "quality_passed": 0,
+            "primitive_rejected": 0,
+            "duplicates_caught": 0,
+            "refinements_made": 0,
+        }
+        for rec in history or []:
+            result = rec.get("result", {}) if isinstance(rec, dict) else {}
+            verdict = result.get("verdict")
+            totals["total_roasted"] += 1
+            if verdict == "quality":
+                totals["quality_passed"] += 1
+            elif verdict == "primitive":
+                totals["primitive_rejected"] += 1
+            elif verdict == "duplicate":
+                totals["duplicates_caught"] += 1
+            if result.get("refined_version"):
+                totals["refinements_made"] += 1
+        return totals
+
     def _load_state(self):
         """Load persisted state."""
         if self.ROAST_HISTORY_FILE.exists():
             try:
-                data = json.loads(self.ROAST_HISTORY_FILE.read_text())
+                data = self._read_json_safe(self.ROAST_HISTORY_FILE) or {}
                 self.roast_history = data.get("history", [])[-1000:]
                 self.total_roasted = data.get("total_roasted", 0)
                 self.quality_passed = data.get("quality_passed", 0)
                 self.primitive_rejected = data.get("primitive_rejected", 0)
                 self.duplicates_caught = data.get("duplicates_caught", 0)
                 self.refinements_made = data.get("refinements_made", 0)
+                if self.roast_history and self.total_roasted == 0:
+                    totals = self._recompute_totals_from_history(self.roast_history)
+                    self.total_roasted = totals["total_roasted"]
+                    if self.quality_passed == 0:
+                        self.quality_passed = totals["quality_passed"]
+                    if self.primitive_rejected == 0:
+                        self.primitive_rejected = totals["primitive_rejected"]
+                    if self.duplicates_caught == 0:
+                        self.duplicates_caught = totals["duplicates_caught"]
+                    if self.refinements_made == 0:
+                        self.refinements_made = totals["refinements_made"]
             except Exception:
                 pass
 
         if self.OUTCOME_TRACKING_FILE.exists():
             try:
-                data = json.loads(self.OUTCOME_TRACKING_FILE.read_text())
+                data = self._read_json_safe(self.OUTCOME_TRACKING_FILE) or {}
                 for rec_data in data.get("records", []):
                     rec = OutcomeRecord(**rec_data)
                     self.outcome_records[rec.learning_id] = rec
@@ -247,7 +298,7 @@ class MetaRalph:
 
         if self.LEARNINGS_STORE_FILE.exists():
             try:
-                data = json.loads(self.LEARNINGS_STORE_FILE.read_text())
+                data = self._read_json_safe(self.LEARNINGS_STORE_FILE) or {}
                 self.learnings_stored = data.get("learnings", {})
             except Exception:
                 self.learnings_stored = {}
@@ -272,20 +323,55 @@ class MetaRalph:
 
     def _save_state(self):
         """Persist state to disk."""
-        self.ROAST_HISTORY_FILE.write_text(json.dumps({
-            "history": self.roast_history[-1000:],
-            "total_roasted": self.total_roasted,
-            "quality_passed": self.quality_passed,
-            "primitive_rejected": self.primitive_rejected,
-            "duplicates_caught": self.duplicates_caught,
-            "refinements_made": self.refinements_made,
-            "last_updated": datetime.now().isoformat()
-        }, indent=2))
+        history = self.roast_history[-1000:]
+        total_roasted = self.total_roasted
+        quality_passed = self.quality_passed
+        primitive_rejected = self.primitive_rejected
+        duplicates_caught = self.duplicates_caught
+        refinements_made = self.refinements_made
 
-        self.OUTCOME_TRACKING_FILE.write_text(json.dumps({
+        if not history and self.ROAST_HISTORY_FILE.exists():
+            try:
+                data = self._read_json_safe(self.ROAST_HISTORY_FILE) or {}
+                history = data.get("history", [])[-1000:] or history
+                if total_roasted == 0:
+                    total_roasted = data.get("total_roasted", 0)
+                if quality_passed == 0:
+                    quality_passed = data.get("quality_passed", 0)
+                if primitive_rejected == 0:
+                    primitive_rejected = data.get("primitive_rejected", 0)
+                if duplicates_caught == 0:
+                    duplicates_caught = data.get("duplicates_caught", 0)
+                if refinements_made == 0:
+                    refinements_made = data.get("refinements_made", 0)
+                if total_roasted == 0 and history:
+                    totals = self._recompute_totals_from_history(history)
+                    total_roasted = totals["total_roasted"]
+                    if quality_passed == 0:
+                        quality_passed = totals["quality_passed"]
+                    if primitive_rejected == 0:
+                        primitive_rejected = totals["primitive_rejected"]
+                    if duplicates_caught == 0:
+                        duplicates_caught = totals["duplicates_caught"]
+                    if refinements_made == 0:
+                        refinements_made = totals["refinements_made"]
+            except Exception:
+                pass
+
+        self._atomic_write_json(self.ROAST_HISTORY_FILE, {
+            "history": history,
+            "total_roasted": total_roasted,
+            "quality_passed": quality_passed,
+            "primitive_rejected": primitive_rejected,
+            "duplicates_caught": duplicates_caught,
+            "refinements_made": refinements_made,
+            "last_updated": datetime.now().isoformat()
+        })
+
+        self._atomic_write_json(self.OUTCOME_TRACKING_FILE, {
             "records": [r.to_dict() for r in list(self.outcome_records.values())[-500:]],
             "last_updated": datetime.now().isoformat()
-        }, indent=2))
+        })
 
         # Keep last N learnings for dedupe (oldest trimmed)
         if self.learnings_stored:
@@ -294,10 +380,10 @@ class MetaRalph:
             items = items[-5000:]
             self.learnings_stored = {k: v for k, v in items}
 
-        self.LEARNINGS_STORE_FILE.write_text(json.dumps({
+        self._atomic_write_json(self.LEARNINGS_STORE_FILE, {
             "learnings": self.learnings_stored,
             "last_updated": datetime.now().isoformat()
-        }, indent=2))
+        })
 
     # =========================================================================
     # CORE: ROAST A LEARNING
@@ -677,6 +763,8 @@ class MetaRalph:
         Only creates a new record if one doesn't exist.
         This preserves acted_on status from previous retrievals.
         """
+        if not self.roast_history and self.ROAST_HISTORY_FILE.exists():
+            self._load_state()
         if learning_id not in self.outcome_records:
             self.outcome_records[learning_id] = OutcomeRecord(
                 learning_id=learning_id,
@@ -695,6 +783,8 @@ class MetaRalph:
 
     def track_outcome(self, learning_id: str, outcome: str, evidence: str = "", trace_id: Optional[str] = None):
         """Track the outcome of acting on a learning."""
+        if not self.roast_history and self.ROAST_HISTORY_FILE.exists():
+            self._load_state()
         # Create record if it doesn't exist (for tool-level outcomes)
         if learning_id not in self.outcome_records:
             self.outcome_records[learning_id] = OutcomeRecord(

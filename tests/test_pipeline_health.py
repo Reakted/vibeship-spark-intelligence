@@ -705,19 +705,25 @@ def test_event_flow():
     print(" Traces: observe.py -> queue -> bridge -> storage")
     print("=" * 70)
 
-    from lib.queue import quick_capture
+    from lib.queue import quick_capture, EventType
 
     # Create a unique test event
     test_id = f"test_{int(time.time())}"
     test_content = f"[PIPELINE_TEST:{test_id}] Remember this: testing pipeline flow works correctly"
+    session_id = "pipeline_test"
 
     print(f"\n1. Emitting test event: {test_id}")
 
     # Capture to queue
     quick_capture(
-        event_type="user_prompt",
-        payload={"content": test_content, "test_id": test_id},
-        source="pipeline_test"
+        event_type=EventType.USER_PROMPT,
+        session_id=session_id,
+        data={
+            "payload": {"role": "user", "text": test_content},
+            "source": "pipeline_test",
+            "kind": "message",
+        },
+        trace_id=f"pipeline-{test_id}",
     )
 
     print("   Event written to queue")

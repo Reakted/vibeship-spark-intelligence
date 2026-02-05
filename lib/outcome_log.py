@@ -36,6 +36,13 @@ def _ensure_trace_id(row: Dict[str, Any]) -> None:
         trace_id = infer_latest_trace_id(row.get("session_id"))
         if trace_id:
             row["trace_id"] = trace_id
+            return
+    except Exception:
+        pass
+    # Fallback: deterministic trace_id so binding is never empty
+    try:
+        seed = f"{row.get('outcome_id','')}|{row.get('event_type','')}|{row.get('created_at','')}"
+        row["trace_id"] = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:16]
     except Exception:
         return
 

@@ -198,6 +198,23 @@ class EvidenceStore:
         except Exception:
             return False
 
+    def _infer_trace_id_from_step(self, step_id: str) -> Optional[str]:
+        if not step_id:
+            return None
+        try:
+            from .store import get_store
+            store = get_store()
+            with sqlite3.connect(store.db_path) as conn:
+                row = conn.execute(
+                    "SELECT trace_id FROM steps WHERE step_id = ?",
+                    (step_id,),
+                ).fetchone()
+                if row and row[0]:
+                    return str(row[0])
+        except Exception:
+            return None
+        return None
+
     def save(self, evidence: Evidence, compress_threshold: int = 10000) -> str:
         """
         Save evidence to the store.
@@ -206,6 +223,9 @@ class EvidenceStore:
             evidence: Evidence object to save
             compress_threshold: Compress content if larger than this (bytes)
         """
+        if not evidence.trace_id and evidence.step_id:
+            evidence.trace_id = self._infer_trace_id_from_step(evidence.step_id)
+
         content = evidence.content
         compressed = False
         byte_size = len(content.encode('utf-8')) if content else 0
@@ -244,6 +264,49 @@ class EvidenceStore:
             conn.commit()
 
         return evidence.evidence_id
+
+    def backfill_trace_ids(self, steps_db_path: Optional[str] = None) -> Dict[str, int]:
+        """
+        Backfill missing trace_id values on evidence using step trace_ids.
+
+        Returns counts for observability.
+        """
+        step_map: Dict[str, str] = {}
+        if steps_db_path:
+            try:
+                with sqlite3.connect(steps_db_path) as conn:
+                    for row in conn.execute(
+                        "SELECT step_id, trace_id FROM steps WHERE trace_id IS NOT NULL AND trace_id != ''"
+                    ):
+                        step_id, trace_id = row[0], row[1]
+                        if step_id and trace_id and step_id not in step_map:
+                            step_map[step_id] = trace_id
+            except Exception:
+                pass
+
+        updated = 0
+        missing = 0
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT evidence_id, step_id FROM evidence WHERE trace_id IS NULL OR trace_id = ''"
+            ).fetchall()
+            missing = len(rows)
+            for evidence_id, step_id in rows:
+                trace_id = step_map.get(step_id) if step_id else None
+                if not trace_id:
+                    key = f"{evidence_id}|{step_id or ''}"
+                    trace_id = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+                conn.execute(
+                    "UPDATE evidence SET trace_id = ? WHERE evidence_id = ?",
+                    (trace_id, evidence_id),
+                )
+                updated += 1
+            conn.commit()
+
+        return {
+            "evidence_missing": missing,
+            "evidence_updated": updated,
+        }
 
     def get(self, evidence_id: str) -> Optional[Evidence]:
         """Get evidence by ID."""

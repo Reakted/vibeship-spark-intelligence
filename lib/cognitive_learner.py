@@ -719,10 +719,10 @@ class CognitiveLearner:
         if "<task-notification>" in t or "<task-id>" in t or "<output-file>" in t:
             return True
 
-        # 18. Code dumps (>5 lines, majority indented)
+        # 18. Code dumps (>5 lines, majority indented at 2+ spaces)
         lines = t.split("\n")
         if len(lines) > 5:
-            indented = sum(1 for ln in lines if ln.startswith("    ") or ln.startswith("\t"))
+            indented = sum(1 for ln in lines if ln.startswith("  ") or ln.startswith("\t"))
             if indented > len(lines) * 0.5:
                 return True
 
@@ -733,12 +733,44 @@ class CognitiveLearner:
             if m and len(m.group(1)) <= 2:
                 return True
 
-        # 20. Benchmark/intelligence chip artifacts with tool_name field
-        if re.match(r"^\[[\w\s-]+ Intelligence\]", t) and re.search(r"tool_name[=:]", t):
+        # 20. Benchmark/intelligence chip artifacts with diagnostic fields
+        # Catches [XXX Intelligence] + any of: tool_name, file_path, status, command, etc.
+        if re.match(r"^\[[\w\s-]+ Intelligence\]", t):
+            diag_fields = r"(tool_name|file_path|status|command|tool_input|context|content|user_prompt)[=:\s]"
+            if re.search(diag_fields, t):
+                return True
+
+        # 20b. Prompt injection test artifacts
+        if "QUALITY_TEST" in t or "quality_test_" in t:
             return True
 
         # 21. Screenshot / image paths stored as insights
         if re.search(r"\\Screenshots\\|\.png['\"\s]|\.jpg['\"\s]", t):
+            return True
+
+        # 22. Rambling transcribed speech without technical substance
+        # Long text with filler phrases and no actionable keywords
+        if len(t) > 80:
+            filler_phrases = ["you know", "in such a way", "kind of", "sort of",
+                              "make sure that we", "those things", "these things",
+                              "in a way that", "going forward", "i would say",
+                              "by the way", "let's bring", "let's make sure",
+                              "is going to be"]
+            filler_count = sum(1 for fp in filler_phrases if fp in tl)
+            tech_keywords = ["function", "class", "import", "error", "bug", "api",
+                             "database", "auth", "deploy", "test", "config", "server",
+                             "client", "endpoint", "query", "schema", "type"]
+            has_tech = any(kw in tl for kw in tech_keywords)
+            if filler_count >= 2 and not has_tech:
+                return True
+
+        # 23. Workflow execution telemetry from Mind
+        # e.g., "Workflow Execution 1/9/2026, 5:06:01 PM workflow: Successful workflow pattern"
+        if re.match(r"^workflow execution\s+\d{1,2}/\d{1,2}/\d{4}", tl):
+            return True
+
+        # 24. Generic testing/pipeline assertions without context
+        if re.match(r"^testing\s+\w+\s+\w+\s+(works|passes|runs|completed|succeeded)\s*(correctly|successfully)?\.?$", tl):
             return True
 
         return False

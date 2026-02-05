@@ -12,6 +12,7 @@ Tables:
 This is NOT where tool logs go. Tool logs are ephemeral evidence.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -168,6 +169,14 @@ class EidosStore:
         except Exception:
             return False
 
+    def _fallback_trace_id(self, step: Step) -> str:
+        raw = f"{step.step_id}|{step.episode_id}|{step.created_at}"
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+    def _fallback_trace_id_fields(self, step_id: str, episode_id: str, created_at: float) -> str:
+        raw = f"{step_id}|{episode_id}|{created_at}"
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
     # ==================== Episode Operations ====================
 
     def save_episode(self, episode: Episode) -> str:
@@ -266,6 +275,8 @@ class EidosStore:
 
     def save_step(self, step: Step) -> str:
         """Save a step to the database."""
+        if not step.trace_id:
+            step.trace_id = self._fallback_trace_id(step)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO steps (
@@ -301,6 +312,50 @@ class EidosStore:
             ))
             conn.commit()
         return step.step_id
+
+    def backfill_trace_ids(self, evidence_db_path: Optional[str] = None) -> Dict[str, int]:
+        """
+        Backfill missing trace_id values on steps using evidence where possible.
+
+        Returns counts for observability.
+        """
+        evidence_map: Dict[str, str] = {}
+        if evidence_db_path:
+            try:
+                with sqlite3.connect(evidence_db_path) as conn:
+                    for row in conn.execute(
+                        "SELECT step_id, trace_id FROM evidence WHERE trace_id IS NOT NULL AND trace_id != ''"
+                    ):
+                        step_id, trace_id = row[0], row[1]
+                        if step_id and trace_id and step_id not in evidence_map:
+                            evidence_map[step_id] = trace_id
+            except Exception:
+                pass
+
+        updated = 0
+        missing = 0
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT step_id, episode_id, created_at FROM steps WHERE trace_id IS NULL OR trace_id = ''"
+            ).fetchall()
+            missing = len(rows)
+            for step_id, episode_id, created_at in rows:
+                trace_id = evidence_map.get(step_id)
+                if not trace_id:
+                    trace_id = self._fallback_trace_id_fields(
+                        step_id, episode_id or "", created_at or 0.0
+                    )
+                conn.execute(
+                    "UPDATE steps SET trace_id = ? WHERE step_id = ?",
+                    (trace_id, step_id),
+                )
+                updated += 1
+            conn.commit()
+
+        return {
+            "steps_missing": missing,
+            "steps_updated": updated,
+        }
 
     def get_step(self, step_id: str) -> Optional[Step]:
         """Get a step by ID."""

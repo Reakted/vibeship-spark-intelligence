@@ -754,6 +754,10 @@ curl http://localhost:8788/api/stats
 
 | Date | Change | Reason | Outcome |
 |------|--------|--------|---------|
+| 2026-02-05 | Backfilled trace_id bindings + added trace fallbacks | Trace binding check failing across steps/evidence/outcomes | Trace binding now 0 missing |
+| 2026-02-05 | Fixed pipeline flow test queue shape + trace_id | `test_pipeline_health.py flow` broke after queue signature change | End-to-end flow test runs again |
+| 2026-02-05 | Hardened Meta-Ralph state load/save (recompute totals, avoid clobber) | Roast history existed but stats were zeroed by outcome-only writes | Stats now reflect roast history reliably |
+| 2026-02-05 | Tightened semantic retrieval thresholds + category filtering | Retrieval dominated by noisy context/user_understanding hits | Higher precision with category-aware filtering |
 | 2026-02-04 | Built meta_ralph_dashboard.py (port `SPARK_META_RALPH_PORT`, default 8586) | Need dedicated tool for advice quality analysis | Real-time quality metrics from storage |
 | 2026-02-04 | Updated META_RALPH.md architecture sections | Documentation was outdated vs actual code | Docs now match implemented feedback loop |
 | 2026-02-04 | Fixed advisor atomic writes | Race conditions on effectiveness file | Safe read-modify-write pattern |
@@ -811,6 +815,28 @@ curl http://localhost:8788/api/stats
 ---
 
 ## Session History
+
+### Session 12: 2026-02-05 (Meta-Ralph Loop: Retrieval Precision & State Integrity)
+
+**Goal:** Run Meta-Ralph loop end-to-end, restore flow test, and tighten semantic retrieval precision.
+
+**Evidence:**
+- Pipeline health: PASS (bridge fresh); warning remains for promoter
+- Meta-Ralph stats now recomputed from roast history when counters are zero
+- Integration test: 7/8 pass (Mind API unreachable)
+- Utilization: Grade A (stored 326, retrieved 500, acted_on 325, good 301)
+- Semantic retrieval logging now includes category; tuneables tightened to reduce noise
+- Trace binding repaired: steps/evidence/outcomes missing trace_id -> 0
+
+**Files Changed:**
+- `tests/test_pipeline_health.py`
+- `lib/meta_ralph.py`
+- `lib/semantic_retriever.py`
+- `lib/eidos/store.py`
+- `lib/eidos/evidence_store.py`
+- `lib/outcome_log.py`
+- `scripts/trace_backfill.py`
+- `~/.spark/tuneables.json`
 
 ### Session 11: 2026-02-04 (Architecture Verification & Meta-Ralph Dashboard)
 
