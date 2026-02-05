@@ -13,6 +13,7 @@ from datetime import datetime
 
 from lib.cognitive_learner import get_cognitive_learner, CognitiveCategory
 from lib.exposure_tracker import record_exposures
+from lib.queue import _tail_lines
 
 
 CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
@@ -55,6 +56,33 @@ def _hash_insight(chip_id: str, content: str, timestamp: str) -> str:
     return hashlib.sha1(raw).hexdigest()[:12]
 
 
+def _tail_jsonl(path: Path, limit: int) -> List[Dict[str, Any]]:
+    """Read the last N JSONL rows without loading the whole file."""
+    if limit <= 0 or not path.exists():
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for raw in _tail_lines(path, limit):
+        if not raw:
+            continue
+        try:
+            out.append(json.loads(raw))
+        except Exception:
+            continue
+    return out
+
+
+def _count_jsonl_lines(path: Path) -> int:
+    """Count non-empty JSONL rows with streaming IO."""
+    if not path.exists():
+        return 0
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            return sum(1 for line in f if line.strip())
+    except Exception:
+        return 0
+
+
 def load_chip_insights(chip_id: str = None, limit: int = 100) -> List[Dict]:
     """Load chip insights from disk."""
     insights = []
@@ -68,10 +96,8 @@ def load_chip_insights(chip_id: str = None, limit: int = 100) -> List[Dict]:
         if not file_path.exists():
             continue
         try:
-            lines = file_path.read_text().splitlines()
-            for line in reversed(lines[-limit:]):
-                if line.strip():
-                    insights.append(json.loads(line))
+            # Tail-read avoids loading very large chip files into memory each cycle.
+            insights.extend(_tail_jsonl(file_path, limit=limit))
         except Exception:
             continue
 
@@ -200,8 +226,7 @@ def get_merge_stats() -> Dict[str, Any]:
     if CHIP_INSIGHTS_DIR.exists():
         for f in CHIP_INSIGHTS_DIR.glob("*.jsonl"):
             try:
-                lines = f.read_text().splitlines()
-                chip_counts[f.stem] = len(lines)
+                chip_counts[f.stem] = _count_jsonl_lines(f)
             except Exception:
                 continue
 

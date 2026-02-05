@@ -61,17 +61,24 @@ class PatternDetector(ABC):
         self.name = name
         self._session_buffer: Dict[str, List[Dict]] = {}  # session_id -> events
         self._max_buffer_size = 50  # Keep last N events per session
+        self._max_active_sessions = 300  # Prevent unbounded session growth in long-running workers
 
     def _buffer_event(self, session_id: str, event: Dict):
         """Add event to session buffer."""
-        if session_id not in self._session_buffer:
-            self._session_buffer[session_id] = []
-
-        self._session_buffer[session_id].append(event)
+        # LRU-style update: remove and reinsert so active sessions stay newest.
+        buf = self._session_buffer.pop(session_id, [])
+        buf.append(event)
 
         # Trim to max size
-        if len(self._session_buffer[session_id]) > self._max_buffer_size:
-            self._session_buffer[session_id] = self._session_buffer[session_id][-self._max_buffer_size:]
+        if len(buf) > self._max_buffer_size:
+            buf = buf[-self._max_buffer_size:]
+
+        self._session_buffer[session_id] = buf
+
+        # Bound total active sessions to avoid memory growth across many session IDs.
+        while len(self._session_buffer) > self._max_active_sessions:
+            oldest_session_id = next(iter(self._session_buffer))
+            self._session_buffer.pop(oldest_session_id, None)
 
     def _get_buffer(self, session_id: str) -> List[Dict]:
         """Get session buffer."""

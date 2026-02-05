@@ -359,6 +359,8 @@ class MetaRalph:
     def _save_state(self):
         """Persist state to disk."""
         history = self.roast_history[-1000:]
+        # Keep in-memory and on-disk retention aligned.
+        self.roast_history = history
         total_roasted = self.total_roasted
         quality_passed = self.quality_passed
         primitive_rejected = self.primitive_rejected
@@ -402,6 +404,15 @@ class MetaRalph:
             "refinements_made": refinements_made,
             "last_updated": datetime.now().isoformat()
         })
+
+        # Bound in-memory outcome records for long-running processes.
+        if len(self.outcome_records) > 500:
+            recent_records = sorted(
+                self.outcome_records.values(),
+                key=lambda r: r.retrieved_at or "",
+                reverse=True,
+            )[:500]
+            self.outcome_records = {r.learning_id: r for r in recent_records}
 
         self._atomic_write_json(self.OUTCOME_TRACKING_FILE, {
             "records": [r.to_dict() for r in list(self.outcome_records.values())[-500:]],
@@ -779,6 +790,8 @@ class MetaRalph:
             "result": result.to_dict()
         }
         self.roast_history.append(record)
+        if len(self.roast_history) > 1000:
+            self.roast_history = self.roast_history[-1000:]
         self._save_state()
 
     # =========================================================================

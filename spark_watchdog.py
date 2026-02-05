@@ -197,6 +197,22 @@ def _find_pids_by_keywords(keywords: list[str], snapshot: Optional[list[tuple[in
     return matches
 
 
+def _find_pids_by_any_keywords(
+    keyword_sets: list[list[str]],
+    snapshot: Optional[list[tuple[int, str]]] = None,
+) -> list[int]:
+    """Find PIDs matching any keyword set, where each set is AND-matched."""
+    if not keyword_sets:
+        return []
+    if snapshot is None:
+        snapshot = _process_snapshot()
+    matches: set[int] = set()
+    for keywords in keyword_sets:
+        for pid in _find_pids_by_keywords(keywords, snapshot):
+            matches.add(pid)
+    return sorted(matches)
+
+
 def _process_exists(keywords: list[str], snapshot: Optional[list[tuple[int, str]]] = None) -> bool:
     return bool(_find_pids_by_keywords(keywords, snapshot))
 
@@ -389,7 +405,13 @@ def main() -> None:
         sparkd_ok = _http_ok(SPARKD_HEALTH_URL)
         sparkd_fail = _bump_fail("sparkd", sparkd_ok)
         if not sparkd_ok:
-            sparkd_pids = _find_pids_by_keywords(["sparkd.py", "-m sparkd"], snapshot)
+            # Match either invocation style:
+            # - python -m sparkd
+            # - python sparkd.py
+            sparkd_pids = _find_pids_by_any_keywords(
+                [["sparkd.py"], ["-m sparkd"]],
+                snapshot,
+            )
             if sparkd_pids and sparkd_fail < args.fail_threshold:
                 _log(f"sparkd unhealthy (fail {sparkd_fail}/{args.fail_threshold}) but process exists")
             elif not args.no_restart and _can_restart(state, "sparkd"):
@@ -403,7 +425,10 @@ def main() -> None:
         dash_ok = _http_ok(DASHBOARD_STATUS_URL)
         dash_fail = _bump_fail("dashboard", dash_ok)
         if not dash_ok:
-            dash_pids = _find_pids_by_keywords(["dashboard.py", "-m dashboard"], snapshot)
+            dash_pids = _find_pids_by_any_keywords(
+                [["dashboard.py"], ["-m dashboard"]],
+                snapshot,
+            )
             if dash_pids and dash_fail < args.fail_threshold:
                 _log(f"dashboard unhealthy (fail {dash_fail}/{args.fail_threshold}) but process exists")
             elif not args.no_restart and _can_restart(state, "dashboard"):
@@ -468,7 +493,10 @@ def main() -> None:
         bridge_ok = hb_age is not None and hb_age <= args.bridge_stale_s
         bridge_fail = _bump_fail("bridge_worker", bridge_ok)
         if not bridge_ok:
-            bridge_pids = _find_pids_by_keywords(["bridge_worker.py", "-m bridge_worker"], snapshot)
+            bridge_pids = _find_pids_by_any_keywords(
+                [["bridge_worker.py"], ["-m bridge_worker"]],
+                snapshot,
+            )
             if bridge_pids and bridge_fail < args.fail_threshold:
                 _log(f"bridge_worker heartbeat stale (fail {bridge_fail}/{args.fail_threshold}) but process exists")
             elif not args.no_restart and _can_restart(state, "bridge_worker"):

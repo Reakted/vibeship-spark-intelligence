@@ -42,6 +42,7 @@ CONFIDENCE_THRESHOLD = 0.6
 # Patterns log file
 PATTERNS_LOG = Path.home() / ".spark" / "detected_patterns.jsonl"
 DEDUPE_TTL_SECONDS = 600
+MAX_TRACKED_SESSIONS = 300
 
 
 def _normalize_text(text: str) -> str:
@@ -221,6 +222,8 @@ class PatternAggregator:
         if len(self._session_patterns[session_id]) > 100:
             self._session_patterns[session_id] = self._session_patterns[session_id][-100:]
 
+        self._prune_session_state()
+
         # === EIDOS INTEGRATION: Periodic distillation ===
         self._events_since_distillation += 1
         if self._events_since_distillation >= self.DISTILLATION_INTERVAL:
@@ -228,6 +231,17 @@ class PatternAggregator:
             self._events_since_distillation = 0
 
         return all_patterns
+
+    def _prune_session_state(self) -> None:
+        """Bound per-session tracking maps to prevent unbounded growth."""
+        while len(self._session_patterns) > MAX_TRACKED_SESSIONS:
+            oldest_session_id = next(iter(self._session_patterns))
+            self._session_patterns.pop(oldest_session_id, None)
+            self._recent_pattern_keys.pop(oldest_session_id, None)
+
+        while len(self._recent_pattern_keys) > MAX_TRACKED_SESSIONS:
+            oldest_session_id = next(iter(self._recent_pattern_keys))
+            self._recent_pattern_keys.pop(oldest_session_id, None)
 
     def _run_distillation(self):
         """Run distillation on completed Steps to create Distillations."""

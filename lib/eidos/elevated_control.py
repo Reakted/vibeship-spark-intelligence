@@ -201,6 +201,7 @@ class WatcherEngine:
 
     def __init__(self):
         self.alert_history: List[WatcherAlert] = []
+        self._max_alert_history = 2000
 
     def check_all(
         self,
@@ -258,6 +259,8 @@ class WatcherEngine:
             alerts.append(alert)
 
         self.alert_history.extend(alerts)
+        if len(self.alert_history) > self._max_alert_history:
+            self.alert_history = self.alert_history[-self._max_alert_history:]
         return alerts
 
     def _check_repeat_failure(self, episode: Episode, step: Step) -> Optional[WatcherAlert]:
