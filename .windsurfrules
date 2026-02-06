@@ -1,7 +1,7 @@
 <!-- SPARK_LEARNINGS_START -->
 ## Spark Bootstrap
 Auto-loaded high-confidence learnings from ~/.spark/cognitive_insights.json
-Last updated: 2026-02-06T04:55:09
+Last updated: 2026-02-06T04:56:50
 
 - [self_awareness] I struggle with Bash fails with permission_denied -> Fix: Check file permissions or run with ele tasks (48% reliable, 3684 validations)
 - [self_awareness] I struggle with Bash fails with windows_path -> Fix: Use forward slashes (/) instead of backslas tasks (30% reliable, 1825 validations)
