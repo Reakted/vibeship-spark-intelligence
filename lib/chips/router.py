@@ -47,8 +47,10 @@ class ChipRouter:
             return matches
 
         content_lower = content.lower()
-        self._current_event_type = event.get('event_type') or event.get('hook_event') or event.get('type') or event.get('kind')
-        self._current_tool_name = event.get('tool_name') or event.get('tool')
+        raw_event_type = event.get('event_type') or event.get('hook_event') or event.get('type') or event.get('kind')
+        raw_tool_name = event.get('tool_name') or event.get('tool')
+        self._current_event_type = self._normalize_event_type(raw_event_type)
+        self._current_tool_name = str(raw_tool_name or "").strip().lower()
 
         for chip in chips:
             chip_matches = self._match_chip(chip, content_lower, content)
@@ -57,6 +59,25 @@ class ChipRouter:
         # Sort by confidence
         matches.sort(key=lambda m: m.confidence, reverse=True)
         return matches
+
+    def _normalize_event_type(self, event_type: Any) -> str:
+        """Normalize event names across hook naming variants."""
+        normalized = str(event_type or "").strip()
+        if not normalized:
+            return ""
+        lowered = normalized.lower()
+        aliases = {
+            "posttooluse": "post_tool",
+            "posttoolusefailure": "post_tool_failure",
+            "userpromptsubmit": "user_prompt",
+            "pretooluse": "pre_tool",
+            "post_tool_use": "post_tool",
+            "post_tool_use_failure": "post_tool_failure",
+        }
+        compact = lowered.replace("_", "").replace("-", "")
+        if compact in aliases:
+            return aliases[compact]
+        return lowered.replace("-", "_")
 
     def _extract_content(self, event: Dict[str, Any]) -> str:
         """
@@ -67,9 +88,11 @@ class ChipRouter:
         parts = []
 
         # Event type
-        event_type = event.get('event_type') or event.get('hook_event') or event.get('type') or event.get('kind')
+        event_type = self._normalize_event_type(
+            event.get('event_type') or event.get('hook_event') or event.get('type') or event.get('kind')
+        )
         if event_type:
-            parts.append(str(event_type))
+            parts.append(event_type)
 
         # Tool name
         tool = event.get('tool_name') or event.get('tool')
@@ -95,6 +118,14 @@ class ChipRouter:
             elif isinstance(inp, str):
                 parts.append(inp[:2000])
 
+        payload = event.get('payload')
+        if isinstance(payload, dict):
+            for v in payload.values():
+                if isinstance(v, str):
+                    parts.append(v[:2000])
+        elif isinstance(payload, str):
+            parts.append(payload[:2000])
+
         # Output/result (limited)
         output = event.get('output') or event.get('result')
         if output and isinstance(output, str):
@@ -113,12 +144,14 @@ class ChipRouter:
         seen_triggers = set()
 
         # Event-type triggers (high confidence)
-        event_type = (self._current_event_type or "").lower()
+        event_type = self._current_event_type or ""
         for event_trigger in getattr(chip, "trigger_events", []) or []:
-            if event_type and event_type == str(event_trigger).lower():
-                if event_trigger in seen_triggers:
+            trigger_event = self._normalize_event_type(event_trigger)
+            if event_type and event_type == trigger_event:
+                seen_key = f"event:{event_trigger}"
+                if seen_key in seen_triggers:
                     continue
-                seen_triggers.add(event_trigger)
+                seen_triggers.add(seen_key)
                 matches.append(TriggerMatch(
                     chip=chip,
                     observer=None,
@@ -128,7 +161,7 @@ class ChipRouter:
                 ))
 
         # Tool triggers (contextual)
-        tool_name = (self._current_tool_name or "").lower()
+        tool_name = self._current_tool_name or ""
         for tool_trigger in getattr(chip, "trigger_tools", []) or []:
             if isinstance(tool_trigger, dict):
                 name = tool_trigger.get("name", "")
@@ -139,12 +172,13 @@ class ChipRouter:
 
             if tool_name and name.lower() == tool_name:
                 if context_patterns and context_patterns != ["*"]:
-                    if not any(p.lower() in content_lower for p in context_patterns):
+                    if not any(self._match_trigger(p, content_lower) for p in context_patterns):
                         continue
                 trigger_label = f"tool:{name}"
-                if trigger_label in seen_triggers:
+                seen_key = f"tool:{trigger_label}"
+                if seen_key in seen_triggers:
                     continue
-                seen_triggers.add(trigger_label)
+                seen_triggers.add(seen_key)
                 matches.append(TriggerMatch(
                     chip=chip,
                     observer=None,
@@ -156,12 +190,13 @@ class ChipRouter:
         # Match observer-level triggers (higher confidence if observer-specific)
         for observer in chip.observers:
             for trigger in observer.triggers:
-                if trigger in seen_triggers:
+                seen_key = f"observer:{observer.name}:{trigger}"
+                if seen_key in seen_triggers:
                     continue
 
                 match_result = self._match_trigger(trigger, content_lower)
                 if match_result:
-                    seen_triggers.add(trigger)
+                    seen_triggers.add(seen_key)
                     confidence, snippet = match_result
                     # Boost confidence slightly for observer matches
                     matches.append(TriggerMatch(
@@ -175,12 +210,13 @@ class ChipRouter:
         # Match chip-level triggers
         trigger_patterns = getattr(chip, "trigger_patterns", None) or chip.triggers
         for trigger in trigger_patterns:
-            if trigger in seen_triggers:
+            seen_key = f"pattern:{trigger}"
+            if seen_key in seen_triggers:
                 continue
 
             match_result = self._match_trigger(trigger, content_lower)
             if match_result:
-                seen_triggers.add(trigger)
+                seen_triggers.add(seen_key)
                 confidence, snippet = match_result
                 matches.append(TriggerMatch(
                     chip=chip,
@@ -198,10 +234,12 @@ class ChipRouter:
 
         Returns (confidence, snippet) or None.
         """
-        trigger_lower = trigger.lower()
+        trigger_lower = str(trigger or "").strip().lower()
+        if not trigger_lower:
+            return None
 
         # Exact word boundary match (highest confidence)
-        pattern = r'\b' + re.escape(trigger_lower) + r'\b'
+        pattern = r'(?<!\w)' + re.escape(trigger_lower) + r'(?!\w)'
         match = re.search(pattern, content)
         if match:
             start = max(0, match.start() - 20)
@@ -209,8 +247,8 @@ class ChipRouter:
             snippet = content[start:end]
             return (0.95, snippet)
 
-        # Substring match (medium confidence)
-        if trigger_lower in content:
+        # Substring match (medium confidence) for longer triggers only.
+        if len(trigger_lower) >= 4 and trigger_lower in content:
             idx = content.find(trigger_lower)
             start = max(0, idx - 20)
             end = min(len(content), idx + len(trigger_lower) + 20)

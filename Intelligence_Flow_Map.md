@@ -1,13 +1,13 @@
 # Intelligence_Flow_Map.md
 
-Generated: 2026-02-05
+Generated: 2026-02-06
 Navigation hub: `docs/GLOSSARY.md`
 
 This file provides a high-level visual map of Spark Intelligence data flow.
 For exhaustive tuneables and file interactions, see Intelligence_Flow.md.
 
 Brief overview:
-Spark Intelligence captures events (hooks/adapters/sparkd) into a queue, runs a bridge cycle to extract signals, and turns them into learnings (cognitive insights, memory bank entries, EIDOS distillations). Queue consumption uses a logical head pointer with overflow spillover to reduce rewrite contention. Bridge-cycle persistence is batched so cognitive/meta stores flush once per cycle instead of per event. Meta-Ralph quality-gates what is stored, outcomes feed back into reliability, and Advisor/Context Sync surface those learnings before actions. When semantic retrieval is enabled, Advisor extracts intent from the current task, matches triggers, runs embedding search over stored insights, fuses scores (similarity + recency + outcome), and returns the top guidance with "why" so learnings are actually used during real work. This map shows the systems and data stores; Intelligence_Flow.md covers exact configs, tuneables, and file-level interactions.
+Spark Intelligence captures events (hooks/adapters/sparkd) into a queue, runs a bridge cycle to extract signals, and turns them into learnings (cognitive insights, memory bank entries, EIDOS distillations). Queue consumption uses a logical head pointer with overflow spillover to reduce rewrite contention. Bridge-cycle persistence is batched so cognitive/meta stores flush once per cycle instead of per event. Meta-Ralph quality-gates what is stored, outcomes feed back into reliability, and Advisor/Context Sync surface those learnings before actions. Chips now load across single, multifile, and hybrid YAML formats, normalize event aliases, and apply pre-storage scoring gates so low-value telemetry is filtered before it reaches chip memory. High-value chip insights are merged into cognitive memory and also surfaced directly to Advisor and Context Sync. When semantic retrieval is enabled, Advisor extracts intent from the current task, matches triggers, runs embedding search over stored insights, fuses scores (similarity + recency + outcome), and returns the top guidance with "why" so learnings are actually used during real work. This map shows the systems and data stores; Intelligence_Flow.md covers exact configs, tuneables, and file-level interactions.
 
 ```mermaid
 flowchart LR
@@ -53,10 +53,12 @@ flowchart LR
 
     content_learner["lib/content_learner"]
 
+    chips_loader["lib/chips/loader\n(single + multifile + hybrid)"]
     chips_router["lib/chips/router"]
-    chips_runtime["lib/chips/runtime"]
+    chips_runtime["lib/chips/runtime\n(observer execution + pre-store quality gate)"]
     chips_scoring["lib/chips/scoring"]
     chips_evolution["lib/chips/evolution"]
+    chips_store["~/.spark/chip_insights/*.jsonl"]
     chip_merger["lib/chip_merger"]
 
     contradictions["lib/contradiction_detector"]
@@ -149,11 +151,15 @@ flowchart LR
 
   bridge_cycle --> content_learner --> cognitive
 
-  bridge_cycle --> chips_router --> chips_runtime --> chips_scoring --> chips_evolution
-  chips_runtime --> chip_merger --> cognitive
+  bridge_cycle --> chips_loader --> chips_router --> chips_runtime --> chips_scoring --> chips_evolution
+  chips_runtime --> chips_store
+  chips_store --> chip_merger --> cognitive
+  chips_store --> advisor
+  chips_store --> context_sync
 
   bridge_cycle --> context_sync --> output_adapters --> context_files
   context_files --> context_sync
+  promoter --> chip_merger
   promoter --> context_files
 
   hooks_observe --> advisor

@@ -49,6 +49,11 @@ ADVISOR_METRICS = ADVISOR_DIR / "metrics.json"
 RECENT_ADVICE_LOG = ADVISOR_DIR / "recent_advice.jsonl"
 RECENT_ADVICE_MAX_AGE_S = 1200  # 20 min (was 15 min) - Ralph Loop tuning for better acted-on rate
 RECENT_ADVICE_MAX_LINES = 200
+CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
+CHIP_ADVICE_FILE_TAIL = 40
+CHIP_ADVICE_MAX_FILES = 6
+CHIP_ADVICE_LIMIT = 4
+CHIP_ADVICE_MIN_SCORE = 0.7
 
 # Thresholds (Improvement #8: Advisor Integration tuneables)
 # Defaults — overridden by ~/.spark/tuneables.json → "advisor" section at module load.
@@ -216,7 +221,7 @@ class SparkAdvisor:
         try:
             metrics = self._load_metrics()
             total = int(metrics.get("total_retrievals", 0)) + 1
-            cognitive_sources = {"cognitive", "semantic", "trigger"}
+            cognitive_sources = {"cognitive", "semantic", "trigger", "chip"}
             has_cognitive = any(a.source in cognitive_sources for a in advice_list)
             cognitive = int(metrics.get("cognitive_retrievals", 0)) + (1 if has_cognitive else 0)
             metrics["total_retrievals"] = total
@@ -441,6 +446,9 @@ class SparkAdvisor:
 
         # 2. Query cognitive insights (semantic + keyword fallback)
         advice_list.extend(self._get_cognitive_advice(tool_name, context, semantic_context))
+
+        # 2.5. Query chip insights (domain-specific intelligence).
+        advice_list.extend(self._get_chip_advice(context))
 
         # 3. Query Mind if available
         if include_mind and HAS_REQUESTS:
@@ -697,6 +705,73 @@ class SparkAdvisor:
 
         return advice
 
+    def _get_chip_advice(self, context: str) -> List[Advice]:
+        """Get advice from recent high-quality chip insights."""
+        advice: List[Advice] = []
+        if not CHIP_INSIGHTS_DIR.exists():
+            return advice
+
+        candidates: List[Dict[str, Any]] = []
+        files = sorted(
+            CHIP_INSIGHTS_DIR.glob("*.jsonl"),
+            key=lambda p: p.stat().st_mtime if p.exists() else 0,
+            reverse=True,
+        )[:CHIP_ADVICE_MAX_FILES]
+
+        for file_path in files:
+            for raw in _tail_jsonl(file_path, CHIP_ADVICE_FILE_TAIL):
+                try:
+                    row = json.loads(raw)
+                except Exception:
+                    continue
+                quality = (row.get("captured_data") or {}).get("quality_score") or {}
+                score = float(quality.get("total", 0.0) or 0.0)
+                conf = float(row.get("confidence", 0.0) or 0.0)
+                if score < CHIP_ADVICE_MIN_SCORE or conf < MIN_RELIABILITY_FOR_ADVICE:
+                    continue
+                text = str(row.get("content") or "").strip()
+                if not text:
+                    continue
+                if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(text):
+                    continue
+                if self._is_metadata_pattern(text):
+                    continue
+                candidates.append(
+                    {
+                        "chip_id": row.get("chip_id") or file_path.stem,
+                        "observer": row.get("observer_name") or "observer",
+                        "text": text,
+                        "score": score,
+                        "confidence": conf,
+                    }
+                )
+
+        # Rank and dedupe.
+        seen = set()
+        candidates.sort(key=lambda x: (x["score"], x["confidence"]), reverse=True)
+        for item in candidates:
+            key = item["text"][:180].strip().lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            context_match = self._calculate_context_match(item["text"], context)
+            reason = f"{item['chip_id']}/{item['observer']} quality={item['score']:.2f}"
+            advice.append(
+                Advice(
+                    advice_id=self._generate_advice_id(item["text"]),
+                    insight_key=f"chip:{item['chip_id']}:{item['observer']}",
+                    text=f"[Chip:{item['chip_id']}] {item['text'][:220]}",
+                    confidence=min(1.0, max(item["confidence"], item["score"])),
+                    source="chip",
+                    context_match=context_match,
+                    reason=reason,
+                )
+            )
+            if len(advice) >= CHIP_ADVICE_LIMIT:
+                break
+
+        return advice
+
     def _get_surprise_advice(self, tool_name: str, context: str) -> List[Advice]:
         """Get advice from past surprises (unexpected failures)."""
         advice = []
@@ -903,6 +978,7 @@ class SparkAdvisor:
         "cognitive": 1.0,       # Standard cognitive insights
         "mind": 1.0,            # Mind memories
         "bank": 0.9,            # Memory banks (less curated)
+        "chip": 1.15,           # Domain-specific chip intelligence
         "semantic": 1.05,       # Semantic retrieval of cognitive insights
         "trigger": 1.2,         # Explicit trigger rules
     }

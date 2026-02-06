@@ -27,6 +27,7 @@ from dataclasses import dataclass
 
 from .cognitive_learner import CognitiveInsight, CognitiveCategory, get_cognitive_learner
 from .project_profile import load_profile
+from .chip_merger import merge_chip_insights
 
 
 # ============= Configuration =============
@@ -726,12 +727,28 @@ class Promoter:
             print(f"[SPARK] Promotion failed: {e}")
             return False
     
-    def promote_all(self, dry_run: bool = False, include_project: bool = True) -> Dict[str, int]:
+    def promote_all(self, dry_run: bool = False, include_project: bool = True, include_chip_merge: bool = True) -> Dict[str, int]:
         """Promote all eligible insights (filters operational telemetry).
 
         Uses get_promotable_insights() which applies two-track promotion:
         validated track + confidence fast-track.
         """
+        chip_merge_stats = {}
+        if include_chip_merge and not dry_run:
+            try:
+                chip_merge_stats = merge_chip_insights(
+                    min_confidence=max(self.reliability_threshold, 0.7),
+                    min_quality_score=0.7,
+                    limit=50,
+                )
+                if chip_merge_stats.get("merged", 0) > 0:
+                    print(
+                        f"[SPARK] Merged {chip_merge_stats.get('merged', 0)} high-value chip insights "
+                        f"into cognitive pipeline before promotion"
+                    )
+            except Exception as e:
+                print(f"[SPARK] Chip merge pre-promotion failed: {e}")
+
         promotable = self.get_promotable_insights(include_operational=False)
 
         stats = {
@@ -741,6 +758,8 @@ class Promoter:
             "fast_tracked": 0,
             "project_written": 0,
             "project_failed": 0,
+            "chip_merged": int(chip_merge_stats.get("merged", 0) or 0),
+            "chip_processed": int(chip_merge_stats.get("processed", 0) or 0),
         }
 
         if include_project:
@@ -817,7 +836,11 @@ def check_and_promote(
     include_project: bool = True,
 ) -> Dict[str, int]:
     """Check for promotable insights and promote them."""
-    return get_promoter(project_dir).promote_all(dry_run, include_project=include_project)
+    return get_promoter(project_dir).promote_all(
+        dry_run,
+        include_project=include_project,
+        include_chip_merge=True,
+    )
 
 
 def get_promotion_status(project_dir: Optional[Path] = None) -> Dict:

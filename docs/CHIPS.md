@@ -34,6 +34,15 @@ Chips are **YAML specifications** that tell Spark:
 
 Think of chips as **domain experts in a box** - each one knows what matters in its field.
 
+### Supported Chip Formats
+
+Spark supports three chip formats:
+- `single`: one `*.chip.yaml` file
+- `multifile`: `chip.yaml` plus modular `triggers.yaml`, `observers.yaml`, `outcomes.yaml`, etc.
+- `hybrid`: one `*.chip.yaml` with `includes:` to merge modular files
+
+Format preference can be controlled with `SPARK_CHIP_PREFERRED_FORMAT` (default: `multifile`).
+
 ## Quick Start
 
 ```bash
@@ -156,8 +165,8 @@ questions:
 
 Chips can be auto-activated from content matching, or left opt-in:
 
-- `activation: auto` — eligible for auto-activation based on content.
-- `activation: opt_in` — only activates when explicitly enabled.
+- `activation: auto` - eligible for auto-activation based on content.
+- `activation: opt_in` - only activates when explicitly enabled.
 
 ### 1. Triggers
 
@@ -174,6 +183,12 @@ are normalized to runtime event types (`post_tool`, `post_tool_failure`,
 `user_prompt`). Use runtime names in chip triggers; add legacy hook names only
 if your environment emits them directly.
 
+Runtime quality gate:
+- Chip insights are scored before storage.
+- Low-value entries are filtered via `SPARK_CHIP_MIN_SCORE` (default `0.35`).
+- Balanced mode also enforces confidence (`SPARK_CHIP_MIN_CONFIDENCE`, default `0.7`),
+  safety policy checks, and evidence/outcome presence (`SPARK_CHIP_GATE_MODE=balanced`).
+
 ### 2. Observers
 
 Observers capture structured data when triggered:
@@ -184,6 +199,7 @@ observers:
     triggers:
       - "worked because"
       - "fixed by"
+    insight_template: "{pattern} worked because {reason}"
     capture:
       required:
         pattern: What worked
@@ -349,29 +365,29 @@ User Action
 +-------------------+
     |
     v
-+-------------------+
-| Chip Router       |  <- Matches event to chips
-+-------------------+
++---------------------------+
+| Chip Loader               |  <- single/multifile/hybrid
++---------------------------+
     |
     v
-+-------------------+
-| Chip Runner       |  <- Runs observers, captures data
-+-------------------+
++---------------------------+
+| Chip Router               |  <- Normalized event/tool/pattern matching
++---------------------------+
     |
     v
-+-------------------+
-| Pattern Detection |  <- Detects patterns in data
-+-------------------+
++---------------------------+
+| Chip Runtime              |  <- Observer execution + extraction
++---------------------------+
     |
     v
-+-------------------+
-| Outcome Validation|  <- Links outcomes to insights
-+-------------------+
++---------------------------+
+| Chip Scoring Gate         |  <- Filters low-value noise before storage
++---------------------------+
     |
     v
-+-------------------+
-| Cognitive Store   |  <- Stores validated insights
-+-------------------+
++---------------------------+
+| Chip Evolution + Merger   |  <- Trigger quality + cognitive merge
++---------------------------+
 ```
 
 ## Best Practices
@@ -393,22 +409,25 @@ See the `chips/` directory for examples:
 ```
 chips/
   spark-core.chip.yaml     # Built-in coding chip
+  multifile/<chip>/chip.yaml
+  hybrid/<chip>.chip.yaml
   my-custom.chip.yaml      # Your custom chips
 
 lib/chips/
-  loader.py                # YAML parsing, Chip
+  loader.py                # Single/multifile/hybrid parsing
+  schema.py                # Chip validation
   registry.py              # Install/activate tracking
   router.py                # Event-to-chip matching
-  runner.py                # Observer execution
+  runtime.py               # Observer execution + quality gate
+  scoring.py               # Insight scoring
+  evolution.py             # Trigger quality evolution
   store.py                 # Per-chip insight storage
 
 ~/.spark/chips/
-  registry.json            # Installed chips registry
+  chip_registry.json       # Installed chips registry
+  chips/                   # User-installed chip files/bundles
   chip_insights/           # Per-chip data storage
-    spark-core/
-      observations.jsonl
-      insights.json
-      outcomes.jsonl
+    spark-core.jsonl
 ```
 
 ---

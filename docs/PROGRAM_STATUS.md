@@ -11,6 +11,7 @@ This file consolidates status from older roadmap and integration plan docs.
 - Cognitive and Meta-Ralph persistence now support deferred batch flush in bridge cycles.
 - Advisor retrieval includes semantic-first behavior with guarded fallback paths.
 - Chips runtime/store now include rotation safeguards to contain file growth.
+- Chips now support single/multifile/hybrid loading with event normalization and pre-store quality gating.
 - Mind bridge retrieval/sync paths include bounded timeouts and health backoff behavior.
 
 ## Completed Foundations
@@ -25,7 +26,7 @@ This file consolidates status from older roadmap and integration plan docs.
 
 1. Improve distillation yield and measured reuse in real sessions.
 2. Improve advice effectiveness accounting and invariants.
-3. Reduce low-value chip noise before storage.
+3. Improve chip outcome linkage and benchmark acceptance rates.
 4. Raise quality pass rates without over-admitting low-signal entries.
 5. Keep docs and flow references synchronized with runtime behavior.
 

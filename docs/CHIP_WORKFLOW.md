@@ -49,6 +49,7 @@ triggers:
     - "bounce rate"
     - "A/B test"
   events:
+    - pre_tool
     - user_prompt
     - post_tool
     - post_tool_failure
@@ -167,6 +168,7 @@ triggers:
     - "failure phrase 1"
     - "decision phrase 1"
   events:
+    - pre_tool
     - user_prompt
     - post_tool
     - post_tool_failure
@@ -212,6 +214,11 @@ questions:
 ```
 
 ## Testing Your Chip
+
+Format tip:
+- Start with a single-file chip for quick iteration.
+- Move to `multifile` (`chip.yaml` + `triggers.yaml` + `observers.yaml`) once the chip grows.
+- Use `hybrid` when you want one distributable file with `includes:` for modular authoring.
 
 ### 1. Install and Activate
 

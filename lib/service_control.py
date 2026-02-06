@@ -371,7 +371,6 @@ def service_status(bridge_stale_s: int = 90) -> dict[str, dict]:
         pulse_ok
         or _pid_matches(pulse_pid, pulse_keys, snapshot)
         or _any_process_matches(pulse_keys, snapshot)
-        or _pid_alive_fallback(pulse_pid, snapshot)
     )
     meta_running = (
         meta_ok

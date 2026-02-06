@@ -1,16 +1,21 @@
 """
 Chip Loader - Parse chip YAML files into usable objects.
 
-This was the first missing piece: we had beautiful YAML specs
-but no code to read them.
+Supports:
+- Single file chips (`*.chip.yaml`)
+- Multi-file chips (`<dir>/chip.yaml` + modular components)
+- Hybrid chips (`*.chip.yaml` with `includes:`)
 """
 
-import os
-import yaml
 import logging
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+import os
+import re
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import yaml
 
 from .schema import validate_chip_spec
 
@@ -19,21 +24,58 @@ log = logging.getLogger("spark.chips")
 # Default chips directory (relative to this package)
 CHIPS_DIR = Path(__file__).parent.parent.parent / "chips"
 
+MULTIFILE_COMPONENTS = (
+    "triggers.yaml",
+    "observers.yaml",
+    "outcomes.yaml",
+    "questions.yaml",
+    "learners.yaml",
+    "evolution.yaml",
+    "context.yaml",
+)
+
 
 @dataclass
 class ChipObserver:
     """An observer that captures domain-specific data."""
+
     name: str
     description: str
     triggers: List[str]
     capture_required: Dict[str, str] = field(default_factory=dict)
     capture_optional: Dict[str, str] = field(default_factory=dict)
     extraction: List[Dict[str, Any]] = field(default_factory=list)
+    insight_template: str = ""
+
+
+@dataclass
+class LoadMetrics:
+    """Loading metrics for diagnostics and benchmark comparisons."""
+
+    format_type: str = "single"
+    load_time_ms: float = 0.0
+    file_count: int = 0
+    total_bytes: int = 0
+    merge_operations: int = 0
+    validation_errors: List[str] = field(default_factory=list)
+    parse_success: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "format_type": self.format_type,
+            "load_time_ms": self.load_time_ms,
+            "file_count": self.file_count,
+            "total_bytes": self.total_bytes,
+            "merge_operations": self.merge_operations,
+            "validation_errors": list(self.validation_errors),
+            "parse_success": self.parse_success,
+        }
 
 
 @dataclass
 class Chip:
     """A loaded chip definition."""
+
     id: str
     name: str
     version: str
@@ -50,25 +92,59 @@ class Chip:
     trigger_events: List[str] = field(default_factory=list)
     trigger_tools: List[Dict[str, Any]] = field(default_factory=list)
     activation: str = "auto"
+    load_format: str = "single"
     source_path: Optional[Path] = None
     raw_yaml: Dict[str, Any] = field(default_factory=dict)
+    load_metrics: Dict[str, Any] = field(default_factory=dict)
+    _compiled_pattern_triggers: Dict[str, re.Pattern] = field(
+        default_factory=dict, repr=False, compare=False
+    )
+
+    def __post_init__(self):
+        self._compiled_pattern_triggers = {}
+        for trigger in self.trigger_patterns:
+            trigger_str = str(trigger or "").strip().lower()
+            if not trigger_str:
+                continue
+            try:
+                self._compiled_pattern_triggers[trigger_str] = re.compile(
+                    r"(?<!\w)" + re.escape(trigger_str) + r"(?!\w)",
+                    re.IGNORECASE,
+                )
+            except re.error:
+                continue
+
+    def _matches_trigger(self, trigger: str, content_lower: str) -> bool:
+        trigger_lower = str(trigger or "").strip().lower()
+        if not trigger_lower:
+            return False
+
+        pattern = self._compiled_pattern_triggers.get(trigger_lower)
+        if pattern and pattern.search(content_lower):
+            return True
+
+        # Allow partial matching for longer phrases when boundary match fails.
+        if len(trigger_lower) >= 4 and trigger_lower in content_lower:
+            return True
+
+        return False
 
     def matches_content(self, content: str) -> List[str]:
         """Check which pattern triggers match the content (exclude event triggers)."""
-        content_lower = content.lower()
-        matched = []
+        content_lower = (content or "").lower()
+        matched: List[str] = []
         for trigger in self.trigger_patterns:
-            if trigger.lower() in content_lower:
+            if self._matches_trigger(trigger, content_lower):
                 matched.append(trigger)
         return matched
 
     def get_matching_observers(self, content: str) -> List[ChipObserver]:
         """Get observers whose triggers match the content."""
-        content_lower = content.lower()
-        matched = []
+        content_lower = (content or "").lower()
+        matched: List[ChipObserver] = []
         for obs in self.observers:
             for trigger in obs.triggers:
-                if trigger.lower() in content_lower:
+                if self._matches_trigger(trigger, content_lower):
                     matched.append(obs)
                     break
         return matched
@@ -77,124 +153,288 @@ class Chip:
 class ChipLoader:
     """Loads chip definitions from YAML files."""
 
-    def __init__(self, chips_dir: Path = None):
-        self.chips_dir = chips_dir or CHIPS_DIR
+    def __init__(self, chips_dir: Path = None, preferred_format: Optional[str] = None):
+        self.chips_dir = Path(chips_dir or CHIPS_DIR)
         self._cache: Dict[str, Chip] = {}
+        self._metrics: Dict[str, LoadMetrics] = {}
+        preferred = (preferred_format or os.getenv("SPARK_CHIP_PREFERRED_FORMAT", "multifile")).lower()
+        self.preferred_format = preferred if preferred in {"single", "multifile", "hybrid"} else "multifile"
+
+    def get_metrics(self, chip_id: str) -> Optional[LoadMetrics]:
+        """Get load metrics for a chip, if available."""
+        return self._metrics.get(chip_id)
+
+    def _format_priority(self, format_type: str) -> int:
+        order = [self.preferred_format] + [
+            fmt for fmt in ("single", "multifile", "hybrid") if fmt != self.preferred_format
+        ]
+        return len(order) - order.index(format_type) if format_type in order else 0
+
+    def _read_yaml_with_metrics(self, path: Path, metrics: LoadMetrics) -> Any:
+        content = path.read_text(encoding="utf-8")
+        metrics.file_count += 1
+        metrics.total_bytes += len(content.encode("utf-8"))
+        return yaml.safe_load(content)
+
+    def _deep_merge(self, base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+        """Deep merge two dictionaries, with overlay taking precedence."""
+        result = dict(base)
+        for key, value in overlay.items():
+            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                result[key] = self._deep_merge(result[key], value)
+            elif key in result and isinstance(result[key], list) and isinstance(value, list):
+                result[key] = result[key] + value
+            else:
+                result[key] = value
+        return result
+
+    def _is_hybrid(self, raw: Any) -> bool:
+        return isinstance(raw, dict) and "includes" in raw
+
+    def _load_multifile(self, dir_path: Path, metrics: LoadMetrics) -> Dict[str, Any]:
+        metrics.format_type = "multifile"
+        chip_file = dir_path / "chip.yaml"
+        if not chip_file.exists():
+            raise FileNotFoundError(f"Missing chip.yaml in {dir_path}")
+
+        raw = self._read_yaml_with_metrics(chip_file, metrics) or {}
+        if not isinstance(raw, dict):
+            raise ValueError(f"Invalid chip.yaml format in {dir_path}")
+
+        for component_name in MULTIFILE_COMPONENTS:
+            component_path = dir_path / component_name
+            if not component_path.exists():
+                continue
+            component_data = self._read_yaml_with_metrics(component_path, metrics) or {}
+            if isinstance(component_data, dict):
+                raw = self._deep_merge(raw, component_data)
+                metrics.merge_operations += 1
+
+        return raw
+
+    def _load_hybrid(self, file_path: Path, raw: Dict[str, Any], metrics: LoadMetrics) -> Dict[str, Any]:
+        metrics.format_type = "hybrid"
+        merged = dict(raw)
+        includes = merged.pop("includes", [])
+        if not isinstance(includes, list):
+            raise ValueError(f"Invalid includes format in {file_path}: expected list")
+
+        for include_item in includes:
+            include_path = file_path.parent / str(include_item)
+            if not include_path.exists():
+                metrics.validation_errors.append(f"missing include: {include_item}")
+                continue
+            include_data = self._read_yaml_with_metrics(include_path, metrics) or {}
+            if isinstance(include_data, dict):
+                merged = self._deep_merge(merged, include_data)
+                metrics.merge_operations += 1
+
+        return merged
+
+    def _load_raw_chip_data(self, path: Path) -> Tuple[Dict[str, Any], Path, LoadMetrics]:
+        start = time.perf_counter()
+        metrics = LoadMetrics()
+        resolved_path = Path(path)
+
+        try:
+            if resolved_path.is_dir():
+                raw_data = self._load_multifile(resolved_path, metrics)
+                source_path = resolved_path / "chip.yaml"
+            else:
+                raw_data = self._read_yaml_with_metrics(resolved_path, metrics)
+                if self._is_hybrid(raw_data):
+                    raw_data = self._load_hybrid(resolved_path, raw_data, metrics)
+                else:
+                    metrics.format_type = "single"
+                source_path = resolved_path
+
+            if not isinstance(raw_data, dict):
+                raise ValueError(f"Invalid chip payload in {resolved_path}")
+
+            metrics.parse_success = True
+            return raw_data, source_path, metrics
+        finally:
+            metrics.load_time_ms = (time.perf_counter() - start) * 1000.0
 
     def load_chip(self, path: Path) -> Optional[Chip]:
-        """Load a chip from a YAML file."""
+        """Load a chip from supported formats (single, multifile, hybrid)."""
+        path = Path(path)
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
+            data, source_path, metrics = self._load_raw_chip_data(path)
+        except Exception as e:
+            log.error(f"Failed to load chip {path}: {e}")
+            return None
 
-            if not data:
-                return None
-
-            # Validate spec (warn-only)
+        try:
+            # Validate spec (warn-only by default)
             spec_for_validation = data if isinstance(data, dict) and "chip" in data else {"chip": data}
             errors = validate_chip_spec(spec_for_validation)
             if errors:
                 validation_mode = os.getenv("SPARK_CHIP_SCHEMA_VALIDATION", "warn").strip().lower()
                 if validation_mode in ("block", "strict", "error"):
-                    log.error(f"Chip spec validation failed for {path}: {errors}")
+                    log.error(f"Chip spec validation failed for {source_path}: {errors}")
                     return None
-                log.warning(f"Chip spec validation failed for {path}: {errors}")
+                log.warning(f"Chip spec validation failed for {source_path}: {errors}")
 
             # Handle nested 'chip' key
-            chip_data = data.get('chip', data)
+            chip_data = data.get("chip", data)
 
             # Parse triggers from multiple sources
             trigger_patterns, trigger_events, trigger_tools = self._parse_triggers(data)
 
             # Parse observers
-            observers = self._parse_observers(data.get('observers', []))
+            observers = self._parse_observers(data.get("observers", []))
 
             # Add observer triggers to chip triggers
             observer_triggers: List[str] = []
             for obs in observers:
                 observer_triggers.extend(obs.triggers)
 
-            trigger_patterns = list(set(trigger_patterns + observer_triggers))
-            triggers = list(set(trigger_patterns + trigger_events))  # Dedupe
+            trigger_patterns = list(dict.fromkeys(trigger_patterns + observer_triggers))
+            triggers = list(dict.fromkeys(trigger_patterns + trigger_events))
 
             # Parse outcomes
-            outcomes = data.get('outcomes', {})
+            outcomes = data.get("outcomes", {})
+            if not isinstance(outcomes, dict):
+                outcomes = {}
+
+            default_id = chip_data.get("id")
+            if not default_id:
+                default_id = source_path.parent.name if source_path.name == "chip.yaml" else source_path.stem
+                default_id = str(default_id).replace(".chip", "")
 
             chip = Chip(
-                id=chip_data.get('id', path.stem.replace('.chip', '')),
-                name=chip_data.get('name', chip_data.get('id', 'Unknown')),
-                version=chip_data.get('version', '0.1.0'),
-                description=chip_data.get('description', ''),
-                domains=chip_data.get('domains', []),
-                activation=chip_data.get('activation', 'auto'),
+                id=default_id,
+                name=chip_data.get("name", chip_data.get("id", "Unknown")),
+                version=chip_data.get("version", "0.1.0"),
+                description=chip_data.get("description", ""),
+                domains=chip_data.get("domains", []),
+                activation=chip_data.get("activation", "auto"),
                 triggers=triggers,
                 trigger_patterns=trigger_patterns,
                 trigger_events=trigger_events,
                 trigger_tools=trigger_tools,
                 observers=observers,
-                learners=data.get('learners', []),
-                outcomes_positive=outcomes.get('positive', []),
-                outcomes_negative=outcomes.get('negative', []),
-                outcomes_neutral=outcomes.get('neutral', []),
-                questions=data.get('questions', []),
-                source_path=path,
-                raw_yaml=data
+                learners=data.get("learners", []),
+                outcomes_positive=outcomes.get("positive", []),
+                outcomes_negative=outcomes.get("negative", []),
+                outcomes_neutral=outcomes.get("neutral", []),
+                questions=data.get("questions", []),
+                load_format=metrics.format_type,
+                source_path=source_path,
+                raw_yaml=data,
+                load_metrics=metrics.to_dict(),
             )
 
             self._cache[chip.id] = chip
-            log.info(f"Loaded chip: {chip.id} with {len(triggers)} triggers, {len(observers)} observers")
+            self._metrics[chip.id] = metrics
+            log.info(
+                "Loaded chip: %s (%s) with %d triggers, %d observers in %.2fms",
+                chip.id,
+                chip.load_format,
+                len(triggers),
+                len(observers),
+                metrics.load_time_ms,
+            )
             return chip
-
         except Exception as e:
-            log.error(f"Failed to load chip {path}: {e}")
+            log.error(f"Failed to parse chip {path}: {e}")
             return None
 
-    def _parse_triggers(self, data: Dict) -> tuple:
+    def _parse_triggers(self, data: Dict[str, Any]) -> Tuple[List[str], List[str], List[Dict[str, Any]]]:
         """Parse triggers from chip data."""
         patterns: List[str] = []
         events: List[str] = []
         tools: List[Dict[str, Any]] = []
-        triggers_data = data.get('triggers', {})
+        triggers_data = data.get("triggers", {})
 
         if isinstance(triggers_data, dict):
-            patterns.extend(triggers_data.get('patterns', []) or [])
-            events.extend(triggers_data.get('events', []) or [])
-            tools.extend(triggers_data.get('tools', []) or [])
+            patterns.extend([str(p) for p in (triggers_data.get("patterns", []) or []) if p is not None])
+            events.extend([str(e) for e in (triggers_data.get("events", []) or []) if e is not None])
+            raw_tools = triggers_data.get("tools", []) or []
+            for tool in raw_tools:
+                if isinstance(tool, dict):
+                    tools.append(tool)
+                elif tool:
+                    tools.append({"name": str(tool), "context_contains": ["*"]})
         elif isinstance(triggers_data, list):
-            patterns = triggers_data
+            patterns = [str(p) for p in triggers_data if p is not None]
 
         return patterns, events, tools
 
-    def _parse_observers(self, observers_data: List) -> List[ChipObserver]:
+    def _parse_observers(self, observers_data: List[Any]) -> List[ChipObserver]:
         """Parse observer definitions."""
-        observers = []
-        for obs in observers_data:
-            capture = obs.get('capture', {})
-            observers.append(ChipObserver(
-                name=obs.get('name', ''),
-                description=obs.get('description', ''),
-                triggers=obs.get('triggers', []),
-                capture_required=capture.get('required', {}),
-                capture_optional=capture.get('optional', {}),
-                extraction=obs.get('extraction', []) or []
-            ))
+        observers: List[ChipObserver] = []
+        for obs in observers_data or []:
+            if not isinstance(obs, dict):
+                continue
+            capture = obs.get("capture", {})
+            capture = capture if isinstance(capture, dict) else {}
+            required = capture.get("required", {})
+            optional = capture.get("optional", {})
+            observers.append(
+                ChipObserver(
+                    name=str(obs.get("name", "")),
+                    description=str(obs.get("description", "")),
+                    triggers=[str(t) for t in (obs.get("triggers", []) or []) if t is not None],
+                    capture_required=required if isinstance(required, dict) else {},
+                    capture_optional=optional if isinstance(optional, dict) else {},
+                    extraction=obs.get("extraction", []) or [],
+                    insight_template=str(obs.get("insight_template", "") or ""),
+                )
+            )
         return observers
+
+    def _discover_candidates(self) -> List[Tuple[str, Path]]:
+        """Discover all chip candidate paths across supported formats."""
+        candidates: List[Tuple[str, Path]] = []
+        if not self.chips_dir.exists():
+            return candidates
+
+        # Single file chips in root.
+        for path in sorted(self.chips_dir.glob("*.chip.yaml")):
+            candidates.append(("single", path))
+
+        # Multi-file chips: chips/multifile/<chip>/chip.yaml
+        multifile_root = self.chips_dir / "multifile"
+        if multifile_root.exists() and multifile_root.is_dir():
+            for path in sorted(multifile_root.iterdir()):
+                if path.is_dir() and (path / "chip.yaml").exists():
+                    candidates.append(("multifile", path))
+
+        # Hybrid chips: chips/hybrid/*.chip.yaml
+        hybrid_root = self.chips_dir / "hybrid"
+        if hybrid_root.exists() and hybrid_root.is_dir():
+            for path in sorted(hybrid_root.glob("*.chip.yaml")):
+                candidates.append(("hybrid", path))
+
+        return candidates
 
     def discover_chips(self) -> List[Chip]:
         """Discover all chips in the chips directory."""
-        chips = []
-
         if not self.chips_dir.exists():
             log.warning(f"Chips directory not found: {self.chips_dir}")
-            return chips
+            return []
 
-        # Load single-file chips
-        for path in self.chips_dir.glob("*.chip.yaml"):
+        selected: Dict[str, Tuple[Chip, int]] = {}
+        for format_type, path in self._discover_candidates():
             chip = self.load_chip(path)
-            if chip:
-                chips.append(chip)
+            if not chip:
+                continue
 
-        log.info(f"Discovered {len(chips)} chips")
+            priority = self._format_priority(format_type)
+            existing = selected.get(chip.id)
+            if existing and existing[1] > priority:
+                log.info(
+                    "Skipping chip variant %s (%s) in favor of higher-priority loaded format",
+                    chip.id,
+                    format_type,
+                )
+                continue
+            selected[chip.id] = (chip, priority)
+
+        chips = [entry[0] for entry in selected.values()]
+        log.info("Discovered %d chips", len(chips))
         return chips
 
     def get_chip(self, chip_id: str) -> Optional[Chip]:
@@ -209,18 +449,12 @@ class ChipLoader:
         """
         Get chips that are active for the given context.
 
-        Improvement #10: Chips Auto-Activation
-
-        Args:
-            context: Text context to match against chip triggers
-            threshold: Activation threshold (0-1). If None, uses strategist default.
-
-        Returns:
-            List of activated chips, sorted by match strength
+        Improvement #10: Chips Auto-Activation.
         """
         if threshold is None:
             try:
                 from ..metalearning.strategist import get_strategist
+
                 threshold = get_strategist().strategy.auto_activate_threshold
             except Exception:
                 threshold = 0.5  # Fallback
@@ -229,36 +463,17 @@ class ChipLoader:
             self.discover_chips()
 
         if not context:
-            # Return all auto-activation chips
             return [c for c in self._cache.values() if c.activation == "auto"]
 
-        context_lower = context.lower()
-        active_chips = []
-
+        active_chips: List[Tuple[Chip, float, int]] = []
         for chip in self._cache.values():
-            # Allow both auto AND opt_in chips to activate on context match
-            # This is intelligent auto-activation: opt_in chips activate when
-            # their triggers match the content (Improvement #10)
-
-            # Calculate match score
-            match_count = 0
-            for trigger in chip.trigger_patterns:
-                if trigger.lower() in context_lower:
-                    match_count += 1
-
-            # Normalize score
-            if chip.trigger_patterns:
-                match_score = match_count / len(chip.trigger_patterns)
-            else:
-                match_score = 0
-
-            # Check if above threshold (or has any match)
+            match_count = len(chip.matches_content(context))
+            trigger_count = len(chip.trigger_patterns)
+            match_score = (match_count / trigger_count) if trigger_count else 0.0
             if match_score >= threshold or match_count > 0:
                 active_chips.append((chip, match_score, match_count))
 
-        # Sort by match score
         active_chips.sort(key=lambda x: (x[1], x[2]), reverse=True)
-
         return [c[0] for c in active_chips]
 
 
@@ -281,12 +496,5 @@ def get_active_chips(context: str = "", threshold: float = None) -> List[Chip]:
     Get chips that are active for the given context.
 
     Convenience function for Improvement #10: Chips Auto-Activation.
-
-    Args:
-        context: Text context to match against chip triggers
-        threshold: Activation threshold (0-1). If None, uses strategist default (0.5).
-
-    Returns:
-        List of activated chips, sorted by match strength
     """
     return get_chip_loader().get_active_chips(context, threshold)

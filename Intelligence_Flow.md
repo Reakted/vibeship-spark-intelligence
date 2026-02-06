@@ -1,6 +1,6 @@
 # Intelligence_Flow.md
 
-Generated: 2026-02-05
+Generated: 2026-02-06
 Navigation hub: `docs/GLOSSARY.md`
 Repository: vibeship-spark-intelligence
 Scope:
@@ -72,8 +72,10 @@ Dashboards and ops:
 1) lib.bridge.update_spark_context builds a live context pack (insights, warnings, advice, skills, taste, outcomes) and writes SPARK_CONTEXT.md.
 2) lib.context_sync selects high-confidence insights and writes live context to output adapters (clawdbot, cursor, windsurf, claude_code).
    - context_sync can include promoted lines already present in CLAUDE.md / AGENTS.md / TOOLS.md / SOUL.md.
+   - context_sync also injects recent high-quality chip highlights from ~/.spark/chip_insights.
    - context_sync does not sync to Mind (see 2.8).
 3) lib.promoter is a separate, manual step (spark promote) that writes durable learnings into CLAUDE.md / AGENTS.md / TOOLS.md / SOUL.md.
+   - promoter can run chip_merger first so high-quality chip insights enter cognitive promotion flow.
 
 ### 2.4 Memory capture + cognitive learning
 1) lib.memory_capture scans user messages for memory triggers.
@@ -106,7 +108,7 @@ Dashboards and ops:
 5) lib.exposure_tracker records exposure timing for prediction evaluation.
 
 ### 2.6.1 Advisor retrieval + Meta-Ralph feedback loop
-1) PreToolUse: hooks/observe.py calls lib.advisor.advise_on_tool for retrieval (cognitive, banks, mind, EIDOS, aha, skills).
+1) PreToolUse: hooks/observe.py calls lib.advisor.advise_on_tool for retrieval (cognitive, banks, chips, mind, EIDOS, aha, skills).
 2) Advisor logs retrievals and notifies Meta-Ralph via track_retrieval.
 3) PostToolUse: hooks/observe.py and lib.bridge_cycle.report_outcome call back into advisor.
 4) Meta-Ralph records outcomes and applies them back to cognitive (apply_outcome).
@@ -126,12 +128,20 @@ Dashboards and ops:
 4) Outcomes feed back into Meta-Ralph and cognitive reliability so future advice is prioritized by what actually helped.
 
 ### 2.7 Chips pipeline (domain intelligence)
-1) lib.chips.router detects triggers in events.
-2) lib.chips.runtime runs observers/learners; writes chip insights under ~/.spark/chip_insights.
-   - chip runtime/store apply size-based JSONL rotation to prevent unbounded chip insight growth.
-3) lib.chips.scoring scores value and promotion tiers.
-4) lib.chips.evolution updates trigger stats and can create provisional chips.
-5) lib.chip_merger merges chip insights into cognitive categories.
+1) lib.chips.loader discovers chips across formats:
+   - single file (`chips/*.chip.yaml`)
+   - multifile bundles (`chips/multifile/<chip>/chip.yaml` + components)
+   - hybrid specs (`chips/hybrid/*.chip.yaml` + includes)
+2) lib.chips.router normalizes event aliases (`PostToolUse` -> `post_tool`, etc.) and matches event/tool/pattern triggers.
+3) lib.chips.runtime runs observers/learners and applies quality gates before storage.
+   - low-value/primitive insights are filtered by score before write
+   - balanced gate enforces confidence + safety + evidence/outcome checks
+   - chip-level fallback matches are suppressed when observer matches exist
+   - chip runtime/store apply size-based JSONL rotation to prevent unbounded chip insight growth
+4) lib.chips.scoring computes cognitive value and promotion tier.
+5) lib.chips.evolution records trigger quality and can deprecate/add triggers or suggest provisional chips.
+6) lib.chip_merger merges accepted chip insights into cognitive categories.
+   - unknown chip IDs use domain/content fallback category inference
 
 ### 2.8 Mind retrieval + manual sync
 1) lib.mind_bridge retrieves from mind_server.py (keyword + optional FTS, RRF + salience).
@@ -207,6 +217,7 @@ Chips:
 - ~/.spark/chip_evolution.yaml
 - ~/.spark/provisional_chips/
 - ~/.spark/chip_merge_state.json
+- ~/.spark/chips/ (user-installed chips, including multifile bundles)
 
 Skills + advisor + sync:
 - ~/.spark/skills_index.json
@@ -282,8 +293,9 @@ EIDOS control and budgets:
 
 Cognitive learning and promotion:
 - cognitive_learner half-lives by category (see auto index), max_age_days=365, min_effective=0.2
-- promoter DEFAULT_PROMOTION_THRESHOLD=0.7, DEFAULT_MIN_VALIDATIONS=3
+- promoter DEFAULT_PROMOTION_THRESHOLD=0.65, DEFAULT_MIN_VALIDATIONS=2, DEFAULT_CONFIDENCE_FLOOR=0.90
 - context_sync DEFAULT_MIN_RELIABILITY=0.7, DEFAULT_MIN_VALIDATIONS=3, DEFAULT_MAX_ITEMS=12, DEFAULT_MAX_PROMOTED=6
+  - context_sync also injects recent high-quality chip highlights
 
 Advisor / skills:
 - advisor MIN_RELIABILITY_FOR_ADVICE=0.5, MIN_VALIDATIONS_FOR_STRONG_ADVICE=2, MAX_ADVICE_ITEMS=8, ADVICE_CACHE_TTL_SECONDS=120
@@ -307,8 +319,12 @@ Chips:
 - chip scoring weights: cognitive_value 0.30, outcome_linkage 0.20, uniqueness 0.15, actionability 0.15, transferability 0.10, domain_relevance 0.10
 - evolution thresholds: deprecate triggers when matches>=10 and value_ratio<0.2; provisional chip rules (see auto index)
 - runtime insight limit default 50
+- runtime quality gate: SPARK_CHIP_MIN_SCORE (default 0.35)
+- runtime confidence gate: SPARK_CHIP_MIN_CONFIDENCE (default 0.7)
+- runtime gate mode: SPARK_CHIP_GATE_MODE (default balanced)
 - runtime/store rotate JSONL files at size thresholds (runtime 10MB cap, observations 5MB cap)
 - loader env SPARK_CHIP_SCHEMA_VALIDATION=warn|block
+- loader preference env SPARK_CHIP_PREFERRED_FORMAT=single|multifile|hybrid (default multifile)
 
 Outcomes + prediction:
 - prediction_loop: prediction max age 6h, project prediction max age 14 days, match sim threshold 0.72
@@ -348,6 +364,10 @@ Logging:
 
 Chips:
 - SPARK_CHIP_SCHEMA_VALIDATION (warn|block)
+- SPARK_CHIP_MIN_SCORE (default 0.35, discard lower-scored chip insights)
+- SPARK_CHIP_MIN_CONFIDENCE (default 0.7, balanced gate confidence floor)
+- SPARK_CHIP_GATE_MODE (balanced|off)
+- SPARK_CHIP_PREFERRED_FORMAT (single|multifile|hybrid, default multifile)
 
 Skills:
 - SPARK_SKILLS_DIR (path to skills repository)
@@ -1839,8 +1859,8 @@ Moltbook adapter:
 
 ### lib\promoter.py
 - constants:
-  - DEFAULT_PROMOTION_THRESHOLD = 0.7 line=32 ctx=DEFAULT_PROMOTION_THRESHOLD = 0.7  # 70% reliability
-  - DEFAULT_MIN_VALIDATIONS = 3 line=33 ctx=DEFAULT_MIN_VALIDATIONS = 3
+  - DEFAULT_PROMOTION_THRESHOLD = 0.65 line=32 ctx=DEFAULT_PROMOTION_THRESHOLD = 0.65  # 65% reliability
+  - DEFAULT_MIN_VALIDATIONS = 2 line=33 ctx=DEFAULT_MIN_VALIDATIONS = 2
   - PROJECT_SECTION = '## Project Intelligence' line=34 ctx=PROJECT_SECTION = "## Project Intelligence"
   - PROJECT_START = '<!-- SPARK_PROJECT_START -->' line=35 ctx=PROJECT_START = "<!-- SPARK_PROJECT_START -->"
   - PROJECT_END = '<!-- SPARK_PROJECT_END -->' line=36 ctx=PROJECT_END = "<!-- SPARK_PROJECT_END -->"

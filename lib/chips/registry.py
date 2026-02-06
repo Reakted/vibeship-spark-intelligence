@@ -92,7 +92,8 @@ class ChipRegistry:
         return False
 
     def install(self, path: Path) -> Optional[Chip]:
-        """Install a chip from a YAML file into the user chips directory."""
+        """Install a chip (single file or multifile directory) into user chips."""
+        path = Path(path)
         if not path.exists():
             return None
 
@@ -101,12 +102,24 @@ class ChipRegistry:
             return None
 
         self.user_chips_dir.mkdir(parents=True, exist_ok=True)
-        dest = self.user_chips_dir / f"{chip.id}.chip.yaml"
-        try:
-            shutil.copy2(path, dest)
-        except Exception as e:
-            log.error(f"Failed to install chip {path}: {e}")
-            return None
+
+        if path.is_dir():
+            dest = self.user_chips_dir / "multifile" / chip.id
+            try:
+                if dest.exists():
+                    shutil.rmtree(dest)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(path, dest)
+            except Exception as e:
+                log.error(f"Failed to install multifile chip {path}: {e}")
+                return None
+        else:
+            dest = self.user_chips_dir / f"{chip.id}.chip.yaml"
+            try:
+                shutil.copy2(path, dest)
+            except Exception as e:
+                log.error(f"Failed to install chip {path}: {e}")
+                return None
 
         user_loader = ChipLoader(chips_dir=self.user_chips_dir)
         installed = user_loader.load_chip(dest)
@@ -125,7 +138,14 @@ class ChipRegistry:
             user_root = self.user_chips_dir.resolve()
             if user_root not in chip_path.parents:
                 return False
-            chip_path.unlink()
+            if (
+                chip_path.name == "chip.yaml"
+                and chip_path.parent.name == chip_id
+                and chip_path.parent.parent.name in {"multifile", "hybrid"}
+            ):
+                shutil.rmtree(chip_path.parent, ignore_errors=False)
+            else:
+                chip_path.unlink()
         except Exception as e:
             log.error(f"Failed to uninstall chip {chip_id}: {e}")
             return False

@@ -14,16 +14,19 @@ Instead of just: "Edit tool used" telemetry
 
 import json
 import logging
-import time
+import os
 import re
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
-from .loader import Chip, ChipObserver, ChipLoader
+from .loader import Chip, ChipObserver
 from .registry import ChipRegistry
 from .router import ChipRouter, TriggerMatch
+from .scoring import score_insight
+from .evolution import get_evolution
+from .policy import SafetyPolicy
 
 log = logging.getLogger("spark.chips")
 
@@ -56,6 +59,29 @@ class ChipRuntime:
     def __init__(self):
         self.registry = ChipRegistry()
         self.router = ChipRouter()
+        try:
+            self.min_insight_score = float(os.getenv("SPARK_CHIP_MIN_SCORE", "0.35"))
+        except Exception:
+            self.min_insight_score = 0.35
+        self.min_insight_score = max(0.0, min(1.0, self.min_insight_score))
+        try:
+            self.min_insight_confidence = float(os.getenv("SPARK_CHIP_MIN_CONFIDENCE", "0.7"))
+        except Exception:
+            self.min_insight_confidence = 0.7
+        self.min_insight_confidence = max(0.0, min(1.0, self.min_insight_confidence))
+        self.gate_mode = str(os.getenv("SPARK_CHIP_GATE_MODE", "balanced")).strip().lower()
+        self.global_safety_policy = SafetyPolicy(
+            block_patterns=[
+                r"\bdecept(?:ive|ion)\b",
+                r"\bmanipulat(?:e|ion)\b",
+                r"\bcoerc(?:e|ion)\b",
+                r"\bexploit\b",
+                r"\bharass(?:ment)?\b",
+                r"\bweaponize\b",
+                r"\bmislead\b",
+            ]
+        )
+        self.evolution = get_evolution()
         self._ensure_storage()
 
     def _ensure_storage(self):
@@ -98,9 +124,41 @@ class ChipRuntime:
     def _process_matches(self, matches: List[TriggerMatch], event: Dict[str, Any]) -> List[ChipInsight]:
         """Execute observers for matched triggers."""
         insights: List[ChipInsight] = []
+        seen_signatures = set()
+        chips_with_observer = {m.chip.id for m in matches if m.observer is not None}
+
         for match in matches:
+            if match.observer is None and match.chip.id in chips_with_observer:
+                continue
             insight = self._execute_observer(match, event)
             if insight:
+                signature = (insight.chip_id, insight.observer_name, insight.content)
+                if signature in seen_signatures:
+                    continue
+                seen_signatures.add(signature)
+
+                score = score_insight(
+                    asdict(insight),
+                    context={
+                        "event_type": event.get("event_type"),
+                        "chip_domains": match.chip.domains,
+                        "trigger_patterns": match.chip.trigger_patterns,
+                    },
+                )
+                insight.captured_data["quality_score"] = score.to_dict()
+                self.evolution.record_match(match.chip.id, match.trigger, score)
+
+                if not self._passes_runtime_gate(match, insight, score):
+                    log.debug(
+                        "Discarded chip insight from %s/%s score=%.2f conf=%.2f tier=%s",
+                        match.chip.id,
+                        match.observer.name if match.observer else "chip",
+                        score.total,
+                        insight.confidence,
+                        score.promotion_tier,
+                    )
+                    continue
+
                 insights.append(insight)
                 self._store_insight(insight)
                 log.info(
@@ -108,6 +166,41 @@ class ChipRuntime:
                     f"{insight.content[:100]}"
                 )
         return insights
+
+    def _passes_runtime_gate(self, match: TriggerMatch, insight: ChipInsight, score: Any) -> bool:
+        """Balanced gate: operational + safety + confidence + evidence/outcome."""
+        if score.promotion_tier == "discard":
+            return False
+
+        if self.gate_mode in {"off", "disabled", "none"}:
+            return score.total >= self.min_insight_score
+
+        if insight.confidence < self.min_insight_confidence:
+            return False
+
+        if score.total < self.min_insight_score:
+            return False
+
+        safety = self.global_safety_policy.check_text(insight.content)
+        if not safety.allowed:
+            return False
+
+        captured = insight.captured_data or {}
+        fields = captured.get("fields") or {}
+        has_evidence = bool(
+            fields
+            or captured.get("change_summary")
+            or captured.get("content_summary")
+            or captured.get("error")
+            or captured.get("status")
+        )
+        has_outcome = float(getattr(score, "outcome_linkage", 0.0) or 0.0) > 0
+
+        # Balanced filter benchmark: evidence OR outcome + conf gate.
+        if not (has_evidence or has_outcome):
+            return False
+
+        return True
 
     def _extract_event_content(self, event: Dict[str, Any]) -> str:
         """Extract content from event for trigger matching."""
@@ -139,6 +232,19 @@ class ChipRuntime:
                 if v and isinstance(v, str):
                     parts.append(v[:1000])
 
+        payload = event.get("payload")
+        if isinstance(payload, dict):
+            for v in payload.values():
+                if v and isinstance(v, str):
+                    parts.append(v[:1000])
+        elif isinstance(payload, str):
+            parts.append(payload[:1000])
+
+        for key in ("content", "text", "message", "prompt", "user_prompt", "description"):
+            value = event.get(key)
+            if isinstance(value, str):
+                parts.append(value[:2000])
+
         return ' '.join(parts)
 
     def _execute_observer(self, match: TriggerMatch, event: Dict[str, Any]) -> Optional[ChipInsight]:
@@ -164,6 +270,15 @@ class ChipRuntime:
             # Generate insight content
             content = self._generate_insight_content(match, captured, event)
             if not content:
+                return None
+
+            # Drop weak chip-level fallbacks that lack observer structure or evidence.
+            if (
+                not match.observer
+                and match.confidence < 0.9
+                and not captured.get("change_summary")
+                and not captured.get("fields")
+            ):
                 return None
 
             confidence = match.confidence
@@ -209,6 +324,13 @@ class ChipRuntime:
         cwd = event.get('cwd') or event.get('data', {}).get('cwd')
         if cwd:
             captured['project'] = str(cwd)
+
+        status = self._derive_status(event)
+        if status:
+            captured["status"] = status
+        success = self._derive_success(event)
+        if success is not None:
+            captured["success"] = success
 
         # Try to extract meaningful changes from Edit/Write
         inp = event.get('input') or event.get('tool_input') or {}
@@ -287,20 +409,198 @@ class ChipRuntime:
         if field_name in event:
             return event[field_name]
 
+        key = str(field_name or "").strip().lower()
+        if not key:
+            return None
+
+        aliases = {
+            "tool_name": [
+                ("tool_name",),
+                ("tool",),
+                ("payload", "tool_name"),
+                ("data", "tool_name"),
+            ],
+            "file_path": [
+                ("file_path",),
+                ("input", "file_path"),
+                ("input", "path"),
+                ("tool_input", "file_path"),
+                ("tool_input", "path"),
+                ("payload", "file_path"),
+            ],
+            "command": [
+                ("command",),
+                ("input", "command"),
+                ("tool_input", "command"),
+                ("payload", "command"),
+            ],
+            "cwd": [
+                ("cwd",),
+                ("data", "cwd"),
+                ("payload", "cwd"),
+            ],
+            "session_id": [
+                ("session_id",),
+                ("data", "session_id"),
+                ("payload", "session_id"),
+            ],
+            "duration_ms": [
+                ("duration_ms",),
+                ("duration",),
+                ("data", "duration_ms"),
+                ("payload", "duration_ms"),
+            ],
+            "error": [
+                ("error",),
+                ("data", "error"),
+                ("payload", "error"),
+                ("result",),
+                ("output",),
+            ],
+            "status": [
+                ("status",),
+                ("data", "status"),
+                ("payload", "status"),
+            ],
+            "success": [
+                ("success",),
+                ("data", "success"),
+                ("payload", "success"),
+            ],
+            "text": [
+                ("text",),
+                ("content",),
+                ("message",),
+                ("prompt",),
+                ("user_prompt",),
+                ("payload", "text"),
+                ("payload", "content"),
+                ("input", "text"),
+                ("input", "content"),
+            ],
+            "prompt_length": [],
+            "has_code": [],
+            "event_type": [],
+        }
+
+        for path in aliases.get(key, []):
+            value = self._nested_lookup(event, path)
+            if value is not None:
+                return value
+
+        if key == "status":
+            return self._derive_status(event)
+        if key == "success":
+            return self._derive_success(event)
+        if key == "event_type":
+            return self._normalize_event_type(
+                event.get("event_type") or event.get("hook_event") or event.get("type") or event.get("kind")
+            )
+        if key == "prompt_length":
+            text = self._prompt_text(event)
+            return len(text) if text else None
+        if key == "has_code":
+            text = self._prompt_text(event)
+            if not text:
+                return None
+            code_like = bool(
+                re.search(r"```|def\s+\w+\(|class\s+\w+\(|function\s+\w+\(|import\s+\w+", text)
+            )
+            return code_like
+
         containers = [
             event.get("payload"),
             event.get("tool_input"),
             event.get("input"),
             event.get("data"),
         ]
-
         data = event.get("data")
         if isinstance(data, dict):
             containers.append(data.get("payload"))
-
         for container in containers:
             if isinstance(container, dict) and field_name in container:
                 return container[field_name]
+
+        return None
+
+    def _nested_lookup(self, event: Dict[str, Any], path: tuple) -> Optional[Any]:
+        current: Any = event
+        for key in path:
+            if not isinstance(current, dict) or key not in current:
+                return None
+            current = current.get(key)
+        return current
+
+    def _normalize_event_type(self, event_type: Any) -> str:
+        raw = str(event_type or "").strip()
+        if not raw:
+            return ""
+        lowered = raw.lower()
+        aliases = {
+            "posttooluse": "post_tool",
+            "posttoolusefailure": "post_tool_failure",
+            "userpromptsubmit": "user_prompt",
+            "pretooluse": "pre_tool",
+        }
+        compact = lowered.replace("_", "").replace("-", "")
+        if compact in aliases:
+            return aliases[compact]
+        return lowered.replace("-", "_")
+
+    def _prompt_text(self, event: Dict[str, Any]) -> str:
+        for key in ("user_prompt", "prompt", "message", "content", "text"):
+            value = event.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        payload = event.get("payload")
+        if isinstance(payload, dict):
+            for key in ("prompt", "message", "content", "text"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+        return ""
+
+    def _derive_status(self, event: Dict[str, Any]) -> Optional[str]:
+        status = event.get("status")
+        if isinstance(status, str) and status.strip():
+            normalized = status.strip().lower()
+            if normalized in {"ok", "completed", "success", "succeeded"}:
+                return "success"
+            if normalized in {"error", "failed", "failure", "exception"}:
+                return "failure"
+            return normalized
+
+        success = self._derive_success(event)
+        if success is True:
+            return "success"
+        if success is False:
+            return "failure"
+        return None
+
+    def _derive_success(self, event: Dict[str, Any]) -> Optional[bool]:
+        success_value = event.get("success")
+        if isinstance(success_value, bool):
+            return success_value
+
+        error_value = event.get("error") or self._nested_lookup(event, ("payload", "error"))
+        if isinstance(error_value, str) and error_value.strip():
+            return False
+
+        event_type = self._normalize_event_type(
+            event.get("event_type") or event.get("hook_event") or event.get("type") or event.get("kind")
+        )
+        if event_type == "post_tool_failure":
+            return False
+        if event_type == "post_tool":
+            return True
+
+        status = event.get("status")
+        if isinstance(status, str):
+            lowered = status.lower()
+            if lowered in {"success", "succeeded", "ok", "completed"}:
+                return True
+            if lowered in {"failure", "failed", "error", "exception"}:
+                return False
 
         return None
 
@@ -402,53 +702,33 @@ class ChipRuntime:
 
     def _build_field_based_insight(self, match: TriggerMatch, fields: Dict, data: Dict) -> str:
         """Build insight from extracted structured fields."""
-        chip_id = match.chip.id
-        observer_name = match.observer.name if match.observer else ""
+        observer = match.observer
+        template = (observer.insight_template if observer else "") or ""
+        if template:
+            try:
+                rendered = template.format(**fields)
+                if rendered.strip():
+                    return rendered.strip()
+            except Exception:
+                pass
 
-        # Market intelligence patterns
-        if chip_id == "market-intel":
-            if "competitor" in fields and "gap_type" in fields:
-                comp = fields["competitor"]
-                gap = fields["gap_type"]
-                opp = fields.get("opportunity", "")
-                if opp:
-                    return f"Competitor gap: {comp} lacks {gap} -> opportunity: {opp}"
-                return f"Competitor gap: {comp} lacks {gap}"
-
-            if "content_type" in fields and "engagement_signal" in fields:
-                ct = fields["content_type"]
-                eng = fields["engagement_signal"]
-                hook = fields.get("hook", "")
-                if hook:
-                    return f"Viral pattern: {ct} with {eng} engagement, hook: \"{hook}\""
-                return f"Viral pattern: {ct} content showing {eng} engagement"
-
-            if "sentiment" in fields and "subject" in fields:
-                sent = fields["sentiment"]
-                subj = fields["subject"]
-                return f"User sentiment: {sent} about {subj}"
-
-            if "insight_type" in fields and "insight" in fields:
-                return f"Product insight ({fields['insight_type']}): {fields['insight']}"
-
-        # Game dev patterns
-        if chip_id == "game_dev":
-            if "balance_decision" in fields:
-                return f"Balance decision: {fields['balance_decision']}"
-            if "feel_factor" in fields:
-                return f"Game feel: {fields['feel_factor']}"
-
-        # Generic field-based insight
+        # Generic field-based insight.
         key_fields = [(k, v) for k, v in fields.items() if v and k not in ("trigger", "chip")]
         if key_fields:
             summary = ", ".join(f"{k}: {v}" for k, v in key_fields[:3])
-            return f"[{match.chip.name}] {summary}"
+            prefix = f"[{match.chip.name}]"
+            if observer and observer.name:
+                prefix += f" {observer.name}:"
+            return f"{prefix} {summary}"
 
         return ""
 
     def _summarize_event(self, event: Dict[str, Any]) -> str:
         """Create a short summary of the event."""
         tool = event.get('tool_name') or event.get('tool') or 'unknown'
+        event_type = self._normalize_event_type(
+            event.get("event_type") or event.get("hook_event") or event.get("type") or event.get("kind")
+        )
         file_path = event.get('file_path')
         if not file_path:
             inp = event.get('input') or event.get('tool_input') or {}
@@ -456,8 +736,9 @@ class ChipRuntime:
                 file_path = inp.get('file_path') or inp.get('path')
 
         if file_path:
-            return f"{tool} on {Path(file_path).name}"
-        return tool
+            base = f"{tool} on {Path(file_path).name}"
+            return f"{event_type}:{base}" if event_type else base
+        return f"{event_type}:{tool}" if event_type else str(tool)
 
     # Maximum chip insight file size before rotation (10 MB)
     CHIP_MAX_BYTES = 10 * 1024 * 1024

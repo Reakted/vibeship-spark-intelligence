@@ -28,6 +28,7 @@ Key fields:
 1) **Questioning**
    - `spark project init` seeds domain questions.
    - `spark project questions` shows unanswered + dynamic questions.
+   - Active chip questions are merged in from the chips registry (`registry.get_active_questions`).
    - Domain questions include references + transferable heuristics.
    - If a reference exists without a transfer, Spark asks for a transfer principle.
 

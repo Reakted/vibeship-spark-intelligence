@@ -23,9 +23,11 @@ chip:
 
 triggers:
   events:
+    - "pre_tool"
     - "post_tool"
     - "post_tool_failure"
     - "user_prompt"
+    - "PreToolUse"
     - "PostToolUse"
     - "PostToolUseFailure"
     - "UserPromptSubmit"
@@ -70,12 +72,68 @@ observers:
           success: ["works", "worked", "perfect", "great"]
           failure: ["no", "not", "wrong"]
 
+  - name: pre_tool_event
+    description: Captures generic pre-tool context
+    triggers: ["pre_tool", "PreToolUse"]
+    capture:
+      required: {}
+      optional:
+        tool_name: Tool name
+        command: Command (if any)
+        cwd: Working directory
+        file_path: File path (if any)
+        session_id: Session identifier
+        event_type: Normalized event type
+
+  - name: post_tool_event
+    description: Captures generic post-tool context
+    triggers: ["post_tool", "PostToolUse"]
+    capture:
+      required: {}
+      optional:
+        tool_name: Tool name
+        command: Command (if any)
+        cwd: Working directory
+        file_path: File path (if any)
+        status: Outcome status
+        success: Success signal
+        duration_ms: Execution time
+        event_type: Normalized event type
+    extraction:
+      - field: status
+        keywords:
+          success: ["succeeded", "success", "completed", "ok"]
+          failure: ["failed", "error", "exception"]
+
+  - name: tool_failure
+    description: Captures generic tool failures
+    triggers: ["post_tool_failure", "PostToolUseFailure", "failed", "error"]
+    capture:
+      required: {}
+      optional:
+        tool_name: Tool name
+        command: Command (if any)
+        cwd: Working directory
+        error: Error message
+        status: Outcome status
+        event_type: Normalized event type
+    extraction:
+      - field: status
+        keywords:
+          failure: ["failed", "error", "exception"]
+
 outcomes:
   positive:
+    - condition: "success == true"
+      insight: "Tool operation succeeded"
+      weight: 0.8
     - condition: "status == success"
       insight: "User/tool signaled success"
       weight: 1.0
   negative:
     - condition: "status == failure"
+      insight: "Tool operation failed"
+      weight: 0.8
+    - condition: "error"
       insight: "User/tool signaled failure"
       weight: 1.0

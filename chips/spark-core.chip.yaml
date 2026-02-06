@@ -39,9 +39,11 @@ triggers:
     - "remember to"
 
   events:
+    - pre_tool
     - post_tool
     - post_tool_failure
     - user_prompt
+    - PreToolUse
     - PostToolUse
     - PostToolUseFailure
     - UserPromptSubmit
@@ -116,6 +118,69 @@ observers:
       - field: reason
         patterns:
           - "because\\s+(.+)"
+
+  - name: user_prompt_signal
+    description: Captures user intent and prompt context
+    triggers:
+      - "user_prompt"
+      - "UserPromptSubmit"
+      - "prefer"
+      - "instead"
+      - "why"
+    capture:
+      required: {}
+      optional:
+        session_id: Session identifier
+        cwd: Working directory
+        prompt_length: Prompt length
+        has_code: Whether prompt contains code
+        event_type: Normalized event type
+
+  - name: tool_cycle
+    description: Captures pre/post tool execution context
+    triggers:
+      - "pre_tool"
+      - "post_tool"
+      - "PreToolUse"
+      - "PostToolUse"
+    capture:
+      required: {}
+      optional:
+        tool_name: Name of the tool
+        command: Command if available
+        file_path: File path if available
+        cwd: Working directory
+        status: Outcome status
+        success: Success signal
+        duration_ms: Execution duration
+        event_type: Normalized event type
+    extraction:
+      - field: status
+        keywords:
+          success: ["success", "succeeded", "completed", "ok"]
+          failure: ["failed", "error", "exception"]
+
+  - name: tool_failure
+    description: Captures failed tool executions
+    triggers:
+      - "post_tool_failure"
+      - "PostToolUseFailure"
+      - "failed"
+      - "error"
+    capture:
+      required: {}
+      optional:
+        tool_name: Name of failed tool
+        command: Command if available
+        error: Error message
+        cwd: Working directory
+        file_path: File path if available
+        status: Outcome status
+        event_type: Normalized event type
+    extraction:
+      - field: status
+        keywords:
+          failure: ["failed", "error", "exception"]
 
 learners:
   - name: tool_effectiveness

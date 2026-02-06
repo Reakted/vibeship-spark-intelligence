@@ -14,6 +14,7 @@ from datetime import datetime
 from lib.cognitive_learner import get_cognitive_learner, CognitiveCategory
 from lib.exposure_tracker import record_exposures
 from lib.queue import _tail_lines
+from lib.chips.registry import get_registry
 
 
 CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
@@ -24,12 +25,31 @@ MERGE_STATE_FILE = Path.home() / ".spark" / "chip_merge_state.json"
 CHIP_TO_CATEGORY = {
     "market-intel": CognitiveCategory.CONTEXT,
     "game_dev": CognitiveCategory.REASONING,
+    "game-dev": CognitiveCategory.REASONING,
     "marketing": CognitiveCategory.CONTEXT,
     "vibecoding": CognitiveCategory.WISDOM,
     "moltbook": CognitiveCategory.REASONING,
     "biz-ops": CognitiveCategory.CONTEXT,
     "bench-core": CognitiveCategory.SELF_AWARENESS,
+    "bench_core": CognitiveCategory.SELF_AWARENESS,
     "spark-core": CognitiveCategory.META_LEARNING,
+}
+
+DOMAIN_TO_CATEGORY = {
+    "coding": CognitiveCategory.REASONING,
+    "development": CognitiveCategory.REASONING,
+    "debugging": CognitiveCategory.REASONING,
+    "tools": CognitiveCategory.META_LEARNING,
+    "engineering": CognitiveCategory.REASONING,
+    "delivery": CognitiveCategory.WISDOM,
+    "reliability": CognitiveCategory.WISDOM,
+    "game_dev": CognitiveCategory.REASONING,
+    "game": CognitiveCategory.REASONING,
+    "marketing": CognitiveCategory.CONTEXT,
+    "growth": CognitiveCategory.CONTEXT,
+    "strategy": CognitiveCategory.CONTEXT,
+    "pricing": CognitiveCategory.CONTEXT,
+    "benchmarking": CognitiveCategory.SELF_AWARENESS,
 }
 
 
@@ -54,6 +74,38 @@ def _hash_insight(chip_id: str, content: str, timestamp: str) -> str:
     import hashlib
     raw = f"{chip_id}|{content[:100]}|{timestamp}".encode()
     return hashlib.sha1(raw).hexdigest()[:12]
+
+
+def _infer_category(chip_id: str, captured_data: Dict[str, Any], content: str) -> CognitiveCategory:
+    """Infer cognitive category for chips with robust fallback."""
+    if chip_id in CHIP_TO_CATEGORY:
+        return CHIP_TO_CATEGORY[chip_id]
+    canonical = chip_id.replace("_", "-")
+    if canonical in CHIP_TO_CATEGORY:
+        return CHIP_TO_CATEGORY[canonical]
+
+    # Try installed chip metadata (domains).
+    try:
+        chip = get_registry().get_chip(chip_id)
+    except Exception:
+        chip = None
+    if chip and getattr(chip, "domains", None):
+        for domain in chip.domains:
+            key = str(domain).strip().lower().replace("-", "_")
+            if key in DOMAIN_TO_CATEGORY:
+                return DOMAIN_TO_CATEGORY[key]
+
+    # Heuristic fallback from content.
+    text = f"{chip_id} {content or ''}".lower()
+    if any(k in text for k in ("prefer", "should", "avoid", "never", "always", "lesson")):
+        return CognitiveCategory.WISDOM
+    if any(k in text for k in ("error", "failed", "fix", "issue", "debug")):
+        return CognitiveCategory.REASONING
+    if any(k in text for k in ("user", "audience", "market", "customer", "campaign")):
+        return CognitiveCategory.CONTEXT
+    if any(k in text for k in ("confidence", "benchmark", "method", "self")):
+        return CognitiveCategory.SELF_AWARENESS
+    return CognitiveCategory.CONTEXT
 
 
 def _tail_jsonl(path: Path, limit: int) -> List[Dict[str, Any]]:
@@ -108,6 +160,7 @@ def load_chip_insights(chip_id: str = None, limit: int = 100) -> List[Dict]:
 
 def merge_chip_insights(
     min_confidence: float = 0.7,
+    min_quality_score: float = 0.7,
     limit: int = 50,
     dry_run: bool = False
 ) -> Dict[str, Any]:
@@ -132,6 +185,7 @@ def merge_chip_insights(
         "processed": 0,
         "merged": 0,
         "skipped_low_confidence": 0,
+        "skipped_low_quality": 0,
         "skipped_duplicate": 0,
         "by_chip": {},
     }
@@ -154,14 +208,20 @@ def merge_chip_insights(
             stats["skipped_low_confidence"] += 1
             continue
 
+        quality = (captured_data.get("quality_score") or {})
+        quality_total = float(quality.get("total", confidence) or confidence)
+        if quality_total < min_quality_score:
+            stats["skipped_low_quality"] += 1
+            continue
+
         # Skip already merged
         insight_hash = _hash_insight(chip_id, content, timestamp)
         if insight_hash in merged_hashes:
             stats["skipped_duplicate"] += 1
             continue
 
-        # Determine category
-        category = CHIP_TO_CATEGORY.get(chip_id, CognitiveCategory.CONTEXT)
+        # Determine category with fallback inference.
+        category = _infer_category(chip_id, captured_data, content)
 
         # Build context from captured data
         context_parts = []

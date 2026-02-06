@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+import json
 import re
 
 from .cognitive_learner import CognitiveLearner, CognitiveInsight
@@ -22,6 +23,7 @@ from .project_profile import load_profile, get_suggested_questions
 from .exposure_tracker import record_exposures, infer_latest_session_id, infer_latest_trace_id
 from .sync_tracker import get_sync_tracker
 from .outcome_checkin import list_checkins
+from .queue import _tail_lines
 
 
 DEFAULT_MIN_RELIABILITY = 0.7
@@ -29,6 +31,8 @@ DEFAULT_MIN_VALIDATIONS = 3
 DEFAULT_MAX_ITEMS = 12
 DEFAULT_MAX_PROMOTED = 6
 DEFAULT_HIGH_VALIDATION_OVERRIDE = 50
+DEFAULT_MAX_CHIP_HIGHLIGHTS = 4
+CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
 
 
 @dataclass
@@ -204,12 +208,12 @@ def _load_promoted_lines(project_dir: Path) -> List[str]:
         # Stop at next section header
         next_idx = tail.find("\n## ")
         block = tail if next_idx == -1 else tail[:next_idx]
-    for raw in block.splitlines():
-        s = raw.strip()
-        if s.startswith("- "):
-            entry = s[2:].strip()
-            if entry and not _is_low_value(entry):
-                lines.append(entry)
+        for raw in block.splitlines():
+            s = raw.strip()
+            if s.startswith("- "):
+                entry = s[2:].strip()
+                if entry and not _is_low_value(entry):
+                    lines.append(entry)
     # De-dupe
     seen = set()
     out: List[str] = []
@@ -222,9 +226,70 @@ def _load_promoted_lines(project_dir: Path) -> List[str]:
     return out
 
 
+def _load_chip_highlights(
+    *,
+    min_score: float = 0.7,
+    min_confidence: float = 0.7,
+    limit: int = DEFAULT_MAX_CHIP_HIGHLIGHTS,
+) -> List[Dict[str, Any]]:
+    """Load recent high-value chip insights for context injection."""
+    highlights: List[Dict[str, Any]] = []
+    if not CHIP_INSIGHTS_DIR.exists():
+        return highlights
+
+    files = sorted(
+        CHIP_INSIGHTS_DIR.glob("*.jsonl"),
+        key=lambda p: p.stat().st_mtime if p.exists() else 0,
+        reverse=True,
+    )[:8]
+
+    for file_path in files:
+        for raw in _tail_lines(file_path, 40):
+            if not raw:
+                continue
+            try:
+                row = json.loads(raw)
+            except Exception:
+                continue
+            text = str(row.get("content") or "").strip()
+            if not text or _is_low_value(text):
+                continue
+            captured = row.get("captured_data") or {}
+            quality = captured.get("quality_score") or {}
+            score = float(quality.get("total", 0.0) or 0.0)
+            conf = float(row.get("confidence", 0.0) or 0.0)
+            if score < min_score or conf < min_confidence:
+                continue
+            highlights.append(
+                {
+                    "chip_id": row.get("chip_id") or file_path.stem,
+                    "observer": row.get("observer_name") or "observer",
+                    "content": text,
+                    "score": score,
+                    "confidence": conf,
+                    "timestamp": row.get("timestamp") or "",
+                }
+            )
+
+    highlights.sort(key=lambda h: (h["score"], h["confidence"], h["timestamp"]), reverse=True)
+    deduped: List[Dict[str, Any]] = []
+    seen = set()
+    for item in highlights:
+        key = _normalize_text(item["content"][:220])
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+        if len(deduped) >= max(0, int(limit)):
+            break
+
+    return deduped
+
+
 def _format_context(
     insights: List[CognitiveInsight],
     promoted: List[str],
+    chip_highlights: Optional[List[Dict[str, Any]]] = None,
     project_profile: Optional[Dict[str, Any]] = None,
 ) -> str:
     lines = [
@@ -292,6 +357,17 @@ def _format_context(
         lines.append("## Promoted Learnings (Docs)")
         for s in promoted[:DEFAULT_MAX_PROMOTED]:
             lines.append(f"- {s}")
+
+    if chip_highlights:
+        lines.append("")
+        lines.append("## Chip Intelligence")
+        for item in chip_highlights:
+            chip = item.get("chip_id") or "chip"
+            observer = item.get("observer") or "observer"
+            content = str(item.get("content") or "").strip()
+            if not content:
+                continue
+            lines.append(f"- [{chip}/{observer}] {content[:220]}")
 
     return "\n".join(lines).strip()
 
@@ -394,6 +470,9 @@ def sync_context(
         pass
 
     promoted = _load_promoted_lines(root) if include_promoted else []
+    chip_highlights = _load_chip_highlights()
+    if diagnostics is not None:
+        diagnostics["chip_highlights"] = len(chip_highlights)
     # De-dupe promoted vs selected insights
     seen = {_normalize_text(i.insight) for i in insights}
     promoted = [p for p in promoted if _normalize_text(p) not in seen]
@@ -404,7 +483,12 @@ def sync_context(
     except Exception:
         profile = None
 
-    context = _format_context(insights, promoted, project_profile=profile)
+    context = _format_context(
+        insights,
+        promoted,
+        chip_highlights=chip_highlights,
+        project_profile=profile,
+    )
     targets: Dict[str, str] = {}
 
     try:

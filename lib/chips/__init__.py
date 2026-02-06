@@ -16,7 +16,7 @@ What this fixes:
 - Runtime: Executes observers and stores domain insights
 """
 
-from .loader import ChipLoader, Chip, ChipObserver
+from .loader import ChipLoader, Chip, ChipObserver, LoadMetrics
 from .registry import ChipRegistry, get_registry
 from .router import ChipRouter, TriggerMatch, get_router
 from .runtime import ChipRuntime, process_chip_events, get_runtime
@@ -24,7 +24,7 @@ from .runner import ChipRunner
 from .store import get_chip_store
 
 __all__ = [
-    'ChipLoader', 'Chip', 'ChipObserver',
+    'ChipLoader', 'Chip', 'ChipObserver', 'LoadMetrics',
     'ChipRegistry', 'get_registry',
     'ChipRouter', 'TriggerMatch', 'get_router',
     'ChipRuntime', 'process_chip_events', 'get_runtime',

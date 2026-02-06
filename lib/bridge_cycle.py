@@ -233,10 +233,11 @@ def run_bridge_cycle(
 
         # --- Chip merger ---
         try:
-            merge_stats = merge_chip_insights(min_confidence=0.7, limit=20)
+            merge_stats = merge_chip_insights(min_confidence=0.7, min_quality_score=0.7, limit=20)
             stats["chip_merge"] = {
                 "processed": merge_stats.get("processed", 0),
                 "merged": merge_stats.get("merged", 0),
+                "skipped_low_quality": merge_stats.get("skipped_low_quality", 0),
                 "by_chip": merge_stats.get("by_chip", {}),
             }
         except Exception as e:
