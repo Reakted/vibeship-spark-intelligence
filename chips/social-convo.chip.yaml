@@ -1,0 +1,380 @@
+# ~/.spark/chips/social-convo.chip.yaml
+# Spark Chip for Conversation Intelligence on X/Twitter
+
+# ============================================================
+# IDENTITY: Who is this chip?
+# ============================================================
+chip:
+  id: social-convo
+  name: X Conversation Intelligence
+  version: 1.0.0
+  activation: opt_in
+  description: |
+    Makes Spark intelligent about X/Twitter conversations.
+    Learns reply patterns, conversation hooks, thread DNA,
+    and what styles generate genuine engagement.
+
+    Not about gaming the algorithm. About being genuinely
+    interesting in conversation.
+
+  author: Vibeship
+  license: MIT
+
+  human_benefit: "Help create more thoughtful, engaging conversations online."
+  harm_avoidance:
+    - "No manipulation or engagement farming"
+    - "No rage-bait or divisive tactics"
+    - "No fake engagement patterns"
+  risk_level: low
+  safety_tests:
+    - "no_manipulation"
+    - "no_rage_bait"
+
+  agent:
+    name: Spark
+    description: |
+      Spark observes conversation patterns on X, learns what
+      makes replies land, and develops genuine conversational skill.
+    personality:
+      - witty
+      - genuine
+      - curious
+      - sharp
+
+  domains:
+    - x-conversation
+    - reply-strategy
+    - engagement
+    - conversation-dna
+    - hooks
+
+# ============================================================
+# TRIGGERS: What activates this chip?
+# ============================================================
+triggers:
+  patterns:
+    - "x reply"
+    - "tweet reply"
+    - "reply to tweet"
+    - "tweet engagement"
+    - "reply strategy"
+    - "conversation hook"
+    - "quote tweet"
+    - "thread reply"
+    - "conversation dna"
+    - "high engagement reply"
+
+  events:
+    - post_tool
+    - post_tool_failure
+    - user_prompt
+    - PostToolUse
+    - PostToolUseFailure
+    - UserPromptSubmit
+    - x_reply_sent
+    - x_reply_received
+    - x_conversation_analyzed
+    - x_hook_detected
+    - x_dna_extracted
+
+  tools:
+    - name: mcp__x-twitter__post_tweet
+      context_contains: ["reply", "respond", "answer", "thread"]
+    - name: mcp__x-twitter__get_tweet_details
+      context_contains: ["reply", "conversation", "thread"]
+    - name: mcp__x-twitter__search_twitter
+      context_contains: ["reply", "engagement", "conversation"]
+
+# ============================================================
+# OBSERVERS: What data to capture when triggered?
+# ============================================================
+observers:
+  # Reply Sent Observer
+  - name: reply_sent
+    description: Captures when Spark sends a reply on X
+
+    triggers:
+      - "x reply sent"
+      - "replied to tweet"
+      - "posted reply"
+
+    capture:
+      required:
+        tweet_id: "ID of the reply tweet"
+        reply_to_id: "ID of the tweet being replied to"
+        tone_used: "witty / technical / conversational / provocative"
+
+      optional:
+        hook_type: "question / observation / challenge / agreement / addition"
+        content: "Reply text"
+        author_handle: "Who we replied to"
+        thread_depth: "Position in thread (1=direct reply)"
+        had_personality_snippet: "Whether personality was injected"
+
+    extraction:
+      - field: tone_used
+        keywords:
+          witty: ["witty", "funny", "humor", "joke", "ironic"]
+          technical: ["technical", "code", "explain", "detail", "data"]
+          conversational: ["casual", "chat", "hey", "nice"]
+          provocative: ["bold", "challenge", "disagree", "hot take"]
+
+      - field: hook_type
+        keywords:
+          question: ["?", "what", "how", "why", "curious"]
+          observation: ["noticed", "interesting", "pattern", "seems"]
+          challenge: ["disagree", "actually", "but", "counter"]
+          agreement: ["exactly", "this", "agree", "yes"]
+          addition: ["also", "adding", "plus", "and"]
+
+  # Reply Effectiveness Observer
+  - name: reply_effectiveness
+    description: Tracks how well replies performed
+
+    triggers:
+      - "reply engagement"
+      - "reply performance"
+      - "reply metrics"
+
+    capture:
+      required:
+        tweet_id: "Which reply"
+        outcome_type: "positive / negative / neutral"
+
+      optional:
+        likes: "Number of likes"
+        replies_received: "Number of replies to our reply"
+        author_responded: "Did the original author respond"
+        quote_tweets: "Number of quote tweets"
+        impressions: "Number of impressions"
+        warmth_change: "Did this change user warmth level"
+
+  # High Engagement Reply Observed
+  - name: high_engagement_reply_observed
+    description: Captures high-performing replies by anyone for pattern learning
+
+    triggers:
+      - "high engagement reply"
+      - "viral reply"
+      - "great reply observed"
+
+    capture:
+      required:
+        content: "Reply text"
+        engagement: "Total engagement score"
+
+      optional:
+        hook_type: "How the reply opened"
+        structure: "Short / medium / long / threaded"
+        tone: "Tone classification"
+        author_handle: "Who wrote it"
+        parent_tweet_topic: "What the parent tweet was about"
+        why_it_worked: "Analysis of why this reply resonated"
+
+  # Conversation DNA Observer
+  - name: conversation_dna
+    description: Extracts the DNA pattern from successful conversations
+
+    triggers:
+      - "conversation dna"
+      - "conversation pattern"
+      - "successful thread"
+
+    capture:
+      required:
+        pattern_type: "hook_and_expand / question_chain / build_together / debate"
+
+      optional:
+        hook_style: "What started the conversation"
+        escalation_pattern: "How the conversation grew"
+        turn_count: "Number of back-and-forth exchanges"
+        topic_evolution: "How the topic shifted"
+        engagement_curve: "How engagement changed over turns"
+        participants: "How many people joined"
+
+# ============================================================
+# LEARNERS: What patterns to detect and learn?
+# ============================================================
+learners:
+  # Reply Effectiveness Learner
+  - name: reply_effectiveness
+    description: Learns which reply styles generate the best engagement
+    type: correlation
+
+    input:
+      observer: reply_sent
+      fields: [tone_used, hook_type, thread_depth, had_personality_snippet]
+
+    output:
+      observer: reply_effectiveness
+      fields: [likes, replies_received, author_responded]
+
+    learn:
+      - "Which hook types get the most replies"
+      - "Which tones work best for different contexts"
+      - "Whether personality injection improves engagement"
+      - "Optimal thread depth for replies"
+
+    min_samples: 10
+    confidence_threshold: 0.65
+
+  # Conversation DNA Learner
+  - name: conversation_dna_learner
+    description: Learns structural patterns of successful conversations
+    type: pattern
+
+    observe: high_engagement_reply_observed
+
+    extract:
+      - common_hooks
+      - effective_structures
+      - tone_patterns
+      - topic_compatibility
+
+    correlate_with:
+      - parent_tweet_topic
+      - time_of_day
+      - author_warmth_level
+
+  # Hook Effectiveness Learner
+  - name: hook_effectiveness
+    description: Learns which opening hooks land best
+    type: correlation
+
+    input:
+      fields: [hook_type, tone, parent_tweet_topic]
+
+    output:
+      fields: [engagement, author_responded, replies_received]
+
+    learn:
+      - "Questions vs observations for different topics"
+      - "Challenge hooks: when they work vs backfire"
+      - "Agreement hooks: genuine vs sycophantic"
+      - "Best hooks for technical vs casual contexts"
+
+    min_samples: 8
+    confidence_threshold: 0.6
+
+# ============================================================
+# OUTCOMES: What does success/failure look like?
+# ============================================================
+outcomes:
+  positive:
+    - condition: "author_responded == true"
+      weight: 1.0
+      insight: "Reply started a real conversation"
+
+    - condition: "likes > 5"
+      weight: 0.7
+      insight: "Reply resonated with audience"
+
+    - condition: "replies_received > 3"
+      weight: 0.8
+      insight: "Reply sparked wider discussion"
+
+    - condition: "warmth_change == 'increased'"
+      weight: 0.9
+      insight: "Reply deepened relationship"
+
+    - condition: "quote_tweets > 0"
+      weight: 0.6
+      insight: "Reply was worth sharing"
+
+  negative:
+    - condition: "likes == 0 AND hours_since_reply > 12"
+      weight: 0.7
+      insight: "Reply got no traction"
+      action: analyze_reply_failure
+
+    - condition: "author_responded == false AND warmth == 'cold'"
+      weight: 0.5
+      insight: "Cold outreach didn't land"
+      action: adjust_cold_approach
+
+    - condition: "replies_received > 3 AND sentiment_negative"
+      weight: 0.9
+      insight: "Reply caused negative reaction"
+      action: review_tone_selection
+
+  neutral:
+    - condition: "first_reply_to_author"
+      insight: "First interaction with this user"
+      action: start_warmth_tracking
+
+    - condition: "new_topic_explored"
+      insight: "Entered new conversation territory"
+      action: observe_reception
+
+# ============================================================
+# EVOLUTION: How does this chip improve itself?
+# ============================================================
+evolution:
+  rules:
+    - trigger:
+        condition: "avg_reply_engagement < 2"
+        over: "last_15_replies"
+      action: expand_observation
+      details:
+        add_fields: [parent_tweet_engagement, timing_context, author_audience_size]
+        reason: "Low reply engagement suggests missing context"
+
+    - trigger:
+        condition: "pattern_validated >= 5"
+      action: boost_pattern
+      details:
+        increase_weight: 0.15
+        promote_to: high_confidence
+
+    - trigger:
+        condition: "hook_success_rate < 25%"
+        over: "last_20_attempts"
+      action: deprecate_strategy
+      details:
+        reason: "Hook type consistently underperforming"
+        notify: true
+
+    - trigger:
+        condition: "unexpected_engagement_spike"
+      action: create_exploratory_learner
+      details:
+        duration: "7_days"
+        auto_promote_if: "generates_3_validated_insights"
+
+  metrics:
+    track:
+      - avg_reply_engagement
+      - author_response_rate
+      - hook_success_rate
+      - conversation_depth_avg
+      - warmth_progression_rate
+
+    goals:
+      author_response_rate: "> 30%"
+      hook_success_rate: "> 50%"
+      conversation_depth_avg: "> 2 turns"
+
+# ============================================================
+# CONTEXT CONTRIBUTION
+# ============================================================
+context:
+  format: |
+    ## X Conversation Intelligence (Chip: social-convo)
+
+    ### Reply Strategy
+    - Best hooks: {{top_hooks}}
+    - Best tones: {{top_tones}}
+    - Author response rate: {{author_response_rate}}%
+
+    ### Conversation DNA
+    {{#each dna_patterns limit=3}}
+    - {{pattern_type}}: {{description}} ({{confidence}}% confident)
+    {{/each}}
+
+    ### Active Learnings
+    {{#each recent_insights limit=5}}
+    - {{insight}}
+    {{/each}}
+
+  priority: 0.75
+  max_chars: 500

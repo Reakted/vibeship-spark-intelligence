@@ -28,6 +28,7 @@ from .sentiment import SentimentDetector
 from .repetition import RepetitionDetector
 from .semantic import SemanticIntentDetector
 from .why import WhyDetector
+from .engagement_surprise import EngagementSurpriseDetector
 from .request_tracker import RequestTracker, get_request_tracker
 from .distiller import PatternDistiller, get_pattern_distiller
 from .memory_gate import MemoryGate, get_memory_gate
@@ -97,6 +98,7 @@ class PatternAggregator:
             RepetitionDetector(),
             SemanticIntentDetector(),
             WhyDetector(),  # Phase 4: Capture reasoning and principles
+            EngagementSurpriseDetector(),  # Engagement Pulse: tweet over/underperform
         ]
         self._patterns_count = 0
         self._session_patterns: Dict[str, List[DetectedPattern]] = {}
@@ -393,6 +395,7 @@ class PatternAggregator:
                 PatternType.FRUSTRATION: CognitiveCategory.SELF_AWARENESS,
                 PatternType.REPETITION: CognitiveCategory.USER_UNDERSTANDING,
                 PatternType.STYLE: CognitiveCategory.USER_UNDERSTANDING,
+                PatternType.ENGAGEMENT_SURPRISE: CognitiveCategory.REASONING,
             }
 
             category = category_map.get(pattern.pattern_type, CognitiveCategory.CONTEXT)

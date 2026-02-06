@@ -283,6 +283,20 @@ def run_bridge_cycle(
             stats["errors"].append("chips")
             log_debug("bridge_worker", f"chip processing failed ({error})", None)
 
+        # --- Engagement Pulse: check for pending snapshots ---
+        def _poll_engagement_pulse():
+            from lib.engagement_tracker import get_engagement_tracker
+            tracker = get_engagement_tracker()
+            pending = tracker.get_pending_snapshots()
+            tracker.cleanup_old(max_age_days=7)
+            return {"pending_snapshots": len(pending), "tracked": len(tracker.tracked)}
+
+        ok, pulse_stats, error = _run_step("engagement_pulse", _poll_engagement_pulse)
+        if ok:
+            stats["engagement_pulse"] = pulse_stats or {}
+        else:
+            stats["errors"].append("engagement_pulse")
+
         # --- Chip merger ---
         ok, merge_stats, error = _run_step(
             "chip_merge",

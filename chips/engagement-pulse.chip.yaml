@@ -1,0 +1,279 @@
+# ~/.spark/chips/engagement-pulse.chip.yaml
+# Spark Chip for Async Engagement Tracking on X/Twitter
+
+# ============================================================
+# IDENTITY
+# ============================================================
+chip:
+  id: engagement-pulse
+  name: X Engagement Pulse
+  version: 1.0.0
+  activation: opt_in
+  description: |
+    Tracks tweet engagement asynchronously over time.
+    Learns prediction accuracy by comparing expected vs actual
+    engagement at 1h, 6h, and 24h intervals.
+
+    Key insight: social engagement is TEMPORAL. A tweet's performance
+    at 1h predicts very differently from 24h.
+
+  author: Vibeship
+  license: MIT
+
+  human_benefit: "Learn what genuinely resonates vs what falls flat."
+  harm_avoidance:
+    - "No engagement manipulation"
+    - "No spam amplification"
+  risk_level: low
+  safety_tests:
+    - "no_spam_amplification"
+
+  agent:
+    name: Spark
+    description: |
+      Spark tracks engagement patterns to understand what content
+      genuinely resonates, not to game metrics.
+    personality:
+      - analytical
+      - curious
+      - honest
+
+  domains:
+    - engagement-tracking
+    - tweet-performance
+    - prediction
+    - velocity
+
+# ============================================================
+# TRIGGERS
+# ============================================================
+triggers:
+  patterns:
+    - "tweet performance"
+    - "engagement tracking"
+    - "tweet posted"
+    - "engagement update"
+    - "engagement snapshot"
+    - "engagement surprise"
+    - "viral tweet"
+    - "tweet flopped"
+
+  events:
+    - post_tool
+    - PostToolUse
+    - tweet_posted
+    - engagement_snapshot
+    - engagement_surprise
+
+  tools:
+    - name: mcp__x-twitter__post_tweet
+      context_contains: ["*"]
+    - name: mcp__x-twitter__get_tweet_details
+      context_contains: ["engagement", "performance", "likes", "retweets"]
+
+# ============================================================
+# OBSERVERS
+# ============================================================
+observers:
+  - name: tweet_posted
+    description: Captures when a tweet is posted for tracking
+
+    triggers:
+      - "tweet posted"
+      - "posted tweet"
+      - "sent tweet"
+
+    capture:
+      required:
+        tweet_id: "ID of the posted tweet"
+        content_preview: "First 100 chars of content"
+
+      optional:
+        tone: "Tone used"
+        topic: "Main topic"
+        is_reply: "Whether this is a reply"
+        is_thread: "Whether this starts a thread"
+        predicted_likes: "Predicted like count"
+        predicted_replies: "Predicted reply count"
+
+  - name: engagement_snapshot
+    description: Captures engagement metrics at a point in time
+
+    triggers:
+      - "engagement snapshot"
+      - "engagement update"
+      - "tweet metrics"
+
+    capture:
+      required:
+        tweet_id: "Which tweet"
+        snapshot_age: "Hours since posting (1, 6, 24)"
+
+      optional:
+        likes: "Current like count"
+        replies: "Current reply count"
+        retweets: "Current retweet count"
+        impressions: "Current impression count"
+        velocity: "Engagement velocity (engagements/hour)"
+
+  - name: engagement_surprise
+    description: Captures when actual engagement significantly differs from predicted
+
+    triggers:
+      - "engagement surprise"
+      - "viral surprise"
+      - "flop detected"
+
+    capture:
+      required:
+        tweet_id: "Which tweet"
+        surprise_type: "overperform / underperform"
+        surprise_ratio: "actual / predicted ratio"
+
+      optional:
+        predicted: "What we predicted"
+        actual: "What actually happened"
+        possible_reason: "Hypothesis for the surprise"
+
+# ============================================================
+# LEARNERS
+# ============================================================
+learners:
+  - name: engagement_prediction
+    description: Learns to predict engagement from content characteristics
+    type: correlation
+
+    input:
+      observer: tweet_posted
+      fields: [tone, topic, is_reply, is_thread]
+
+    output:
+      observer: engagement_snapshot
+      fields: [likes, replies, retweets]
+
+    learn:
+      - "Which topics get the most engagement"
+      - "Reply vs original post engagement patterns"
+      - "Thread vs single tweet performance"
+      - "Tone impact on engagement"
+
+    min_samples: 10
+    confidence_threshold: 0.6
+
+  - name: surprise_pattern
+    description: Learns what causes engagement surprises
+    type: pattern
+
+    observe: engagement_surprise
+
+    extract:
+      - common_overperform_traits
+      - common_underperform_traits
+      - timing_effects
+
+    correlate_with:
+      - topic
+      - tone
+      - time_of_day
+
+  - name: velocity_tracker
+    description: Tracks engagement velocity patterns
+    type: correlation
+
+    input:
+      fields: [tone, topic, time_of_day, day_of_week]
+
+    output:
+      fields: [velocity_1h, velocity_6h, velocity_24h]
+
+    learn:
+      - "Early velocity as predictor of final performance"
+      - "Time-of-day impact on velocity"
+
+# ============================================================
+# OUTCOMES
+# ============================================================
+outcomes:
+  positive:
+    - condition: "actual_engagement > predicted * 2"
+      weight: 1.0
+      insight: "Tweet significantly outperformed prediction"
+
+    - condition: "engagement_rate > 5%"
+      weight: 0.8
+      insight: "High engagement rate tweet"
+
+    - condition: "replies > 10"
+      weight: 0.7
+      insight: "Generated significant conversation"
+
+  negative:
+    - condition: "actual_engagement < predicted * 0.3"
+      weight: 0.7
+      insight: "Tweet significantly underperformed"
+      action: analyze_flop
+
+    - condition: "likes == 0 AND hours > 6"
+      weight: 0.5
+      insight: "Zero traction after 6 hours"
+      action: review_content_strategy
+
+  neutral:
+    - condition: "first_tweet_on_topic"
+      insight: "Testing new topic territory"
+      action: observe_engagement
+
+# ============================================================
+# EVOLUTION
+# ============================================================
+evolution:
+  rules:
+    - trigger:
+        condition: "prediction_accuracy < 40%"
+        over: "last_15_predictions"
+      action: expand_observation
+      details:
+        add_fields: [time_of_day, follower_count_at_post, competing_content]
+        reason: "Predictions consistently off - need more features"
+
+    - trigger:
+        condition: "surprise_count > 5"
+        over: "last_20_tweets"
+      action: create_exploratory_learner
+      details:
+        duration: "7_days"
+        auto_promote_if: "identifies_new_prediction_feature"
+
+  metrics:
+    track:
+      - prediction_accuracy
+      - avg_surprise_ratio
+      - velocity_prediction_accuracy
+
+    goals:
+      prediction_accuracy: "> 60%"
+      avg_surprise_ratio: "< 1.5"
+
+# ============================================================
+# CONTEXT CONTRIBUTION
+# ============================================================
+context:
+  format: |
+    ## Engagement Pulse (Chip: engagement-pulse)
+
+    ### Prediction Accuracy
+    - Overall: {{prediction_accuracy}}%
+    - Best topic: {{best_predicted_topic}}
+
+    ### Recent Surprises
+    {{#each surprises limit=3}}
+    - {{surprise_type}}: {{description}} ({{ratio}}x)
+    {{/each}}
+
+    ### Velocity Insights
+    {{#each velocity_insights limit=3}}
+    - {{insight}}
+    {{/each}}
+
+  priority: 0.65
+  max_chars: 400

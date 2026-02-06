@@ -1,0 +1,298 @@
+# ~/.spark/chips/niche-intel.chip.yaml
+# Spark Chip for Niche Intelligence Network on X/Twitter
+
+# ============================================================
+# IDENTITY
+# ============================================================
+chip:
+  id: niche-intel
+  name: Niche Intelligence Network
+  version: 1.0.0
+  activation: opt_in
+  description: |
+    Maps the social graph around Spark's niche on X/Twitter.
+    Discovers accounts, tracks relationships, identifies hubs,
+    and generates strategic engagement opportunities.
+
+    Build genuine connections, not follow-for-follow games.
+
+  author: Vibeship
+  license: MIT
+
+  human_benefit: "Build authentic relationships within niche communities."
+  harm_avoidance:
+    - "No follow-unfollow manipulation"
+    - "No mass engagement automation"
+    - "No stalking or obsessive tracking"
+  risk_level: low
+  safety_tests:
+    - "no_manipulation"
+    - "no_stalking"
+
+  agent:
+    name: Spark
+    description: |
+      Spark maps relationships within its niche to understand community
+      dynamics, find collaboration opportunities, and engage genuinely.
+    personality:
+      - strategic
+      - genuine
+      - observant
+      - community-minded
+
+  domains:
+    - niche-mapping
+    - relationship-tracking
+    - engagement-opportunity
+    - community-intelligence
+
+# ============================================================
+# TRIGGERS
+# ============================================================
+triggers:
+  patterns:
+    - "niche map"
+    - "relationship tracking"
+    - "engagement opportunity"
+    - "community intelligence"
+    - "account discovery"
+    - "hub detection"
+    - "strategic engagement"
+    - "niche scanning"
+
+  events:
+    - post_tool
+    - PostToolUse
+    - account_discovered
+    - relationship_update
+    - hub_identified
+    - engagement_opportunity
+
+  tools:
+    - name: mcp__x-twitter__get_user_profile
+      context_contains: ["*"]
+    - name: mcp__x-twitter__get_user_followers
+      context_contains: ["*"]
+    - name: mcp__x-twitter__get_user_following
+      context_contains: ["*"]
+    - name: mcp__x-twitter__search_twitter
+      context_contains: ["community", "niche", "network"]
+
+# ============================================================
+# OBSERVERS
+# ============================================================
+observers:
+  - name: account_discovered
+    description: Captures when a new account is identified in our niche
+
+    triggers:
+      - "account discovered"
+      - "new account in niche"
+      - "interesting account found"
+
+    capture:
+      required:
+        handle: "Account handle"
+        relevance: "How relevant to our niche (0-1)"
+
+      optional:
+        topics: "Topics they engage with"
+        follower_count: "Their follower count"
+        engagement_style: "How they typically engage"
+        discovered_via: "How we found them"
+
+  - name: relationship_update
+    description: Tracks changes in relationship state
+
+    triggers:
+      - "relationship update"
+      - "warmth changed"
+      - "interaction milestone"
+
+    capture:
+      required:
+        handle: "Account handle"
+        event_type: "Type of relationship event"
+
+      optional:
+        warmth_before: "Previous warmth level"
+        warmth_after: "New warmth level"
+        interaction_type: "What happened"
+
+  - name: hub_identified
+    description: Captures when a conversation hub is detected
+
+    triggers:
+      - "hub identified"
+      - "conversation hub"
+      - "community hub"
+
+    capture:
+      required:
+        hub_type: "topic / account / thread"
+        engagement_level: "How active this hub is"
+
+      optional:
+        key_accounts: "Accounts active in this hub"
+        topics: "Topics discussed"
+
+  - name: engagement_opportunity
+    description: Captures strategic engagement opportunities
+
+    triggers:
+      - "engagement opportunity"
+      - "should engage"
+      - "opportunity detected"
+
+    capture:
+      required:
+        target_handle: "Who to engage with"
+        reason: "Why this is an opportunity"
+        urgency: "1-5 urgency score"
+
+      optional:
+        suggested_tone: "Recommended tone"
+        suggested_hook: "Recommended hook type"
+        expires_at: "When this opportunity expires"
+
+# ============================================================
+# LEARNERS
+# ============================================================
+learners:
+  - name: relationship_effectiveness
+    description: Learns which interaction types improve relationships
+    type: correlation
+
+    input:
+      fields: [interaction_type, tone_used, topic]
+
+    output:
+      fields: [warmth_delta, response_received]
+
+    learn:
+      - "Which interaction types warm up cold accounts"
+      - "Optimal frequency for maintaining warm relationships"
+      - "Topics that deepen connections"
+
+    min_samples: 10
+    confidence_threshold: 0.6
+
+  - name: hub_dynamics
+    description: Learns conversation hub patterns
+    type: pattern
+
+    observe: hub_identified
+
+    extract:
+      - hub_lifecycle
+      - peak_activity_times
+      - key_influencer_patterns
+
+    correlate_with:
+      - topics
+      - time_of_day
+      - day_of_week
+
+  - name: opportunity_outcomes
+    description: Learns which engagement opportunities pay off
+    type: correlation
+
+    input:
+      observer: engagement_opportunity
+      fields: [reason, urgency, suggested_tone]
+
+    output:
+      fields: [warmth_change, response_received, engagement_generated]
+
+    learn:
+      - "High-urgency opportunities that actually deliver"
+      - "Tone-opportunity matching"
+      - "Timing impact on opportunity success"
+
+# ============================================================
+# OUTCOMES
+# ============================================================
+outcomes:
+  positive:
+    - condition: "warmth_increased == true"
+      weight: 0.8
+      insight: "Interaction deepened relationship"
+
+    - condition: "new_ally_gained == true"
+      weight: 1.0
+      insight: "Reached ally status with account"
+
+    - condition: "hub_engagement > 5"
+      weight: 0.7
+      insight: "Active participation in community hub"
+
+  negative:
+    - condition: "missed_high_urgency_opportunity"
+      weight: 0.5
+      insight: "Missed a time-sensitive engagement opportunity"
+      action: review_opportunity_timing
+
+    - condition: "warmth_decreased"
+      weight: 0.7
+      insight: "Interaction cooled the relationship"
+      action: review_engagement_approach
+
+  neutral:
+    - condition: "new_account_discovered"
+      insight: "Expanded network awareness"
+      action: begin_tracking
+
+# ============================================================
+# EVOLUTION
+# ============================================================
+evolution:
+  rules:
+    - trigger:
+        condition: "avg_warmth_progression < 0.1"
+        over: "last_30_days"
+      action: expand_observation
+      details:
+        add_fields: [competitor_engagement, content_overlap]
+        reason: "Relationships not progressing"
+
+    - trigger:
+        condition: "opportunity_success_rate > 70%"
+      action: boost_pattern
+      details:
+        increase_weight: 0.2
+        promote_to: high_confidence
+
+  metrics:
+    track:
+      - tracked_accounts
+      - avg_warmth_level
+      - opportunities_acted_on
+      - warmth_progression_rate
+
+    goals:
+      warmth_progression_rate: "> 0.2/month"
+      opportunities_acted_on: "> 60%"
+
+# ============================================================
+# CONTEXT CONTRIBUTION
+# ============================================================
+context:
+  format: |
+    ## Niche Intelligence (Chip: niche-intel)
+
+    ### Network
+    - Tracked accounts: {{tracked_count}}
+    - Warmth: {{warmth_distribution}}
+
+    ### Opportunities
+    {{#each active_opportunities limit=3}}
+    - [{{urgency}}] {{target}}: {{reason}}
+    {{/each}}
+
+    ### Hubs
+    {{#each active_hubs limit=3}}
+    - {{hub_type}}: {{description}}
+    {{/each}}
+
+  priority: 0.7
+  max_chars: 400

@@ -18,6 +18,7 @@ class PatternType(str, Enum):
     FRUSTRATION = "frustration"        # User expressing frustration
     REPETITION = "repetition"          # Same request multiple times
     STYLE = "style"                    # Working style preference
+    ENGAGEMENT_SURPRISE = "engagement_surprise"  # Tweet over/underperformed prediction
 
 
 @dataclass

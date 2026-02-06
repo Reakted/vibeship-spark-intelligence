@@ -54,6 +54,7 @@ CHIP_ADVICE_FILE_TAIL = 40
 CHIP_ADVICE_MAX_FILES = 6
 CHIP_ADVICE_LIMIT = 4
 CHIP_ADVICE_MIN_SCORE = 0.7
+RECENT_OUTCOMES_MAX = 5000
 
 # Thresholds (Improvement #8: Advisor Integration tuneables)
 # Defaults — overridden by ~/.spark/tuneables.json → "advisor" section at module load.
@@ -184,15 +185,82 @@ class SparkAdvisor:
         """Load effectiveness tracking data."""
         if EFFECTIVENESS_FILE.exists():
             try:
-                return json.loads(EFFECTIVENESS_FILE.read_text())
+                data = json.loads(EFFECTIVENESS_FILE.read_text())
+                return self._normalize_effectiveness(data)
             except Exception:
                 pass
-        return {
+        return self._normalize_effectiveness({
             "total_advice_given": 0,
             "total_followed": 0,
             "total_helpful": 0,
             "by_source": {},
             "by_category": {},
+            "recent_outcomes": {},
+        })
+
+    def _normalize_effectiveness(self, data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Normalize and enforce invariants for effectiveness counters."""
+        src = data if isinstance(data, dict) else {}
+
+        def _as_int(value: Any) -> int:
+            try:
+                return max(0, int(value))
+            except Exception:
+                return 0
+
+        total_advice_given = _as_int(src.get("total_advice_given", 0))
+        total_followed = _as_int(src.get("total_followed", 0))
+        total_helpful = _as_int(src.get("total_helpful", 0))
+
+        # Invariants: helpful <= followed <= advice_given.
+        total_followed = min(total_followed, total_advice_given)
+        total_helpful = min(total_helpful, total_followed)
+
+        by_source: Dict[str, Dict[str, int]] = {}
+        for key, row in (src.get("by_source") or {}).items():
+            if not isinstance(row, dict):
+                continue
+            total = _as_int(row.get("total", 0))
+            helpful = min(_as_int(row.get("helpful", 0)), total)
+            by_source[str(key)] = {"total": total, "helpful": helpful}
+
+        by_category = src.get("by_category")
+        if not isinstance(by_category, dict):
+            by_category = {}
+
+        recent_outcomes: Dict[str, Dict[str, Any]] = {}
+        raw_recent = src.get("recent_outcomes") or {}
+        if isinstance(raw_recent, dict):
+            for advice_id, row in raw_recent.items():
+                if not advice_id or not isinstance(row, dict):
+                    continue
+                ts_raw = row.get("ts")
+                try:
+                    ts = float(ts_raw)
+                except Exception:
+                    ts = 0.0
+                recent_outcomes[str(advice_id)] = {
+                    "followed_counted": bool(row.get("followed_counted")),
+                    "helpful_counted": bool(row.get("helpful_counted")),
+                    "ts": ts,
+                }
+
+        # Keep recent outcomes bounded by recency.
+        if len(recent_outcomes) > RECENT_OUTCOMES_MAX:
+            keep = sorted(
+                recent_outcomes.items(),
+                key=lambda item: float(item[1].get("ts", 0.0)),
+                reverse=True,
+            )[:RECENT_OUTCOMES_MAX]
+            recent_outcomes = dict(keep)
+
+        return {
+            "total_advice_given": total_advice_given,
+            "total_followed": total_followed,
+            "total_helpful": total_helpful,
+            "by_source": by_source,
+            "by_category": by_category,
+            "recent_outcomes": recent_outcomes,
         }
 
     def _load_metrics(self) -> Dict[str, Any]:
@@ -273,34 +341,46 @@ class SparkAdvisor:
         try:
             # Read current disk state to merge (handles multiple processes)
             disk_data = self._load_effectiveness()
+            mem_data = self._normalize_effectiveness(self.effectiveness)
 
             # Merge: take max of counters (monotonically increasing)
             merged = {
                 "total_advice_given": max(
                     disk_data.get("total_advice_given", 0),
-                    self.effectiveness.get("total_advice_given", 0)
+                    mem_data.get("total_advice_given", 0)
                 ),
                 "total_followed": max(
                     disk_data.get("total_followed", 0),
-                    self.effectiveness.get("total_followed", 0)
+                    mem_data.get("total_followed", 0)
                 ),
                 "total_helpful": max(
                     disk_data.get("total_helpful", 0),
-                    self.effectiveness.get("total_helpful", 0)
+                    mem_data.get("total_helpful", 0)
                 ),
                 "by_source": {},
                 "by_category": {},
+                "recent_outcomes": {},
             }
 
             # Merge by_source
             for src in set(list(disk_data.get("by_source", {}).keys()) +
-                          list(self.effectiveness.get("by_source", {}).keys())):
+                          list(mem_data.get("by_source", {}).keys())):
                 disk_src = disk_data.get("by_source", {}).get(src, {})
-                mem_src = self.effectiveness.get("by_source", {}).get(src, {})
+                mem_src = mem_data.get("by_source", {}).get(src, {})
                 merged["by_source"][src] = {
                     "total": max(disk_src.get("total", 0), mem_src.get("total", 0)),
                     "helpful": max(disk_src.get("helpful", 0), mem_src.get("helpful", 0)),
                 }
+
+            # Merge by_category as shallow union.
+            merged["by_category"] = dict(disk_data.get("by_category", {}))
+            merged["by_category"].update(mem_data.get("by_category", {}))
+
+            # Merge per-advice outcome index to avoid repeated counter inflation.
+            recent_outcomes = dict(disk_data.get("recent_outcomes", {}))
+            recent_outcomes.update(mem_data.get("recent_outcomes", {}))
+            merged["recent_outcomes"] = recent_outcomes
+            merged = self._normalize_effectiveness(merged)
 
             # Update in-memory state with merged values
             self.effectiveness = merged
@@ -326,7 +406,45 @@ class SparkAdvisor:
                 raise
         except Exception:
             # Fallback to simple write if atomic fails
-            EFFECTIVENESS_FILE.write_text(json.dumps(self.effectiveness, indent=2))
+            fallback = self._normalize_effectiveness(self.effectiveness)
+            self.effectiveness = fallback
+            EFFECTIVENESS_FILE.write_text(json.dumps(fallback, indent=2))
+
+    def _mark_outcome_counted(
+        self,
+        advice_id: str,
+        was_followed: bool,
+        was_helpful: Optional[bool],
+    ) -> Tuple[bool, bool]:
+        """Return whether aggregate counters should increment for this advice_id."""
+        outcomes = self.effectiveness.setdefault("recent_outcomes", {})
+        key = str(advice_id or "").strip()
+        now = time.time()
+
+        # If advice_id is missing, keep legacy behavior.
+        if not key:
+            return bool(was_followed), bool(was_helpful)
+
+        entry = outcomes.get(key) or {}
+        followed_counted = bool(entry.get("followed_counted"))
+        helpful_counted = bool(entry.get("helpful_counted"))
+
+        inc_followed = bool(was_followed) and not followed_counted
+        inc_helpful = bool(was_helpful) and not helpful_counted
+
+        if was_followed:
+            entry["followed_counted"] = True
+        if was_helpful:
+            entry["helpful_counted"] = True
+        entry["ts"] = now
+        outcomes[key] = entry
+
+        # Keep bounded to avoid unbounded growth.
+        if len(outcomes) > RECENT_OUTCOMES_MAX:
+            oldest = min(outcomes.items(), key=lambda item: float(item[1].get("ts", 0.0)))[0]
+            outcomes.pop(oldest, None)
+
+        return inc_followed, inc_helpful
 
     def _generate_advice_id(self, context: str) -> str:
         """Generate unique advice ID."""
@@ -467,6 +585,15 @@ class SparkAdvisor:
         if HAS_EIDOS:
             advice_list.extend(self._get_eidos_advice(tool_name, context))
 
+        # 8. Get conversation intelligence advice (ConvoIQ)
+        advice_list.extend(self._get_convo_advice(tool_name, context))
+
+        # 9. Get engagement pulse advice
+        advice_list.extend(self._get_engagement_advice(tool_name, context))
+
+        # 10. Get niche intelligence advice
+        advice_list.extend(self._get_niche_advice(tool_name, context))
+
         # Sort by relevance (confidence * context_match * effectiveness_boost)
         advice_list = self._rank_advice(advice_list)
 
@@ -479,7 +606,7 @@ class SparkAdvisor:
         # Log advice given (only for operational use, not sampling)
         if track_retrieval:
             self._record_cognitive_surface(advice_list)
-            self._log_advice(advice_list, tool_name, context)
+            self._log_advice(advice_list, tool_name, context, trace_id=trace_id)
 
             # Track retrievals in Meta-Ralph for outcome tracking
             try:
@@ -884,6 +1011,200 @@ class SparkAdvisor:
 
         return advice
 
+    def _get_niche_advice(self, tool_name: str, context: str) -> List[Advice]:
+        """Get niche intelligence advice.
+
+        Activates for X user profile tools or engagement contexts.
+        Surfaces active opportunities and relationship context.
+        """
+        advice: List[Advice] = []
+
+        niche_signals = [
+            "profile", "user", "follower", "following", "engage",
+            "x-twitter", "community", "niche", "network", "relationship",
+        ]
+        if not any(s in context for s in niche_signals):
+            return advice
+
+        try:
+            from lib.niche_mapper import get_niche_mapper
+
+            mapper = get_niche_mapper()
+
+            # Surface active high-urgency opportunities
+            opps = mapper.get_active_opportunities(min_urgency=4)
+            for opp in opps[:2]:
+                text = (
+                    f"[NicheNet] Opportunity: engage @{opp.target} - "
+                    f"{opp.reason} (urgency {opp.urgency}/5, "
+                    f"tone: {opp.suggested_tone})"
+                )
+                advice.append(Advice(
+                    advice_id=self._generate_advice_id(text),
+                    insight_key=f"niche:opp:{opp.target}",
+                    text=text,
+                    confidence=min(0.8, opp.urgency * 0.15),
+                    source="niche",
+                    context_match=0.7,
+                    reason=opp.reason,
+                ))
+
+            # Surface warm relationship context for relevant handles
+            for handle in list(mapper.accounts.keys())[:100]:
+                if handle in context:
+                    acct = mapper.accounts[handle]
+                    if acct.warmth in ("warm", "hot", "ally"):
+                        text = (
+                            f"[NicheNet] @{handle} is {acct.warmth} "
+                            f"({acct.interaction_count} interactions, "
+                            f"topics: {', '.join(acct.topics[:3])})"
+                        )
+                        advice.append(Advice(
+                            advice_id=self._generate_advice_id(text),
+                            insight_key=f"niche:warmth:{handle}",
+                            text=text,
+                            confidence=0.75,
+                            source="niche",
+                            context_match=0.9,
+                            reason=f"Relationship: {acct.warmth}",
+                        ))
+                        break  # Only one relationship hint per call
+
+        except Exception:
+            pass
+
+        return advice
+
+    def _get_engagement_advice(self, tool_name: str, context: str) -> List[Advice]:
+        """Get engagement pulse advice.
+
+        Activates when posting tweets or checking engagement.
+        Surfaces prediction accuracy and recent surprises.
+        """
+        advice: List[Advice] = []
+
+        engagement_signals = [
+            "tweet", "post", "engagement", "likes", "performance",
+            "x-twitter", "viral", "thread",
+        ]
+        if not any(s in context for s in engagement_signals):
+            return advice
+
+        try:
+            from lib.engagement_tracker import get_engagement_tracker
+
+            tracker = get_engagement_tracker()
+            stats = tracker.get_stats()
+
+            # Surface prediction accuracy if we have data
+            accuracy = stats.get("prediction_accuracy", {})
+            if accuracy.get("total_predictions", 0) >= 5:
+                acc_pct = accuracy.get("accuracy", 0)
+                text = (
+                    f"[Pulse] Engagement prediction accuracy: {acc_pct}% "
+                    f"(avg ratio: {accuracy.get('avg_ratio', 0)}x)"
+                )
+                advice.append(Advice(
+                    advice_id=self._generate_advice_id(text),
+                    insight_key="engagement:accuracy",
+                    text=text,
+                    confidence=0.7,
+                    source="engagement",
+                    context_match=0.7,
+                    reason=f"Based on {accuracy.get('total_predictions', 0)} predictions",
+                ))
+
+            # Surface recent surprises
+            surprises = [
+                t for t in tracker.tracked.values() if t.surprise_detected
+            ]
+            for s in surprises[-2:]:
+                text = (
+                    f"[Pulse] Recent {s.surprise_type}: "
+                    f"'{s.content_preview[:60]}' ({s.surprise_ratio}x prediction)"
+                )
+                advice.append(Advice(
+                    advice_id=self._generate_advice_id(text),
+                    insight_key=f"engagement:surprise:{s.tweet_id[:8]}",
+                    text=text,
+                    confidence=0.65,
+                    source="engagement",
+                    context_match=0.6,
+                    reason=f"Surprise ratio: {s.surprise_ratio}x",
+                ))
+
+        except Exception:
+            pass
+
+        return advice
+
+    def _get_convo_advice(self, tool_name: str, context: str) -> List[Advice]:
+        """Get conversation intelligence advice from ConvoIQ.
+
+        Only activates for X/Twitter reply tools or when context mentions
+        replies, conversations, or engagement.
+        """
+        advice: List[Advice] = []
+
+        # Only trigger for relevant contexts
+        convo_signals = [
+            "reply", "respond", "tweet", "thread", "engagement",
+            "x-twitter", "conversation", "quote", "mention",
+        ]
+        if not any(s in context for s in convo_signals):
+            return advice
+
+        try:
+            from lib.convo_analyzer import get_convo_analyzer
+
+            analyzer = get_convo_analyzer()
+            stats = analyzer.get_stats()
+
+            # Surface top DNA patterns as advice
+            for dna_key, dna in list(analyzer.dna_patterns.items())[:3]:
+                if dna.engagement_score >= 5.0 and dna.times_seen >= 2:
+                    text = (
+                        f"[ConvoIQ] {dna.hook_type} hooks with {dna.tone} tone "
+                        f"work well (engagement {dna.engagement_score:.0f}/10, "
+                        f"seen {dna.times_seen}x)"
+                    )
+                    ctx_match = self._calculate_context_match(
+                        f"{dna.hook_type} {dna.tone} {dna.pattern_type}",
+                        context,
+                    )
+                    advice.append(Advice(
+                        advice_id=self._generate_advice_id(text),
+                        insight_key=f"convo:dna:{dna_key}",
+                        text=text,
+                        confidence=min(0.9, 0.5 + dna.times_seen * 0.1),
+                        source="convo",
+                        context_match=ctx_match,
+                        reason=f"DNA pattern validated {dna.times_seen}x",
+                    ))
+
+            # If replying to someone, recommend best hook
+            if "reply" in context or "respond" in context:
+                # Extract parent text hint from context if available
+                rec = analyzer.get_best_hook(context[:200])
+                text = (
+                    f"[ConvoIQ] Try {rec.hook_type} hook with {rec.tone} tone: "
+                    f"{rec.reasoning}"
+                )
+                advice.append(Advice(
+                    advice_id=self._generate_advice_id(text),
+                    insight_key=f"convo:hook:{rec.hook_type}",
+                    text=text,
+                    confidence=rec.confidence,
+                    source="convo",
+                    context_match=0.8,
+                    reason=rec.reasoning,
+                ))
+
+        except Exception:
+            pass  # Don't break advice flow if ConvoIQ isn't available
+
+        return advice
+
     def _calculate_context_match(self, insight_context: str, current_context: str) -> float:
         """Calculate how well an insight's context matches current context."""
         if not insight_context or not current_context:
@@ -975,6 +1296,9 @@ class SparkAdvisor:
     _SOURCE_BOOST = {
         "eidos": 1.4,           # EIDOS distillations are validated patterns
         "self_awareness": 1.3,  # Tool-specific cautions from past failures
+        "convo": 1.2,           # Conversation intelligence (ConvoIQ)
+        "engagement": 1.15,     # Engagement pulse predictions
+        "niche": 1.1,           # Niche intelligence network
         "cognitive": 1.0,       # Standard cognitive insights
         "mind": 1.0,            # Mind memories
         "bank": 0.9,            # Memory banks (less curated)
@@ -1016,7 +1340,13 @@ class SparkAdvisor:
         """Rank advice by relevance, actionability, and effectiveness."""
         return sorted(advice_list, key=self._rank_score, reverse=True)
 
-    def _log_advice(self, advice_list: List[Advice], tool: str, context: str):
+    def _log_advice(
+        self,
+        advice_list: List[Advice],
+        tool: str,
+        context: str,
+        trace_id: Optional[str] = None,
+    ):
         """Log advice given for later analysis."""
         if not advice_list:
             return
@@ -1025,6 +1355,7 @@ class SparkAdvisor:
             "timestamp": datetime.now().isoformat(),
             "tool": tool,
             "context": context[:100],
+            "trace_id": trace_id,
             "advice_ids": [a.advice_id for a in advice_list],
             "advice_texts": [a.text[:100] for a in advice_list],
             "insight_keys": [a.insight_key for a in advice_list],
@@ -1041,6 +1372,7 @@ class SparkAdvisor:
         recent = {
             "ts": time.time(),
             "tool": tool,
+            "trace_id": trace_id,
             "advice_ids": [a.advice_id for a in advice_list],
             "insight_keys": [a.insight_key for a in advice_list],
             "sources": [a.source for a in advice_list],
@@ -1051,7 +1383,11 @@ class SparkAdvisor:
         except Exception:
             pass
 
-    def _get_recent_advice_entry(self, tool_name: str) -> Optional[Dict[str, Any]]:
+    def _get_recent_advice_entry(
+        self,
+        tool_name: str,
+        trace_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Return the most recent advice entry for a tool within TTL.
 
         Uses fuzzy matching to handle tool name variations:
@@ -1073,6 +1409,7 @@ class SparkAdvisor:
         tool_lower = tool_name.lower()  # Case-insensitive matching
         task_fallback = None  # Track most recent task advice as fallback
         prefix_match = None  # Track prefix matches (e.g., "Bash" in "Bash command")
+        trace_match = None
 
         for line in reversed(lines[-RECENT_ADVICE_MAX_LINES:]):
             try:
@@ -1083,6 +1420,11 @@ class SparkAdvisor:
             ts = float(entry.get("ts") or 0.0)
             if now - ts > RECENT_ADVICE_MAX_AGE_S:
                 continue  # Too old
+
+            entry_trace = (entry.get("trace_id") or "").strip()
+            if trace_id and entry_trace and entry_trace == str(trace_id).strip():
+                trace_match = entry
+                break
 
             entry_tool = entry.get("tool", "").lower()
 
@@ -1101,8 +1443,8 @@ class SparkAdvisor:
             if entry_tool == "task" and task_fallback is None:
                 task_fallback = entry
 
-        # Return prefix match if found, else fall back to task advice
-        return prefix_match or task_fallback
+        # Prefer exact trace match; otherwise use tool/prefix/task fallback.
+        return trace_match or prefix_match or task_fallback
 
     def _find_recent_advice_by_id(self, advice_id: str) -> Optional[Dict[str, Any]]:
         """Find recent advice entry containing a specific advice_id."""
@@ -1151,9 +1493,14 @@ class SparkAdvisor:
         )
 
         # Update effectiveness stats
-        if was_followed:
+        inc_followed, inc_helpful = self._mark_outcome_counted(
+            advice_id=advice_id,
+            was_followed=was_followed,
+            was_helpful=was_helpful,
+        )
+        if inc_followed:
             self.effectiveness["total_followed"] += 1
-        if was_helpful:
+        if inc_helpful:
             self.effectiveness["total_helpful"] += 1
 
         self._save_effectiveness()
@@ -1163,8 +1510,13 @@ class SparkAdvisor:
         try:
             from .meta_ralph import get_meta_ralph
             ralph = get_meta_ralph()
-            outcome_str = "good" if was_helpful else ("bad" if was_helpful is False else "unknown")
-            ralph.track_outcome(advice_id, outcome_str, notes, trace_id=trace_id)
+            outcome_str = (
+                "good" if was_helpful is True
+                else ("bad" if was_helpful is False else None)
+            )
+            # Avoid overwriting an existing explicit outcome with "unknown".
+            if outcome_str:
+                ralph.track_outcome(advice_id, outcome_str, notes, trace_id=trace_id)
         except Exception:
             pass  # Don't break outcome flow if tracking fails
 
@@ -1185,7 +1537,7 @@ class SparkAdvisor:
         Call this after each tool execution to build the feedback loop.
         """
         # Update source effectiveness based on whether advice helped
-        entry = self._get_recent_advice_entry(tool_name)
+        entry = self._get_recent_advice_entry(tool_name, trace_id=trace_id)
 
         # Use actual source from recent advice (not hardcoded "cognitive")
         source = "cognitive"  # Default fallback
@@ -1235,10 +1587,15 @@ class SparkAdvisor:
                     # helpful just because the tool succeeded.  Only explicit
                     # feedback (advice_was_relevant=True) or failure-after-advice
                     # (False) should count.  None = unknown.
+                    was_followed = bool(advice_was_relevant)
+                    was_helpful = (
+                        True if (advice_was_relevant and success)
+                        else (False if (advice_was_relevant and not success) else None)
+                    )
                     self.report_outcome(
                         aid,
-                        was_followed=True,
-                        was_helpful=True if advice_was_relevant else None,
+                        was_followed=was_followed,
+                        was_helpful=was_helpful,
                         notes=f"Auto-linked from {tool_name}",
                         trace_id=trace_id,
                     )
@@ -1449,6 +1806,22 @@ class SparkAdvisor:
             "sufficient_data": wa_total >= 5 and wo_total >= 5,
         }
 
+    def repair_effectiveness_counters(self) -> Dict[str, Any]:
+        """Normalize persisted effectiveness counters and return before/after."""
+        before = {
+            "total_advice_given": int(self.effectiveness.get("total_advice_given", 0) or 0),
+            "total_followed": int(self.effectiveness.get("total_followed", 0) or 0),
+            "total_helpful": int(self.effectiveness.get("total_helpful", 0) or 0),
+        }
+        self.effectiveness = self._normalize_effectiveness(self.effectiveness)
+        self._save_effectiveness()
+        after = {
+            "total_advice_given": int(self.effectiveness.get("total_advice_given", 0) or 0),
+            "total_followed": int(self.effectiveness.get("total_followed", 0) or 0),
+            "total_helpful": int(self.effectiveness.get("total_helpful", 0) or 0),
+        }
+        return {"before": before, "after": after}
+
     # ============= Context Generation =============
 
     def generate_context_block(self, tool_name: str, task_context: str = "", include_mind: bool = False) -> str:
@@ -1544,3 +1917,8 @@ def record_advice_feedback(
 def generate_context(tool_name: str, task: str = "") -> str:
     """Generate injectable context block."""
     return get_advisor().generate_context_block(tool_name, task)
+
+
+def repair_effectiveness_counters() -> Dict[str, Any]:
+    """Repair advisor effectiveness counters on disk."""
+    return get_advisor().repair_effectiveness_counters()

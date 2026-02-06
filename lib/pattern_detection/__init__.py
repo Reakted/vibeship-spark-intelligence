@@ -23,6 +23,7 @@ from .sentiment import SentimentDetector
 from .repetition import RepetitionDetector
 from .semantic import SemanticIntentDetector
 from .why import WhyDetector
+from .engagement_surprise import EngagementSurpriseDetector
 from .aggregator import PatternAggregator, get_aggregator
 from .worker import process_pattern_events, get_pattern_backlog
 
@@ -41,6 +42,7 @@ __all__ = [
     "RepetitionDetector",
     "SemanticIntentDetector",
     "WhyDetector",
+    "EngagementSurpriseDetector",
     "PatternAggregator",
     "get_aggregator",
     "process_pattern_events",

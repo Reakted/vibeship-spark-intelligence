@@ -95,6 +95,25 @@ CONTENT_ANGLES = {
 }
 
 
+# Reply pattern topics to study for ConvoIQ
+REPLY_STUDY_TOPICS = {
+    "high_engagement_replies": {
+        "queries": [
+            "AI agent reply viral engagement",
+            "best reply thread engagement",
+        ],
+        "priority": "medium",
+    },
+    "conversation_hooks": {
+        "queries": [
+            "conversation starter tweet hook",
+            "quote tweet engagement strategy",
+        ],
+        "priority": "medium",
+    },
+}
+
+
 def extract_insights_from_search(search_results: List[Dict], topic: str) -> List[Dict]:
     """Extract actionable insights from search results."""
     insights = []
@@ -274,6 +293,106 @@ def inject_to_spark(insights: List[Dict]):
     print(f"Total processed: {len(top_insights)}")
 
     return len(top_insights)
+
+
+def scan_niche_accounts(search_results: List[Dict]) -> int:
+    """Scan search results for niche accounts to track.
+
+    Feeds discovered accounts through the NicheMapper to build
+    the relationship network.
+
+    Args:
+        search_results: Tweets with author info
+
+    Returns:
+        Number of accounts discovered
+    """
+    try:
+        from lib.niche_mapper import get_niche_mapper
+    except ImportError:
+        print("NicheNet not available, skipping niche scan")
+        return 0
+
+    mapper = get_niche_mapper()
+    discovered = 0
+
+    seen = set()
+    for tweet in search_results:
+        author = tweet.get("author", "")
+        if not author or author in seen:
+            continue
+        seen.add(author)
+
+        engagement = tweet.get("likes", 0) + tweet.get("retweets", 0)
+        if engagement < 5:
+            continue
+
+        # Determine relevance from engagement and content
+        relevance = min(0.9, 0.3 + engagement / 200)
+        topics = []
+        text = tweet.get("text", "").lower()
+        for keyword in ["ai", "agent", "coding", "build", "deploy", "token"]:
+            if keyword in text:
+                topics.append(keyword)
+
+        mapper.discover_account(
+            handle=author,
+            topics=topics,
+            relevance=relevance,
+            discovered_via="daily_trend_research",
+        )
+        discovered += 1
+
+    if discovered:
+        print(f"NicheNet: discovered {discovered} accounts from trend research")
+
+    return discovered
+
+
+def study_reply_patterns(search_results: List[Dict]) -> int:
+    """Study high-engagement replies for ConvoIQ conversation DNA.
+
+    Feeds reply patterns through the ConvoIQ analyzer to extract
+    conversation DNA and learn what makes replies land.
+
+    Args:
+        search_results: Tweets with engagement data
+
+    Returns:
+        Number of patterns extracted
+    """
+    try:
+        from lib.convo_analyzer import get_convo_analyzer
+    except ImportError:
+        print("ConvoIQ not available, skipping reply study")
+        return 0
+
+    analyzer = get_convo_analyzer()
+    patterns_found = 0
+
+    for tweet in search_results:
+        text = tweet.get("text", "")
+        likes = tweet.get("likes", 0)
+        replies = tweet.get("replies", 0)
+        retweets = tweet.get("retweets", 0)
+
+        # Only study tweets with meaningful engagement
+        if likes < 10 and replies < 3:
+            continue
+
+        dna = analyzer.study_reply(
+            reply_text=text,
+            engagement={"likes": likes, "replies": replies, "retweets": retweets},
+            parent_text=tweet.get("parent_text", ""),
+            topic_tags=tweet.get("tags", []),
+        )
+        if dna:
+            patterns_found += 1
+
+    if patterns_found:
+        print(f"ConvoIQ: extracted {patterns_found} conversation DNA patterns")
+
+    return patterns_found
 
 
 def run_research_with_mcp():

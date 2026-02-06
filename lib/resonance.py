@@ -306,6 +306,48 @@ def _points_to_next(total: float, current: ResonanceState) -> Optional[float]:
     return round(next_threshold - total, 1)
 
 
+def calculate_user_resonance(
+    user_handle: str,
+    interaction_count: int = 0,
+    they_initiated_count: int = 0,
+    successful_tones: int = 0,
+    topics_shared: int = 0,
+) -> float:
+    """Calculate resonance with a specific X user.
+
+    Lightweight version of the full resonance calculator, scoped to
+    a single user relationship rather than the whole system.
+
+    Args:
+        user_handle: The X handle (for logging/identification).
+        interaction_count: Total interactions with this user.
+        they_initiated_count: Times they reached out first.
+        successful_tones: Number of successful tone matches.
+        topics_shared: Number of topics we've engaged on together.
+
+    Returns:
+        Resonance score 0-100.
+    """
+    # Interaction depth (40%)
+    interaction_score = min(interaction_count / 20.0, 1.0) * 40
+
+    # Reciprocity (25%) - they initiate too, not just us
+    reciprocity = 0.0
+    if interaction_count > 0:
+        reciprocity = they_initiated_count / interaction_count
+    reciprocity_score = reciprocity * 25
+
+    # Tone alignment (20%) - we know what works with them
+    tone_score = min(successful_tones / 5.0, 1.0) * 20
+
+    # Topic breadth (15%) - varied conversations
+    topic_score = min(topics_shared / 5.0, 1.0) * 15
+
+    return round(
+        interaction_score + reciprocity_score + tone_score + topic_score, 1
+    )
+
+
 if __name__ == "__main__":
     display = get_resonance_display()
     print(f"\n{display['icon']} {display['name']} - {display['score']:.0f}% Resonance")

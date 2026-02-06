@@ -221,8 +221,49 @@ class SparkVoice:
         
         return by_area
     
+    # ===== Personality Snippets =====
+
+    def get_personality_snippet(self, topic: Optional[str] = None) -> Optional[str]:
+        """Get a short personality-infused string for injection into content.
+
+        Returns an opinion, growth moment, or self-assessment as a brief
+        string suitable for tweet-length content.
+
+        Args:
+            topic: Optional topic to find a relevant opinion for.
+
+        Returns:
+            A short personality string, or None if nothing relevant.
+        """
+        # Try topic-specific opinion first
+        if topic:
+            key = topic.lower().replace(" ", "_")
+            if key in self.data["opinions"]:
+                o = self.data["opinions"][key]
+                return f"I {o['preference']}."
+
+            # Fuzzy match: check if topic words appear in any opinion
+            topic_words = set(topic.lower().split())
+            for okey, oval in self.data["opinions"].items():
+                okey_words = set(okey.split("_"))
+                if topic_words & okey_words:
+                    return f"I {oval['preference']}."
+
+        # Fallback: strongest opinion
+        strong = self.get_strong_opinions(min_strength=0.8)
+        if strong:
+            o = strong[0]
+            return f"I {o.preference}."
+
+        # Fallback: recent growth
+        if self.data.get("growth_moments"):
+            g = self.data["growth_moments"][-1]
+            return f"I learned to {g['after']}."
+
+        return None
+
     # ===== Voice Generation =====
-    
+
     def get_age(self) -> Dict[str, Any]:
         """Get Spark's age and experience."""
         born = datetime.fromisoformat(self.data["born_at"])
