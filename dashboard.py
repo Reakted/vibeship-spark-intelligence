@@ -569,7 +569,15 @@ def get_ops_data() -> Dict:
         agents = []
 
     handoffs = _read_jsonl(ORCH_HANDOFFS_FILE)
-    handoffs_sorted = sorted(handoffs, key=lambda h: h.get("timestamp", 0), reverse=True)
+
+    def _handoff_ts(h: Dict[str, Any]) -> float:
+        raw = h.get("timestamp", 0)
+        try:
+            return float(raw or 0)
+        except Exception:
+            return 0.0
+
+    handoffs_sorted = sorted(handoffs, key=_handoff_ts, reverse=True)
     recent_handoffs = handoffs_sorted[:8]
 
     pair_stats: Dict[str, Dict] = {}
