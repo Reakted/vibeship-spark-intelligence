@@ -34,6 +34,13 @@ secrets.json
 telegram_token.txt
 .telegram_token
 
+# Twitter/X API credentials - NEVER commit
+**/x-twitter-mcp/.env
+**/x-twitter-mcp/.env.*
+!**/x-twitter-mcp/.env.example
+twitter_credentials*
+.twitter_keys
+
 # IDE
 .idea/
 .vscode/
