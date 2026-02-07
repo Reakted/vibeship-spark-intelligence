@@ -658,6 +658,114 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════
+   RESEARCH INTELLIGENCE
+   ═══════════════════════════════════════════════════════ */
+.research-meta {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 32px;
+  flex-wrap: wrap;
+}
+
+.research-meta-item {
+  padding: 12px 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.research-meta-item .meta-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--green);
+  margin-bottom: 2px;
+}
+
+.research-columns {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.research-col {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  padding: 20px;
+}
+
+.col-title {
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: var(--green);
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.hp-item {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(42, 48, 66, 0.5);
+}
+
+.hp-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+.hp-content {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.hp-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  display: flex;
+  gap: 12px;
+}
+
+.hp-meta .likes { color: var(--orange); }
+
+.watched-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(42, 48, 66, 0.5);
+  font-size: 12px;
+}
+
+.watched-item:last-child { border-bottom: none; }
+
+.watched-handle { color: var(--green); font-weight: 500; }
+.watched-followers { color: var(--text-tertiary); }
+.watched-via { color: var(--text-tertiary); font-size: 10px; }
+
+.intent-item {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(42, 48, 66, 0.5);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.intent-item:last-child { border-bottom: none; }
+
+.intent-item::before {
+  content: '\25B8';
+  color: var(--orange);
+  margin-right: 8px;
+}
+
+.no-data {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  padding: 20px 0;
+}
+
+/* ═══════════════════════════════════════════════════════
    GROWTH TIMELINE
    ═══════════════════════════════════════════════════════ */
 .timeline {
@@ -801,6 +909,7 @@ body {
   .topics-grid { grid-template-columns: repeat(2, 1fr); }
   .patterns-grid { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .research-columns { grid-template-columns: 1fr; }
   .flow-pipeline { flex-direction: column; }
   .flow-stage { border-right: 1px solid var(--border); border-bottom: none; }
   .flow-stage:last-child { border-bottom: 1px solid var(--border); }
@@ -924,6 +1033,37 @@ body {
   </div>
 
   <div class="voice-grid" id="voice-grid"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════
+     RESEARCH INTELLIGENCE
+     ═══════════════════════════════════════════════════════ -->
+<section class="section fade-in" id="research">
+  <div class="section-header">
+    <div class="section-label"><span class="dot"></span> RESEARCH ENGINE</div>
+    <h2 class="section-title">What the research found</h2>
+    <p class="section-desc">
+      Autonomous searches across X. High-performing content surfaces here.
+      Accounts to study. Intents that evolve with each session.
+    </p>
+  </div>
+
+  <div class="research-meta" id="research-meta"></div>
+
+  <div class="research-columns">
+    <div class="research-col">
+      <h3 class="col-title">HIGH PERFORMERS</h3>
+      <div id="high-performers-list"></div>
+    </div>
+    <div class="research-col">
+      <h3 class="col-title">WATCHED ACCOUNTS</h3>
+      <div id="watched-accounts-list"></div>
+    </div>
+    <div class="research-col">
+      <h3 class="col-title">RESEARCH INTENTS</h3>
+      <div id="research-intents-list"></div>
+    </div>
+  </div>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════
@@ -1164,7 +1304,101 @@ async function loadGrowth() {
       <div class="stat-value">${stats.patterns_cataloged}</div>
       <div class="stat-label">PATTERNS CATALOGED</div>
     </div>
+    ${stats.tweets_analyzed ? `
+    <div class="stat-card">
+      <div class="stat-value">${stats.tweets_analyzed.toLocaleString()}</div>
+      <div class="stat-label">TWEETS ANALYZED</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${stats.accounts_watched || 0}</div>
+      <div class="stat-label">ACCOUNTS WATCHED</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${stats.users_discovered || 0}</div>
+      <div class="stat-label">USERS DISCOVERED</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${stats.research_sessions || 0}</div>
+      <div class="stat-label">RESEARCH SESSIONS</div>
+    </div>
+    ` : ''}
   `;
+}
+
+async function loadResearch() {
+  const data = await fetchJSON('/api/research');
+  if (!data) return;
+
+  // Meta stats
+  const meta = document.getElementById('research-meta');
+  if (data.sessions_run > 0) {
+    meta.innerHTML = `
+      <div class="research-meta-item">
+        <div class="meta-value">${data.sessions_run}</div>
+        Sessions Run
+      </div>
+      <div class="research-meta-item">
+        <div class="meta-value">${data.total_tweets_analyzed.toLocaleString()}</div>
+        Tweets Analyzed
+      </div>
+      <div class="research-meta-item">
+        <div class="meta-value">${data.total_insights.toLocaleString()}</div>
+        Insights Stored
+      </div>
+    `;
+  } else {
+    meta.innerHTML = '<div class="research-meta-item">Research engine initialized. First session data loading...</div>';
+  }
+
+  // High performers
+  const hpList = document.getElementById('high-performers-list');
+  if (data.high_performers && data.high_performers.length > 0) {
+    hpList.innerHTML = data.high_performers.slice(0, 8).map(hp => `
+      <div class="hp-item">
+        <div class="hp-content">${escapeHtml(hp.content)}</div>
+        <div class="hp-meta">
+          <span class="likes">${hp.likes} likes</span>
+          <span>${hp.replies} replies</span>
+          <span>${hp.user}</span>
+          <span>${hp.topic}</span>
+        </div>
+      </div>
+    `).join('');
+  } else {
+    hpList.innerHTML = '<div class="no-data">No high performers found yet. Run a research session to discover them.</div>';
+  }
+
+  // Watched accounts
+  const acctList = document.getElementById('watched-accounts-list');
+  if (data.watched_accounts && data.watched_accounts.length > 0) {
+    acctList.innerHTML = data.watched_accounts.map(a => `
+      <div class="watched-item">
+        <div>
+          <span class="watched-handle">@${a.handle}</span>
+          <div class="watched-via">via ${a.discovered_via}</div>
+        </div>
+        <div class="watched-followers">${a.followers ? a.followers.toLocaleString() + ' followers' : 'studying...'}</div>
+      </div>
+    `).join('');
+  } else {
+    acctList.innerHTML = '<div class="no-data">No accounts on watchlist yet.</div>';
+  }
+
+  // Research intents
+  const intentList = document.getElementById('research-intents-list');
+  if (data.research_intents && data.research_intents.length > 0) {
+    intentList.innerHTML = data.research_intents.map(intent => `
+      <div class="intent-item">${escapeHtml(intent)}</div>
+    `).join('');
+  } else {
+    intentList.innerHTML = '<div class="no-data">No research intents generated yet.</div>';
+  }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
 // ── Live Polling ────────────────────────────────
@@ -1177,6 +1411,7 @@ async function pollLiveData() {
   const skip = false;
   loadOverview();
   loadLearningFlow();
+  loadResearch();
   loadGrowth();
   // Pulse the live indicator
   const dot = document.getElementById('live-dot');
@@ -1192,6 +1427,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadTopics();
   loadPatterns();
   loadVoice();
+  loadResearch();
   loadGrowth();
   // Start live polling
   setInterval(pollLiveData, POLL_INTERVAL);
