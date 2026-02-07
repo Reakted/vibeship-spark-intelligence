@@ -60,6 +60,31 @@ def show_status():
             print(f"    High performers:  {last.get('high_performers_found', 0)}")
             print(f"    Accounts found:   {last.get('accounts_discovered', 0)}")
 
+        # Budget info
+        month_key = datetime.now(timezone.utc).strftime("%Y-%m")
+        monthly = state.get("monthly_usage", {}).get(month_key, {})
+        used = monthly.get("reads", 0)
+        print(f"\n  Monthly budget ({month_key}): {used}/10,000 reads used")
+
+        # API stats from last session
+        last_api = last.get("api_calls", 0)
+        last_reads = last.get("tweet_reads", 0)
+        if last_api:
+            print(f"    Last session: {last_api} API calls, {last_reads} tweet reads")
+
+        # Topic performance
+        tp = state.get("topic_performance", {})
+        if tp:
+            print(f"\n  Topic performance:")
+            for name, perf in sorted(tp.items(), key=lambda x: -(x[1].get("hits", 0))):
+                hits = perf.get("hits", 0)
+                misses = perf.get("misses", 0)
+                total = hits + misses
+                rate = f"{hits/total:.0%}" if total > 0 else "n/a"
+                zeros = perf.get("consecutive_zeros", 0)
+                skip = " [SKIPPED]" if zeros >= 3 else ""
+                print(f"    {name:30s}  hit rate={rate:>4s}  ({hits}/{total}){skip}")
+
         intents = state.get("research_intents", [])
         if intents:
             print(f"\n  Active research intents ({len(intents)}):")
@@ -87,7 +112,7 @@ def show_status():
     print("=" * 50)
 
 
-def run_session(quick: bool = False):
+def run_session(quick: bool = False, dry_run: bool = False):
     """Run a research session."""
     print()
     print("=" * 50)
@@ -96,7 +121,7 @@ def run_session(quick: bool = False):
     print("=" * 50)
     print()
 
-    researcher = SparkResearcher(verbose=True)
+    researcher = SparkResearcher(verbose=True, dry_run=dry_run)
 
     if quick:
         # Quick mode: just search topics, skip account study
@@ -157,6 +182,7 @@ def main():
     parser.add_argument("--status", action="store_true", help="Show research status")
     parser.add_argument("--loop", action="store_true", help="Run continuously")
     parser.add_argument("--interval", type=float, default=4, help="Hours between sessions (default: 4)")
+    parser.add_argument("--dry-run", action="store_true", help="Print queries and budget without calling API")
     args = parser.parse_args()
 
     if args.status:
@@ -164,7 +190,7 @@ def main():
     elif args.loop:
         run_loop(args.interval)
     else:
-        run_session(quick=args.quick)
+        run_session(quick=args.quick, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

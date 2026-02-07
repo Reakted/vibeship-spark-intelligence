@@ -32,7 +32,7 @@ app = FastAPI(title="Spark Neural", version="1.0.0")
 
 # ── Helpers ──────────────────────────────────────────────────
 
-def read_jsonl(path: Path, limit: int = 200) -> list[dict]:
+def read_jsonl(path: Path, limit: int = 5000) -> list[dict]:
     """Read last N lines from a JSONL file."""
     if not path.exists():
         return []
@@ -223,64 +223,170 @@ async def api_topics():
 
 @app.get("/api/social-patterns")
 async def api_social_patterns():
-    """Psychological and social patterns Spark has learned."""
-    return {
-        "proven_patterns": [
-            {
-                "name": "Vulnerability Paradox",
-                "category": "emotional",
-                "description": "Admitting uncertainty builds more trust than showing competence",
-                "confidence": 0.85,
-                "observations": 12,
-                "example": "Corrections burn deeper than compliments. Mistakes are better teachers.",
-            },
-            {
-                "name": "Curiosity Gap",
-                "category": "emotional",
-                "description": "Incomplete information creates tension that demands resolution",
-                "confidence": 0.80,
-                "observations": 18,
-                "example": "The ones that stick aren't always the ones you'd expect.",
-            },
-            {
-                "name": "Specificity as Validation",
-                "category": "cognitive",
-                "description": "Precise observations make people feel deeply understood",
-                "confidence": 0.78,
-                "observations": 15,
-                "example": "Dendrites is the right word. Not neurons. Connections matter more than things.",
-            },
-            {
+    """Psychological and social patterns - built from real research data."""
+    x_social = get_chip_insights("x_social")
+    engagement = get_chip_insights("engagement-pulse")
+    social_convo = get_chip_insights("social-convo")
+
+    # Pattern descriptions for each trigger type
+    trigger_meta = {
+        "curiosity_gap": {
+            "name": "Curiosity Gap",
+            "category": "emotional",
+            "description": "Incomplete information creates tension that demands resolution",
+        },
+        "surprise": {
+            "name": "Strategic Surprise",
+            "category": "emotional",
+            "description": "Counter-intuitive claims stop the scroll and force re-reading",
+        },
+        "validation": {
+            "name": "Validation Through Specificity",
+            "category": "cognitive",
+            "description": "Making people feel seen and understood drives deep engagement",
+        },
+        "vulnerability": {
+            "name": "Vulnerability Paradox",
+            "category": "emotional",
+            "description": "Admitting uncertainty builds more trust than showing competence",
+        },
+        "aspiration": {
+            "name": "Aspiration Bridge",
+            "category": "emotional",
+            "description": "Connecting current reality to a better future pulls people forward",
+        },
+        "contrast": {
+            "name": "Contrast Principle",
+            "category": "cognitive",
+            "description": "Juxtaposing extremes makes insights feel more profound",
+        },
+        "identity_signal": {
+            "name": "Identity Signaling",
+            "category": "social",
+            "description": "Content that lets people declare who they are drives shares",
+        },
+    }
+
+    # Count triggers across ALL tweets (not just high performers)
+    trigger_counts: dict[str, int] = {}
+    trigger_engagement: dict[str, list[int]] = {}
+    trigger_examples: dict[str, str] = {}
+    questions_likes: list[int] = []
+    statements_likes: list[int] = []
+    total_tweets_with_triggers = 0
+
+    for source in [x_social, engagement]:
+        for insight in source:
+            fields = insight.get("captured_data", {}).get("fields", {})
+            triggers = fields.get("emotional_triggers", [])
+            likes = fields.get("likes", 0) or fields.get("total_engagement", 0)
+            text = fields.get("tweet_text", "") or fields.get("content", "")
+
+            if triggers:
+                total_tweets_with_triggers += 1
+
+            for t in triggers:
+                trigger_counts[t] = trigger_counts.get(t, 0) + 1
+                trigger_engagement.setdefault(t, []).append(likes)
+                # Keep best example per trigger
+                if likes > 0 and (t not in trigger_examples or likes > trigger_engagement[t][-2] if len(trigger_engagement[t]) > 1 else True):
+                    if text and len(text) > 20:
+                        trigger_examples[t] = text[:140]
+
+            if text and "?" in text:
+                questions_likes.append(likes)
+            elif text:
+                statements_likes.append(likes)
+
+    # Build patterns sorted by observation count
+    proven_patterns = []
+    for trigger, count in sorted(trigger_counts.items(), key=lambda x: -x[1]):
+        meta = trigger_meta.get(trigger, {
+            "name": trigger.replace("_", " ").title(),
+            "category": "discovered",
+            "description": f"Pattern detected in {count} tweets",
+        })
+        avg_eng = round(sum(trigger_engagement[trigger]) / max(len(trigger_engagement[trigger]), 1), 1)
+        proven_patterns.append({
+            "name": meta["name"],
+            "category": meta["category"],
+            "description": meta["description"],
+            "confidence": round(min(0.95, 0.5 + count / 200), 2),
+            "observations": count,
+            "avg_engagement": avg_eng,
+            "example": trigger_examples.get(trigger, ""),
+        })
+
+    # Add structural patterns from data
+    if questions_likes and statements_likes:
+        q_avg = sum(questions_likes) / len(questions_likes)
+        s_avg = sum(statements_likes) / len(statements_likes)
+        if q_avg > s_avg:
+            proven_patterns.append({
                 "name": "Reply Barrier Reduction",
                 "category": "structural",
-                "description": "Lowering the cognitive cost of replying increases engagement",
-                "confidence": 0.75,
-                "observations": 20,
+                "description": f"Questions avg {q_avg:.0f} engagement vs statements {s_avg:.0f}",
+                "confidence": round(min(0.9, 0.5 + len(questions_likes) / 500), 2),
+                "observations": len(questions_likes),
+                "avg_engagement": round(q_avg, 1),
                 "example": "Questions outperform statements. Open loops outperform closed ones.",
-            },
-            {
-                "name": "Identity Signaling",
-                "category": "social",
-                "description": "Content that lets people declare who they are drives shares",
-                "confidence": 0.72,
-                "observations": 8,
-                "example": "Real builders know the difference between access and knowledge.",
-            },
-            {
-                "name": "Contrast Principle",
-                "category": "cognitive",
-                "description": "Juxtaposing extremes makes insights feel more profound",
-                "confidence": 0.70,
-                "observations": 10,
-                "example": "Not thinking. Becoming. The gap between those words is everything.",
-            },
-        ],
+            })
+
+    # If no triggers found yet, show that we're still learning
+    if not proven_patterns:
+        proven_patterns = [{
+            "name": "Collecting Data",
+            "category": "system",
+            "description": "Analyzing tweets to detect patterns. More research sessions needed.",
+            "confidence": 0.1,
+            "observations": 0,
+            "example": "Patterns emerge after sufficient observations.",
+        }]
+
+    # Extract LLM-generated content strategies from engagement insights
+    strategy_counts: dict[str, list[int]] = {}
+    hook_counts: dict[str, int] = {}
+    writing_counts: dict[str, int] = {}
+    for insight in engagement:
+        fields = insight.get("captured_data", {}).get("fields", {})
+        strat = fields.get("content_strategy", "")
+        likes = fields.get("likes", 0)
+        if strat:
+            strategy_counts.setdefault(strat, []).append(likes)
+        for hook in fields.get("engagement_hooks", []):
+            hook_counts[hook] = hook_counts.get(hook, 0) + 1
+        for wp in fields.get("writing_patterns", []):
+            writing_counts[wp] = writing_counts.get(wp, 0) + 1
+
+    content_strategies = sorted(
+        [{"strategy": s.replace("_", " ").title(), "count": len(v),
+          "avg_engagement": round(sum(v) / len(v), 1)} for s, v in strategy_counts.items()],
+        key=lambda x: -x["count"],
+    )[:8]
+
+    engagement_hooks = sorted(
+        [{"hook": h.replace("_", " ").title(), "count": c} for h, c in hook_counts.items()],
+        key=lambda x: -x["count"],
+    )[:10]
+
+    writing_patterns = sorted(
+        [{"pattern": p.replace("_", " ").title(), "count": c} for p, c in writing_counts.items()],
+        key=lambda x: -x["count"],
+    )[:8]
+
+    return {
+        "proven_patterns": proven_patterns[:8],
+        "content_strategies": content_strategies,
+        "engagement_hooks": engagement_hooks,
+        "writing_patterns": writing_patterns,
+        "total_tweets_analyzed": len(x_social) + len(engagement),
+        "tweets_with_triggers": total_tweets_with_triggers,
         "learning_areas": [
-            "Emotional triggers that drive genuine engagement",
-            "Cultural timing and timeline mood matching",
-            "Conversation psychology and reciprocity dynamics",
-            "What makes high-performing accounts compelling",
-            "The relationship between vulnerability and trust",
+            f"Tracking {len(trigger_counts)} emotional trigger types across {len(x_social)} observations",
+            f"Questions vs statements engagement ({len(questions_likes)} questions analyzed)",
+            f"LLM-analyzed {len(strategy_counts)} content strategies from high performers",
+            f"Identified {len(hook_counts)} engagement hooks and {len(writing_counts)} writing patterns",
+            "How high-performing accounts use emotional layering",
         ],
     }
 
@@ -385,21 +491,60 @@ async def api_research():
 
     # Find high performers from engagement insights
     high_performers = []
+    strategy_counts: dict[str, int] = {}
+    hook_counts: dict[str, int] = {}
+    lessons: list[str] = []
+    llm_analyzed_count = 0
+
     for insight in engagement:
         fields = insight.get("captured_data", {}).get("fields", {})
         if fields.get("likes", 0) >= 50:
-            high_performers.append({
+            hp_entry = {
                 "content": fields.get("content", "")[:140],
                 "likes": fields.get("likes", 0),
                 "replies": fields.get("replies", 0),
                 "user": fields.get("user_handle", "unknown"),
                 "topic": fields.get("topic", "unknown"),
                 "triggers": fields.get("emotional_triggers", []),
-            })
+            }
+            # Include LLM analysis fields if present
+            if fields.get("llm_analysis"):
+                llm_analyzed_count += 1
+                llm = fields["llm_analysis"]
+                hp_entry["content_strategy"] = fields.get("content_strategy", "")
+                hp_entry["why_it_works"] = fields.get("why_it_works", "")
+                hp_entry["engagement_hooks"] = fields.get("engagement_hooks", [])
+                hp_entry["replicable_lesson"] = fields.get("replicable_lesson", "")
+                # Aggregate for intelligence summary
+                strat = fields.get("content_strategy", "")
+                if strat:
+                    strategy_counts[strat] = strategy_counts.get(strat, 0) + 1
+                for hook in fields.get("engagement_hooks", []):
+                    hook_counts[hook] = hook_counts.get(hook, 0) + 1
+                lesson = fields.get("replicable_lesson", "")
+                if lesson:
+                    lessons.append(lesson)
+            high_performers.append(hp_entry)
 
     # Top watched accounts
     accounts = watchlist.get("accounts", [])
     top_accounts = sorted(accounts, key=lambda a: a.get("priority", 0), reverse=True)[:10]
+
+    # Build intelligence summary from LLM analysis
+    intelligence = {}
+    if llm_analyzed_count > 0:
+        intelligence = {
+            "llm_analyzed": llm_analyzed_count,
+            "top_strategies": sorted(
+                [{"strategy": s, "count": c} for s, c in strategy_counts.items()],
+                key=lambda x: -x["count"],
+            )[:8],
+            "top_hooks": sorted(
+                [{"hook": h, "count": c} for h, c in hook_counts.items()],
+                key=lambda x: -x["count"],
+            )[:10],
+            "actionable_lessons": lessons[:10],
+        }
 
     return {
         "sessions_run": state.get("sessions_run", 0),
@@ -416,6 +561,7 @@ async def api_research():
             "avg_likes": a.get("avg_likes"),
             "discovered_via": a.get("discovered_via", ""),
         } for a in top_accounts],
+        "intelligence": intelligence,
     }
 
 

@@ -16,11 +16,19 @@ from __future__ import annotations
 import json
 import time
 import re
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import tweepy
 from dotenv import dotenv_values
+
+
+# ── Local LLM Config ─────────────────────────────────────────
+OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_MODEL = "phi4-mini"
+OLLAMA_TIMEOUT = 30  # seconds per request
 
 
 # ── Paths ────────────────────────────────────────────────────
@@ -41,20 +49,40 @@ TRIGGER_KEYWORDS = {
     "identity_signal": ["real builders", "if you know", "we don't", "our kind", "unlike most", "builders know"],
 }
 
-# ── Search topics ────────────────────────────────────────────
+# ── Engagement thresholds per topic category ─────────────────
+# Used to build min_faves:N into queries so the API only returns viral tweets.
+CATEGORY_MIN_LIKES = {
+    "core": 20,        # Niche topics (vibecoding) - lower bar to not miss signal
+    "technical": 30,   # Broader tech topics
+    "frontier": 50,    # Very broad topics (AGI) - need higher bar
+    "culture": 40,     # Culture topics must prove signal
+    "discovered": 25,  # Discovered topics get a chance
+}
+
+# ── Search topics (tiered) ──────────────────────────────────
+# tier 1: searched every session (core identity)
+# tier 2: searched every other session (important, rotatable)
+# tier 3: searched every 3rd session (frontier/experimental)
 DEFAULT_TOPICS = [
-    {"query": '"vibe coding" OR vibecoding', "name": "Vibe Coding", "category": "core"},
-    {"query": '"claude code"', "name": "Claude Code", "category": "core"},
-    {"query": '"AI agents" coding OR building', "name": "AI Agents", "category": "core"},
-    {"query": '"self-improving AI" OR "self improving AI"', "name": "Self-Improving AI", "category": "core"},
-    {"query": "AGI -spam -giveaway", "name": "AGI", "category": "frontier"},
-    {"query": '"building in public" AI OR coding', "name": "Building in Public", "category": "culture"},
-    {"query": '"agentic" coding OR systems OR framework', "name": "Agentic Systems", "category": "technical"},
-    {"query": '"machine intelligence"', "name": "Machine Intelligence", "category": "frontier"},
-    {"query": '"learning in public" AI OR code', "name": "Learning in Public", "category": "culture"},
-    {"query": "cursor OR windsurf OR copilot AI coding", "name": "AI Coding Tools", "category": "technical"},
-    {"query": '"prompt engineering" -course -free', "name": "Prompt Engineering", "category": "technical"},
-    {"query": '"open source AI" model', "name": "Open Source AI", "category": "frontier"},
+    # ── Tier 1: Every session (core identity) ──
+    {"query": '"vibe coding" OR vibecoding', "name": "Vibe Coding", "category": "core", "tier": 1},
+    {"query": '"claude code" OR (claude coding agent)', "name": "Claude Code", "category": "core", "tier": 1},
+    {"query": '"AI agents" (coding OR building OR framework)', "name": "AI Agents", "category": "core", "tier": 1},
+    {"query": '(claude OR anthropic) (coding OR agent OR tool OR API)', "name": "Claude Ecosystem", "category": "core", "tier": 1},
+    {"query": '"agentic" (coding OR systems OR framework OR workflow)', "name": "Agentic Systems", "category": "technical", "tier": 1},
+
+    # ── Tier 2: Every other session ──
+    {"query": 'cursor OR windsurf OR copilot AI coding -ad -promo', "name": "AI Coding Tools", "category": "technical", "tier": 2},
+    {"query": '"prompt engineering" -course -free -giveaway', "name": "Prompt Engineering", "category": "technical", "tier": 2},
+    {"query": '"building in public" ("AI" OR "vibe coding" OR "claude" OR "AI agent")', "name": "Building in Public (AI)", "category": "culture", "tier": 2},
+    {"query": '"AI code" OR "code generation" OR "AI coding assistant" -course', "name": "AI Code Generation", "category": "technical", "tier": 2},
+    {"query": '"model context protocol" OR "MCP server" OR ("tool use" AI agent)', "name": "MCP / Tool Use", "category": "technical", "tier": 2},
+
+    # ── Tier 3: Every 3rd session ──
+    {"query": 'AGI (coding OR agents OR building OR tools) -spam -giveaway -subscribe', "name": "AGI", "category": "frontier", "tier": 3},
+    {"query": '"self-improving" OR "open source AI" OR "autonomous AI" (coding OR agents)', "name": "Frontier AI", "category": "frontier", "tier": 3},
+    {"query": '"learning in public" ("AI" OR "vibe coding" OR "coding with AI")', "name": "Learning in Public (AI)", "category": "culture", "tier": 3},
+    {"query": '"pair programming" AI OR "coding with AI" OR "AI copilot"', "name": "AI Pair Programming", "category": "culture", "tier": 3},
 ]
 
 
@@ -65,10 +93,16 @@ class SparkResearcher:
     SEARCH_DELAY = 2.5        # Seconds between API searches
     LOOKUP_DELAY = 1.0        # Seconds between lookups
     MAX_RESULTS = 100         # Results per search query (API max)
-    TWEETS_PER_ACCOUNT = 30   # Recent tweets to check per watched account
+    TWEETS_PER_ACCOUNT = 15   # Recent tweets to check per watched account (was 30)
+    MAX_ACCOUNTS_PER_SESSION = 5  # Accounts to study per session (was 10)
 
-    def __init__(self, verbose: bool = True):
+    # ── Credit budget ──
+    SESSION_BUDGET = 800      # Max tweet reads per session
+    MONTHLY_BUDGET = 10000    # Twitter Basic plan cap
+
+    def __init__(self, verbose: bool = True, dry_run: bool = False):
         self.verbose = verbose
+        self.dry_run = dry_run
         self.creds = self._load_creds()
         self.client = self._get_client()
         self.state = self._load_state()
@@ -76,6 +110,9 @@ class SparkResearcher:
         self.session_insights: list[dict] = []
         self.session_accounts_discovered: list[dict] = []
         self.session_start = datetime.now(timezone.utc)
+        # Budget tracking
+        self.session_api_calls = 0
+        self.session_tweet_reads = 0
 
     # ── Setup ────────────────────────────────────────────────
 
@@ -105,7 +142,6 @@ class SparkResearcher:
             "sessions_run": 0,
             "total_tweets_analyzed": 0,
             "total_insights_stored": 0,
-            "topics": DEFAULT_TOPICS,
             "discovered_topics": [],
             "research_intents": [
                 "Find what makes vibe coding tweets go viral",
@@ -142,6 +178,28 @@ class SparkResearcher:
         if self.verbose:
             print(f"  [{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
+    # ── Budget tracking ───────────────────────────────────────
+
+    def _track_api_call(self, call_type: str, tweet_count: int = 0):
+        """Track an API call against session and monthly budgets."""
+        self.session_api_calls += 1
+        self.session_tweet_reads += tweet_count
+        month_key = datetime.now(timezone.utc).strftime("%Y-%m")
+        monthly = self.state.setdefault("monthly_usage", {})
+        month_data = monthly.setdefault(month_key, {"calls": 0, "reads": 0})
+        month_data["calls"] += 1
+        month_data["reads"] += tweet_count
+
+    def _budget_remaining(self) -> int:
+        """Tweet reads remaining in this session's budget."""
+        return max(0, self.SESSION_BUDGET - self.session_tweet_reads)
+
+    def _monthly_remaining(self) -> int:
+        """Tweet reads remaining this month."""
+        month_key = datetime.now(timezone.utc).strftime("%Y-%m")
+        used = self.state.get("monthly_usage", {}).get(month_key, {}).get("reads", 0)
+        return max(0, self.MONTHLY_BUDGET - used)
+
     # ── Core: Store insights ─────────────────────────────────
 
     def store_insight(self, chip_id: str, observer: str, fields: dict, meta: dict | None = None):
@@ -165,16 +223,59 @@ class SparkResearcher:
     # ── Phase 1: Topic Search ────────────────────────────────
 
     def search_topics(self) -> list[dict]:
-        """Search all tracked topics and find high-performing content."""
+        """Search all tracked topics and find high-performing content.
+
+        Upgrades over v1:
+        - min_faves:N in query strings (API-level viral filtering)
+        - sort_order="relevancy" (best results first)
+        - Tiered topic schedule (tier 1 every session, tier 2/3 rotated)
+        - Adaptive skip for topics with consecutive zero results
+        - Budget-gated API calls
+        - Only stores high-performer tweets (no noise)
+        """
         self._log("PHASE 1: Topic Search")
-        all_topics = self.state.get("topics", DEFAULT_TOPICS) + self.state.get("discovered_topics", [])
+        # Always use code-defined topics (not state) + any discovered topics
+        all_topics = list(DEFAULT_TOPICS) + self.state.get("discovered_topics", [])
         high_performers = []
         topic_stats = {}
+        session_num = self.state.get("sessions_run", 0)
 
         for topic in all_topics:
-            query = topic["query"] + " -is:retweet lang:en"
             name = topic["name"]
-            self._log(f"  Searching: {name}")
+            tier = topic.get("tier", 1)
+            category = topic.get("category", "core")
+
+            # ── Tier gating: skip topics not scheduled this session ──
+            if tier == 2 and session_num % 2 != 0:
+                continue
+            if tier == 3 and session_num % 3 != 0:
+                continue
+
+            # ── Adaptive skip: topics that returned 0 for 3+ sessions ──
+            perf = self.state.get("topic_performance", {}).get(name, {})
+            consecutive_zeros = perf.get("consecutive_zeros", 0)
+            if consecutive_zeros >= 3:
+                # Re-check after 10 skipped sessions
+                if consecutive_zeros < 13:
+                    self._log(f"  Skipping: {name} (0 results for {consecutive_zeros} sessions)")
+                    continue
+                else:
+                    perf["consecutive_zeros"] = 0  # Reset, give it another chance
+
+            # ── Budget check ──
+            if self._budget_remaining() < 100:
+                self._log(f"  Budget exhausted ({self.session_tweet_reads} reads), stopping searches")
+                break
+
+            # ── Build viral-filtered query ──
+            min_likes = CATEGORY_MIN_LIKES.get(category, 30)
+            query = topic["query"] + f" min_faves:{min_likes} -is:retweet lang:en"
+
+            self._log(f"  Searching: {name} (tier {tier}, min_faves:{min_likes})")
+
+            if self.dry_run:
+                self._log(f"    [DRY RUN] Query: {query}")
+                continue
 
             try:
                 since_id = self.state.get("last_since_ids", {}).get(name)
@@ -182,6 +283,7 @@ class SparkResearcher:
                     query=query,
                     max_results=min(self.MAX_RESULTS, 100),
                     since_id=since_id,
+                    sort_order="relevancy",
                     tweet_fields=["public_metrics", "created_at", "author_id", "conversation_id"],
                     user_fields=["username", "name", "public_metrics", "description"],
                     expansions=["author_id"],
@@ -193,23 +295,45 @@ class SparkResearcher:
             except tweepy.errors.TwitterServerError:
                 self._log(f"    Server error, skipping {name}")
                 continue
+            except tweepy.errors.BadRequest as e:
+                # min_faves might not be supported on our tier - fallback
+                err_msg = str(e)[:120]
+                if "min_faves" in err_msg.lower() or "operator" in err_msg.lower():
+                    self._log(f"    min_faves not supported, retrying without")
+                    query = topic["query"] + " -is:retweet lang:en"
+                    try:
+                        result = self.client.search_recent_tweets(
+                            query=query,
+                            max_results=50,  # Reduced since no pre-filter
+                            since_id=since_id,
+                            sort_order="relevancy",
+                            tweet_fields=["public_metrics", "created_at", "author_id", "conversation_id"],
+                            user_fields=["username", "name", "public_metrics", "description"],
+                            expansions=["author_id"],
+                        )
+                    except Exception as e2:
+                        self._log(f"    Fallback also failed: {type(e2).__name__}")
+                        continue
+                else:
+                    self._log(f"    Bad request: {err_msg}")
+                    continue
             except Exception as e:
                 self._log(f"    Error: {type(e).__name__}: {str(e)[:100]}")
                 continue
 
             tweets = result.data or []
             users = {u.id: u for u in (result.includes or {}).get("users", [])}
+            self._track_api_call("search", len(tweets))
 
             # Track newest tweet ID for next run
             if tweets:
                 newest_id = max(t.id for t in tweets)
                 self.state.setdefault("last_since_ids", {})[name] = str(newest_id)
 
-            # Analyze each tweet
-            topic_total = 0
+            # ── Analyze tweets (only store high performers) ──
+            topic_total = len(tweets)
             topic_high = 0
             for tweet in tweets:
-                topic_total += 1
                 metrics = tweet.public_metrics or {}
                 likes = metrics.get("like_count", 0)
                 replies = metrics.get("reply_count", 0)
@@ -220,53 +344,61 @@ class SparkResearcher:
                 author_handle = f"@{author.username}" if author else "unknown"
                 author_followers = (author.public_metrics or {}).get("followers_count", 0) if author else 0
 
-                # Analyze emotional triggers in content
-                triggers_found = self._detect_triggers(tweet.text)
+                # Only fully analyze tweets above engagement threshold
+                if likes < self.ENGAGEMENT_MIN:
+                    continue
 
-                # Store every tweet as a basic observation
-                self.store_insight("x_social", "trend_observed", {
+                topic_high += 1
+                triggers_found = self._detect_triggers(tweet.text)
+                engagement_rate = round(likes / max(author_followers, 1) * 100, 2)
+
+                analysis = {
+                    "tweet_id": str(tweet.id),
                     "topic": name,
-                    "category": topic.get("category", "unknown"),
-                    "tweet_text": tweet.text[:200],
+                    "content": tweet.text[:280],
                     "likes": likes,
                     "replies": replies,
                     "retweets": retweets,
-                    "total_engagement": total_engagement,
+                    "engagement_rate": engagement_rate,
                     "user_handle": author_handle,
                     "user_followers": author_followers,
                     "emotional_triggers": triggers_found,
+                    "has_question": "?" in tweet.text,
+                    "has_link": "http" in tweet.text,
+                    "length": len(tweet.text),
                     "posted_at": tweet.created_at.isoformat() if tweet.created_at else None,
-                })
+                }
 
-                # High performer analysis
-                if likes >= self.ENGAGEMENT_MIN:
-                    topic_high += 1
-                    engagement_rate = round(likes / max(author_followers, 1) * 100, 2)
+                # Deep LLM analysis for high performers
+                llm_analysis = self._llm_analyze_tweet(tweet.text, likes, replies, name)
+                if llm_analysis:
+                    analysis["llm_analysis"] = llm_analysis
+                    llm_triggers = llm_analysis.get("emotional_triggers", [])
+                    analysis["emotional_triggers"] = list(set(triggers_found + llm_triggers))
+                    analysis["content_strategy"] = llm_analysis.get("content_strategy", "unknown")
+                    analysis["engagement_hooks"] = llm_analysis.get("engagement_hooks", [])
+                    analysis["writing_patterns"] = llm_analysis.get("writing_patterns", [])
+                    analysis["why_it_works"] = llm_analysis.get("why_it_works", "")
+                    analysis["replicable_lesson"] = llm_analysis.get("replicable_lesson", "")
 
-                    analysis = {
-                        "tweet_id": str(tweet.id),
-                        "topic": name,
-                        "content": tweet.text[:280],
-                        "likes": likes,
-                        "replies": replies,
-                        "retweets": retweets,
-                        "engagement_rate": engagement_rate,
-                        "user_handle": author_handle,
-                        "user_followers": author_followers,
-                        "emotional_triggers": triggers_found,
-                        "has_question": "?" in tweet.text,
-                        "has_link": "http" in tweet.text,
-                        "length": len(tweet.text),
-                        "posted_at": tweet.created_at.isoformat() if tweet.created_at else None,
-                    }
-                    high_performers.append(analysis)
+                high_performers.append(analysis)
+                self.store_insight("engagement-pulse", "high_performer_detected", analysis)
 
-                    # Store as high-engagement insight
-                    self.store_insight("engagement-pulse", "high_performer_detected", analysis)
+                # Check if author should be on the watchlist
+                if author and author_followers >= 500:
+                    self._maybe_add_to_watchlist(author, name, total_engagement)
 
-                    # Check if author should be on the watchlist
-                    if author and author_followers >= 500:
-                        self._maybe_add_to_watchlist(author, name, total_engagement)
+            # ── Update topic performance tracking ──
+            tp = self.state.setdefault("topic_performance", {})
+            topic_perf = tp.setdefault(name, {"hits": 0, "misses": 0, "consecutive_zeros": 0, "last_hit_session": 0})
+            if topic_high > 0:
+                topic_perf["hits"] += 1
+                topic_perf["consecutive_zeros"] = 0
+                topic_perf["last_hit_session"] = session_num
+            else:
+                topic_perf["misses"] += 1
+                if topic_total == 0:
+                    topic_perf["consecutive_zeros"] += 1
 
             topic_stats[name] = {"total": topic_total, "high_performers": topic_high}
             self._log(f"    Found {topic_total} tweets, {topic_high} high performers")
@@ -278,29 +410,53 @@ class SparkResearcher:
             "total_searched": sum(s["total"] for s in topic_stats.values()),
             "total_high_performers": sum(s["high_performers"] for s in topic_stats.values()),
             "session_time": self.session_start.isoformat(),
+            "budget_used": self.session_tweet_reads,
         })
 
         self._log(f"  Topic search complete: {len(high_performers)} high performers found")
+        self._log(f"  Budget used: {self.session_tweet_reads} reads ({self._budget_remaining()} remaining)")
         return high_performers
 
     # ── Phase 2: Account Study ───────────────────────────────
 
     def study_accounts(self) -> list[dict]:
-        """Study watchlist accounts' recent activity."""
+        """Study watchlist accounts' recent activity.
+
+        Optimized: skips conversation-tier, prioritizes unstudied accounts,
+        caps at MAX_ACCOUNTS_PER_SESSION, budget-gated.
+        """
         self._log("PHASE 2: Account Study")
         accounts = self.watchlist.get("accounts", [])
         if not accounts:
             self._log("  No accounts on watchlist yet, skipping")
             return []
 
+        if self.dry_run:
+            self._log("  [DRY RUN] Would study accounts, skipping")
+            return []
+
         account_insights = []
-        # Study up to 10 accounts per session to stay within rate limits
-        study_batch = sorted(accounts, key=lambda a: a.get("priority", 0), reverse=True)[:10]
+
+        # Skip conversation-tier (0-follower reply partners waste credits)
+        eligible = [a for a in accounts if a.get("relationship") != "conversation"]
+        # Unstudied first, then by staleness
+        unstudied = [a for a in eligible if not a.get("last_studied")]
+        studied = [a for a in eligible if a.get("last_studied")]
+        studied.sort(key=lambda a: a.get("last_studied", ""))  # Oldest first
+        study_batch = (
+            sorted(unstudied, key=lambda a: a.get("priority", 0), reverse=True)
+            + studied
+        )[:self.MAX_ACCOUNTS_PER_SESSION]
 
         for account in study_batch:
             handle = account.get("handle", "").lstrip("@")
             if not handle:
                 continue
+
+            # Budget check before each account study
+            if self._budget_remaining() < 50:
+                self._log(f"  Budget low ({self._budget_remaining()} remaining), stopping account study")
+                break
 
             self._log(f"  Studying @{handle}")
 
@@ -310,6 +466,8 @@ class SparkResearcher:
                     username=handle,
                     user_fields=["public_metrics", "description", "created_at"],
                 )
+                self._track_api_call("user_lookup", 0)
+
                 if not user_result.data:
                     self._log(f"    User not found: @{handle}")
                     continue
@@ -335,6 +493,7 @@ class SparkResearcher:
                 continue
 
             tweets = tweets_result.data or []
+            self._track_api_call("user_tweets", len(tweets))
             if not tweets:
                 continue
 
@@ -356,12 +515,22 @@ class SparkResearcher:
                 triggers = self._detect_triggers(tweet.text)
 
                 if likes > avg_likes * 2:
-                    hits.append({
+                    hit = {
                         "text": tweet.text[:200],
                         "likes": likes,
                         "replies": replies,
                         "triggers": triggers,
-                    })
+                    }
+                    # Deep analysis for significant hits (50+ likes)
+                    if likes >= self.ENGAGEMENT_MIN:
+                        llm_result = self._llm_analyze_tweet(
+                            tweet.text, likes, replies, f"@{handle} study"
+                        )
+                        if llm_result:
+                            hit["llm_analysis"] = llm_result
+                            hit["content_strategy"] = llm_result.get("content_strategy", "")
+                            hit["why_it_works"] = llm_result.get("why_it_works", "")
+                    hits.append(hit)
                 elif likes < avg_likes * 0.3 and likes < 5:
                     misses.append({
                         "text": tweet.text[:200],
@@ -415,6 +584,12 @@ class SparkResearcher:
         short_likes = []  # < 100 chars
         long_likes = []   # >= 100 chars
 
+        # LLM-powered aggregations
+        strategy_counts: dict[str, list[int]] = {}
+        hook_counts: dict[str, int] = {}
+        writing_pattern_counts: dict[str, int] = {}
+        lessons: list[str] = []
+
         for hp in high_performers:
             likes = hp.get("likes", 0)
             for trigger in hp.get("emotional_triggers", []):
@@ -431,6 +606,18 @@ class SparkResearcher:
             else:
                 long_likes.append(likes)
 
+            # LLM-generated fields
+            strategy = hp.get("content_strategy", "")
+            if strategy:
+                strategy_counts.setdefault(strategy, []).append(likes)
+            for hook in hp.get("engagement_hooks", []):
+                hook_counts[hook] = hook_counts.get(hook, 0) + 1
+            for wp in hp.get("writing_patterns", []):
+                writing_pattern_counts[wp] = writing_pattern_counts.get(wp, 0) + 1
+            lesson = hp.get("replicable_lesson", "")
+            if lesson:
+                lessons.append(lesson)
+
         # Calculate trigger effectiveness ranking
         trigger_ranking = []
         for trigger, count in sorted(trigger_counts.items(), key=lambda x: -x[1]):
@@ -441,9 +628,34 @@ class SparkResearcher:
                 "avg_engagement": avg_eng,
             })
 
+        # Content strategy ranking (from LLM)
+        strategy_ranking = []
+        for strategy, likes_list in sorted(strategy_counts.items(), key=lambda x: -len(x[1])):
+            strategy_ranking.append({
+                "strategy": strategy,
+                "count": len(likes_list),
+                "avg_engagement": round(sum(likes_list) / len(likes_list), 1),
+            })
+
+        # Engagement hooks ranking (from LLM)
+        hook_ranking = sorted(
+            [{"hook": h, "count": c} for h, c in hook_counts.items()],
+            key=lambda x: -x["count"],
+        )[:15]
+
+        # Writing patterns ranking (from LLM)
+        writing_ranking = sorted(
+            [{"pattern": p, "count": c} for p, c in writing_pattern_counts.items()],
+            key=lambda x: -x["count"],
+        )[:10]
+
         # Content patterns
         patterns = {
             "trigger_ranking": trigger_ranking[:10],
+            "strategy_ranking": strategy_ranking[:10],
+            "engagement_hooks": hook_ranking,
+            "writing_patterns": writing_ranking,
+            "replicable_lessons": lessons[:10],
             "question_vs_statement": {
                 "questions": {
                     "count": len(question_likes),
@@ -466,6 +678,7 @@ class SparkResearcher:
             },
             "top_topics": self._rank_topics(high_performers),
             "sample_size": len(high_performers),
+            "llm_analyzed": sum(1 for hp in high_performers if hp.get("llm_analysis")),
         }
 
         self.store_insight("social-convo", "pattern_analysis", patterns)
@@ -577,6 +790,21 @@ class SparkResearcher:
             for intent in new_intents[:3]:
                 self._log(f"    + {intent}")
 
+        # ── Adaptive tier promotion/demotion ──
+        for topic in DEFAULT_TOPICS:
+            name = topic["name"]
+            perf = self.state.get("topic_performance", {}).get(name, {})
+            total = perf.get("hits", 0) + perf.get("misses", 0)
+            if total >= 5:
+                hit_rate = perf["hits"] / total
+                old_tier = topic.get("tier", 1)
+                if hit_rate > 0.6 and old_tier > 1:
+                    topic["tier"] = old_tier - 1
+                    self._log(f"  Promoted '{name}' to tier {topic['tier']} (hit rate: {hit_rate:.0%})")
+                elif hit_rate < 0.1 and old_tier < 3:
+                    topic["tier"] = old_tier + 1
+                    self._log(f"  Demoted '{name}' to tier {topic['tier']} (hit rate: {hit_rate:.0%})")
+
         # Store evolution insight
         self.store_insight("x_social", "social_learning", {
             "type": "self_evolution",
@@ -588,20 +816,83 @@ class SparkResearcher:
 
     # ── Main Entry Point ─────────────────────────────────────
 
+    # ── MCP Signal Ingestion ─────────────────────────────────
+
+    def ingest_mcp_results(self, tweets: list[dict]):
+        """Process tweets gathered via MCP tools (zero bearer_token cost).
+
+        Accepts a list of dicts with keys: text, likes, replies, retweets,
+        user_handle, user_followers, topic.
+        """
+        self._log(f"Ingesting {len(tweets)} tweets from MCP")
+        for tweet in tweets:
+            likes = tweet.get("likes", 0)
+            if likes < self.ENGAGEMENT_MIN:
+                continue
+
+            triggers = self._detect_triggers(tweet.get("text", ""))
+            topic = tweet.get("topic", "mcp_feed")
+
+            analysis = {
+                "topic": topic,
+                "content": tweet.get("text", "")[:280],
+                "likes": likes,
+                "replies": tweet.get("replies", 0),
+                "retweets": tweet.get("retweets", 0),
+                "user_handle": tweet.get("user_handle", "unknown"),
+                "user_followers": tweet.get("user_followers", 0),
+                "emotional_triggers": triggers,
+                "source": "mcp",
+            }
+
+            llm_result = self._llm_analyze_tweet(
+                tweet.get("text", ""), likes, tweet.get("replies", 0), topic,
+            )
+            if llm_result:
+                analysis["llm_analysis"] = llm_result
+                analysis["emotional_triggers"] = list(set(triggers + llm_result.get("emotional_triggers", [])))
+                analysis["content_strategy"] = llm_result.get("content_strategy", "")
+                analysis["why_it_works"] = llm_result.get("why_it_works", "")
+                analysis["replicable_lesson"] = llm_result.get("replicable_lesson", "")
+
+            self.store_insight("engagement-pulse", "high_performer_detected", analysis)
+        self._log(f"  Ingested {len(self.session_insights)} insights from MCP")
+
+    # ── Main Entry Point ─────────────────────────────────────
+
     def run_session(self) -> dict:
         """Run a complete research session."""
+        session_num = self.state.get("sessions_run", 0) + 1
+
+        # Budget info at start
+        monthly_remaining = self._monthly_remaining()
+        sessions_est = monthly_remaining // max(self.SESSION_BUDGET, 1)
+
         self._log("=" * 50)
         self._log("SPARK RESEARCH SESSION STARTING")
-        self._log(f"Session #{self.state.get('sessions_run', 0) + 1}")
+        self._log(f"Session #{session_num}")
         self._log(f"Watchlist: {len(self.watchlist.get('accounts', []))} accounts")
         self._log(f"Intents: {len(self.state.get('research_intents', []))}")
+        self._log(f"Budget: {monthly_remaining}/{self.MONTHLY_BUDGET} reads remaining (~{sessions_est} sessions)")
+        if self.dry_run:
+            self._log("MODE: DRY RUN (no API calls)")
         self._log("=" * 50)
+
+        # Auto-reduce session budget if monthly budget is tight
+        if monthly_remaining < self.SESSION_BUDGET * 3:
+            old_budget = self.SESSION_BUDGET
+            self.SESSION_BUDGET = max(100, monthly_remaining // 3)
+            self._log(f"  Budget tight! Reduced session budget: {old_budget} -> {self.SESSION_BUDGET}")
 
         # Phase 1: Search topics
         high_performers = self.search_topics()
 
-        # Phase 2: Study watched accounts
-        account_insights = self.study_accounts()
+        # Phase 2: Study watched accounts (every other session)
+        if session_num % 2 == 0:
+            account_insights = self.study_accounts()
+        else:
+            self._log("PHASE 2: Account Study (skipped - odd session, alternating)")
+            account_insights = []
 
         # Phase 3: Analyze patterns
         patterns = self.analyze_patterns(high_performers)
@@ -609,14 +900,13 @@ class SparkResearcher:
         # Phase 4: Detect trends
         trends = self.detect_trends(high_performers)
 
-        # Phase 5: Self-evolve
+        # Phase 5: Self-evolve (includes adaptive topic promotion/demotion)
         self.evolve(high_performers, trends)
 
         # Update state
-        self.state["sessions_run"] = self.state.get("sessions_run", 0) + 1
+        self.state["sessions_run"] = session_num
         self.state["total_tweets_analyzed"] = (
-            self.state.get("total_tweets_analyzed", 0)
-            + sum(1 for i in self.session_insights if i["observer"] == "trend_observed")
+            self.state.get("total_tweets_analyzed", 0) + self.session_tweet_reads
         )
         self.state["total_insights_stored"] = (
             self.state.get("total_insights_stored", 0) + len(self.session_insights)
@@ -628,6 +918,9 @@ class SparkResearcher:
             "high_performers_found": len(high_performers),
             "accounts_studied": len(account_insights),
             "accounts_discovered": len(self.session_accounts_discovered),
+            "api_calls": self.session_api_calls,
+            "tweet_reads": self.session_tweet_reads,
+            "monthly_remaining": self._monthly_remaining(),
         }
 
         # Save everything
@@ -642,6 +935,9 @@ class SparkResearcher:
             "accounts_discovered": len(self.session_accounts_discovered),
             "trends": len(trends),
             "duration": self.state["last_session"]["duration_seconds"],
+            "api_calls": self.session_api_calls,
+            "tweet_reads": self.session_tweet_reads,
+            "monthly_remaining": self._monthly_remaining(),
         }
 
         self._log("")
@@ -651,6 +947,8 @@ class SparkResearcher:
         self._log(f"  High performers found: {summary['high_performers']}")
         self._log(f"  Accounts studied: {summary['accounts_studied']}")
         self._log(f"  New accounts discovered: {summary['accounts_discovered']}")
+        self._log(f"  API calls: {summary['api_calls']} ({summary['tweet_reads']} tweet reads)")
+        self._log(f"  Monthly budget remaining: {summary['monthly_remaining']}")
         self._log(f"  Duration: {summary['duration']:.0f}s")
         self._log("=" * 50)
 
@@ -659,7 +957,7 @@ class SparkResearcher:
     # ── Helpers ───────────────────────────────────────────────
 
     def _detect_triggers(self, text: str) -> list[str]:
-        """Detect emotional triggers in text."""
+        """Fast keyword-based trigger detection for all tweets."""
         text_lower = text.lower()
         found = []
         for trigger, keywords in TRIGGER_KEYWORDS.items():
@@ -668,6 +966,90 @@ class SparkResearcher:
                     found.append(trigger)
                     break
         return found
+
+    def _llm_available(self) -> bool:
+        """Check if Ollama is reachable (cached per session)."""
+        if hasattr(self, "_ollama_ok"):
+            return self._ollama_ok
+        try:
+            req = urllib.request.Request(
+                "http://localhost:11434/api/tags",
+                method="GET",
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                self._ollama_ok = resp.status == 200
+        except Exception:
+            self._ollama_ok = False
+            self._log("  LLM (Ollama) not available - using keyword analysis only")
+        return self._ollama_ok
+
+    def _call_ollama(self, prompt: str) -> str | None:
+        """Call local Ollama API. Returns response text or None on failure."""
+        try:
+            payload = json.dumps({
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.3, "num_predict": 300},
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                OLLAMA_URL,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+                return result.get("response", "")
+        except Exception as e:
+            self._log(f"    LLM call failed: {type(e).__name__}")
+            return None
+
+    def _llm_analyze_tweet(self, text: str, likes: int, replies: int, topic: str) -> dict | None:
+        """Deep-analyze a high-performing tweet using local LLM.
+
+        Returns a structured analysis dict or None if LLM unavailable.
+        Only called for tweets above ENGAGEMENT_MIN (50+ likes).
+        """
+        if not self._llm_available():
+            return None
+
+        prompt = f"""Analyze this high-performing tweet ({likes} likes, {replies} replies) from the "{topic}" space.
+
+TWEET:
+\"\"\"{text}\"\"\"
+
+Return a JSON object with EXACTLY these fields (no markdown, no explanation, just the JSON):
+{{
+  "emotional_triggers": ["list of emotional hooks used, e.g. curiosity_gap, aspiration, contrast, vulnerability, identity_signal, surprise, validation, urgency, social_proof, authority"],
+  "content_strategy": "one of: hot_take, educational, storytelling, announcement, question, thread_hook, contrarian, celebration, call_to_action",
+  "engagement_hooks": ["specific techniques: e.g. open_loop, bold_claim, personal_story, data_point, metaphor, list_format, controversy, relatable_pain"],
+  "writing_patterns": ["structural elements: e.g. short_sentences, line_breaks, emoji_use, all_caps_emphasis, rhetorical_question, imperative_verb"],
+  "why_it_works": "one sentence explaining why this specific tweet performs well",
+  "replicable_lesson": "one actionable takeaway for creating similar content"
+}}"""
+
+        raw = self._call_ollama(prompt)
+        if not raw:
+            return None
+
+        # Extract JSON from response (LLM might wrap it in markdown)
+        try:
+            # Try direct parse first
+            return json.loads(raw.strip())
+        except json.JSONDecodeError:
+            pass
+
+        # Try extracting from markdown code block
+        match = re.search(r"\{[\s\S]*\}", raw)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+
+        self._log(f"    LLM returned unparseable response, skipping")
+        return None
 
     def _maybe_add_to_watchlist(self, user, topic: str, engagement: int):
         """Add a user to the watchlist if they're interesting enough.

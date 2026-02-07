@@ -765,6 +765,102 @@ body {
   padding: 20px 0;
 }
 
+/* Intelligence Analysis */
+.intel-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  margin-bottom: 32px;
+}
+
+.intel-card {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-right: none;
+  background: var(--bg-secondary);
+}
+
+.intel-card:last-child { border-right: 1px solid var(--border); }
+
+.intel-card-title {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.intel-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(42, 48, 66, 0.3);
+}
+
+.intel-item:last-child { border-bottom: none; }
+
+.intel-item-name {
+  color: var(--text-secondary);
+  font-weight: 300;
+}
+
+.intel-item-count {
+  color: var(--gold);
+  font-weight: 500;
+  font-size: 11px;
+}
+
+.intel-lesson {
+  padding: 6px 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-weight: 300;
+  border-bottom: 1px solid rgba(42, 48, 66, 0.3);
+}
+
+.intel-lesson:last-child { border-bottom: none; }
+
+.intel-lesson::before {
+  content: '\2192';
+  color: var(--gold);
+  margin-right: 6px;
+}
+
+.hp-analysis {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: rgba(200, 168, 78, 0.06);
+  border-left: 2px solid var(--gold);
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.hp-strategy {
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 2px;
+}
+
+@media (max-width: 900px) {
+  .intel-grid { grid-template-columns: repeat(2, 1fr); }
+  .intel-card:nth-child(2) { border-right: 1px solid var(--border); }
+  .intel-card:nth-child(n+3) { border-top: none; }
+}
+
+@media (max-width: 600px) {
+  .intel-grid { grid-template-columns: 1fr; }
+  .intel-card { border-right: 1px solid var(--border); border-bottom: none; }
+  .intel-card:last-child { border-bottom: 1px solid var(--border); }
+}
+
 /* ═══════════════════════════════════════════════════════
    GROWTH TIMELINE
    ═══════════════════════════════════════════════════════ */
@@ -1050,6 +1146,8 @@ body {
 
   <div class="research-meta" id="research-meta"></div>
 
+  <div id="intelligence-section"></div>
+
   <div class="research-columns">
     <div class="research-col">
       <h3 class="col-title">HIGH PERFORMERS</h3>
@@ -1230,8 +1328,7 @@ async function loadPatterns() {
   const data = await fetchJSON('/api/social-patterns');
   if (!data) return;
 
-  const grid = document.getElementById('patterns-grid');
-  grid.innerHTML = data.proven_patterns.map(p => `
+  let html = data.proven_patterns.map(p => `
     <div class="pattern-card">
       <div class="pattern-category ${p.category}">${p.category}</div>
       <div class="pattern-name">${p.name}</div>
@@ -1243,6 +1340,24 @@ async function loadPatterns() {
       </div>
     </div>
   `).join('');
+
+  // Add LLM-discovered content strategies as patterns
+  if (data.content_strategies && data.content_strategies.length > 0) {
+    html += data.content_strategies.slice(0, 3).map(s => `
+      <div class="pattern-card">
+        <div class="pattern-category" style="color: var(--gold); border-color: var(--gold);">strategy</div>
+        <div class="pattern-name">${s.strategy}</div>
+        <div class="pattern-desc">Content strategy seen in ${s.count} high-performing tweets. Avg ${s.avg_engagement} engagement.</div>
+        <div class="pattern-meta">
+          <span style="color: var(--gold);">LLM-detected</span>
+          <span>${s.count} observations</span>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  const grid = document.getElementById('patterns-grid');
+  grid.innerHTML = html;
 }
 
 async function loadVoice() {
@@ -1350,6 +1465,45 @@ async function loadResearch() {
     meta.innerHTML = '<div class="research-meta-item">Research engine initialized. First session data loading...</div>';
   }
 
+  // Intelligence analysis (LLM-powered)
+  const intelSection = document.getElementById('intelligence-section');
+  const intel = data.intelligence;
+  if (intel && intel.llm_analyzed > 0) {
+    intelSection.innerHTML = `
+      <div style="margin-bottom: 8px; font-size: 10px; letter-spacing: 2px; color: var(--gold); text-transform: uppercase;">
+        LLM-ANALYZED: ${intel.llm_analyzed} tweets deep-scanned by phi4-mini
+      </div>
+      <div class="intel-grid">
+        <div class="intel-card">
+          <div class="intel-card-title">CONTENT STRATEGIES</div>
+          ${intel.top_strategies.map(s => `
+            <div class="intel-item">
+              <span class="intel-item-name">${s.strategy.replace(/_/g, ' ')}</span>
+              <span class="intel-item-count">${s.count}x</span>
+            </div>
+          `).join('') || '<div class="no-data">Collecting...</div>'}
+        </div>
+        <div class="intel-card">
+          <div class="intel-card-title">ENGAGEMENT HOOKS</div>
+          ${intel.top_hooks.slice(0, 8).map(h => `
+            <div class="intel-item">
+              <span class="intel-item-name">${h.hook.replace(/_/g, ' ')}</span>
+              <span class="intel-item-count">${h.count}x</span>
+            </div>
+          `).join('') || '<div class="no-data">Collecting...</div>'}
+        </div>
+        <div class="intel-card" style="grid-column: span 2;">
+          <div class="intel-card-title">ACTIONABLE LESSONS</div>
+          ${intel.actionable_lessons.slice(0, 6).map(l => `
+            <div class="intel-lesson">${escapeHtml(l)}</div>
+          `).join('') || '<div class="no-data">Lessons will appear after LLM analysis runs...</div>'}
+        </div>
+      </div>
+    `;
+  } else {
+    intelSection.innerHTML = '';
+  }
+
   // High performers
   const hpList = document.getElementById('high-performers-list');
   if (data.high_performers && data.high_performers.length > 0) {
@@ -1362,6 +1516,12 @@ async function loadResearch() {
           <span>${hp.user}</span>
           <span>${hp.topic}</span>
         </div>
+        ${hp.why_it_works ? `
+        <div class="hp-analysis">
+          ${hp.content_strategy ? `<div class="hp-strategy">${hp.content_strategy.replace(/_/g, ' ')}</div>` : ''}
+          ${escapeHtml(hp.why_it_works)}
+        </div>
+        ` : ''}
       </div>
     `).join('');
   } else {
