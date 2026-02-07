@@ -328,6 +328,19 @@ def run_bridge_cycle(
             stats["errors"].append("sync")
             log_debug("bridge_worker", f"context sync failed ({error})", None)
 
+        # --- Auto-tuner: periodic source boost optimization ---
+        try:
+            from lib.auto_tuner import AutoTuner
+            tuner = AutoTuner()
+            if tuner.should_run():
+                report = tuner.run()
+                stats["auto_tuner"] = {
+                    "changes": len(report.changes),
+                    "skipped": len(report.skipped),
+                }
+        except Exception as e:
+            log_debug("bridge_worker", f"auto-tuner failed ({e})", None)
+
     finally:
         # --- Flush all deferred saves (single write per file) ---
         if cognitive:

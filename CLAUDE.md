@@ -8,7 +8,7 @@
 <!-- SPARK_LEARNINGS_START -->
 ## Spark Bootstrap
 Auto-loaded high-confidence learnings from ~/.spark/cognitive_insights.json
-Last updated: 2026-02-07T18:50:29
+Last updated: 2026-02-07T19:11:44
 
 - [reasoning] #!/usr/bin/env python3
 """X/Twitter API client - thin tweepy wrapper with rate limit handling.
@@ -26,7 +26,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optio... (100% reliable, 4 validations)
+from typing import Any, Dict, List, Optio... (100% reliable, 9 validations)
 - [context] **Always verify:** Is bridge_worker running? Is the queue being processed?
 
 ### Rule 3: Pipeline Health Before Tuning
@@ -40,7 +40,8 @@ Session 2 lesson: Meta-Ralph showed 39.4% quality rate, but `learnings_stored=0`
 ### Rule 4: Anti-Hallucination
 
 **CRITICAL:** Never claim improvement... (88% reliable, 60 validations)
-- [user_understanding] Now, can we actually do this in this way? After we do these upgrades too for the next iteration, can you actually give me a project prompt so that I can run that using Spark and we can see in real-time what is really happening - what is being saved into the memory and what are the gaps? Instead of trying to just do these through these tests, because in real-time, we may be able to achieve even more understanding - not maybe, but even more understanding - about what is working and what is not. If... (95% reliable, 230 validations)
+- [meta_learning] [System Gap] [TUNEABLES] Auto-tuner not active. Tuneables are static — never self-adjust. (95% reliable, 59 validations)
+- [user_understanding] Now, can we actually do this in this way? After we do these upgrades too for the next iteration, can you actually give me a project prompt so that I can run that using Spark and we can see in real-time what is really happening - what is being saved into the memory and what are the gaps? Instead of trying to just do these through these tests, because in real-time, we may be able to achieve even more understanding - not maybe, but even more understanding - about what is working and what is not. If... (95% reliable, 235 validations)
 - [user_understanding] User prefers 'I think we gotta do it better over here for things to look more serious' over 'gonna lie. And we can bring maybe a GLB format, or maybe we can do this through steps. I don't know, just recommend me something' (77% reliable, 118 validations)
 - [context] ### Improvement Workflow (Updated - Reality-Grounded)
 
@@ -77,7 +78,7 @@ from pathlib import Path
 
 
 def main():
-    from lib.service_control impo... (93% reliable, 97 validations)
+    from lib.service_control impo... (93% reliable, 98 validations)
 - [wisdom] [X Strategy] Use 'announcement, call_to_action' content strategy on X. Data shows 23 observations with avg 2729 likes. This strategy consistently drives engagement. (100% reliable, 13 validations)
 - [wisdom] Maintainable > clever - code should be easy to understand and modify (100% reliable, 3 validations)
 - [wisdom] Can you now read all these documents in think hard mode  Here are the new core docs we created:
@@ -93,7 +94,7 @@ def main():
     sequencing, deliverables, and success metrics.
 
   If you want, I can link these from README.md so theyâ€™re always frontâ€‘andâ€‘center. (99% reliable, 798 validations)
-- [reasoning] Always Read a file before Edit to verify current content (99% reliable, 205 validations)
+- [reasoning] Always Read a file before Edit to verify current content (99% reliable, 210 validations)
 - [reasoning] ## Code Content Extraction (NEW)
 
 ### The Problem
@@ -112,7 +113,6 @@ Added to `observe.py` PostToolUse handler:
 ```python
 if tool_name in ("Write", "Edit") and isinstance(tool_input, dict):
     ... (100% reliable, 57 validations)
-- [reasoning] I decided to use TypeScript because it has better type safety (98% reliable, 131 validations)
 
 ## Project Focus
 - Phase: discovery
