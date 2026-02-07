@@ -64,8 +64,8 @@ class SparkResearcher:
     ENGAGEMENT_MIN = 50       # Minimum likes for "high performer"
     SEARCH_DELAY = 2.5        # Seconds between API searches
     LOOKUP_DELAY = 1.0        # Seconds between lookups
-    MAX_RESULTS = 50          # Results per search query
-    TWEETS_PER_ACCOUNT = 10   # Recent tweets to check per watched account
+    MAX_RESULTS = 100         # Results per search query (API max)
+    TWEETS_PER_ACCOUNT = 30   # Recent tweets to check per watched account
 
     def __init__(self, verbose: bool = True):
         self.verbose = verbose
@@ -670,7 +670,17 @@ class SparkResearcher:
         return found
 
     def _maybe_add_to_watchlist(self, user, topic: str, engagement: int):
-        """Add a user to the watchlist if they're interesting enough."""
+        """Add a user to the watchlist if they're interesting enough.
+
+        Relationship types:
+          - learn_from: High-value accounts we follow to learn from.
+            Criteria: 5K+ followers OR exceptional engagement rate (50+ likes
+            with <5K followers). These are accounts producing consistent
+            insight in our tracked topics.
+          - watch: Accounts worth monitoring but not following yet.
+            Discovered via high engagement but don't meet learn_from bar.
+          - conversation: People we've interacted with (set manually).
+        """
         handle = user.username
         existing = {a["handle"].lower() for a in self.watchlist.get("accounts", [])}
         if handle.lower() in existing:
@@ -678,6 +688,13 @@ class SparkResearcher:
 
         followers = (user.public_metrics or {}).get("followers_count", 0)
         description = user.description or ""
+
+        # Determine relationship: follow with purpose
+        engagement_rate = engagement / max(followers, 1) * 100
+        if followers >= 5000 or (engagement >= 50 and engagement_rate >= 2.0):
+            relationship = "learn_from"
+        else:
+            relationship = "watch"
 
         account = {
             "handle": handle,
@@ -690,11 +707,14 @@ class SparkResearcher:
             "priority": min(10, engagement // 100),
             "avg_likes": None,
             "last_studied": None,
+            "relationship": relationship,
+            "following": False,
         }
 
         self.watchlist.setdefault("accounts", []).append(account)
         self.session_accounts_discovered.append(account)
-        self._log(f"    + Watchlist: @{handle} ({followers} followers, via {topic})")
+        tag = "LEARN" if relationship == "learn_from" else "WATCH"
+        self._log(f"    + [{tag}] @{handle} ({followers} followers, via {topic})")
 
     def _rank_topics(self, high_performers: list[dict]) -> list[dict]:
         """Rank topics by number of high performers."""
