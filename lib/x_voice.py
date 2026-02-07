@@ -26,6 +26,8 @@ from lib.x_humanizer import get_humanizer, XHumanizer
 # State directory
 X_VOICE_DIR = Path.home() / ".spark" / "x_voice"
 PROFILES_FILE = X_VOICE_DIR / "profiles.json"
+EVOLUTION_STATE = Path.home() / ".spark" / "x_evolution_state.json"
+CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
 
 # Config shipped with repo
 _CONFIG_PATH = Path(__file__).parent / "x_voice_config.json"
@@ -191,6 +193,8 @@ class XVoice:
         self.humanizer: XHumanizer = get_humanizer()
         self.config: Dict = CONFIG
         self.user_profiles: Dict[str, UserToneProfile] = {}
+        self._evolution_cache: Optional[Dict] = None
+        self._evolution_cache_ts: float = 0.0
         self._load_profiles()
 
     # ------ Persistence ------
@@ -346,9 +350,13 @@ class XVoice:
 
         text = content
 
-        # Humanize
+        # Humanize (lowercase for replies per learned style)
+        is_reply = reply_to_handle is not None
+        reply_style = CONFIG.get("learned_playbook", {}).get("reply_style", {})
+        use_lowercase = is_reply and reply_style.get("case") == "lowercase"
+
         if humanize:
-            text = self.humanizer.humanize_tweet(text)
+            text = self.humanizer.humanize_tweet(text, lowercase=use_lowercase)
 
         # Truncate to fit (leave room for ellipsis if needed)
         if len(text) > self.TWEET_MAX:
@@ -474,17 +482,91 @@ class XVoice:
 
     # ------ Personality Integration ------
 
+    def get_research_intelligence(self) -> Dict:
+        """Read the latest pattern analysis from the research engine.
+
+        Returns aggregated intelligence about what works on X:
+        - Top emotional triggers with engagement data
+        - Best content strategies
+        - Proven engagement hooks
+        - Writing patterns that drive performance
+        - Replicable lessons from high performers
+
+        Falls back to the static learned_playbook in config if no
+        research data is available yet.
+        """
+        # Try to read latest social-convo pattern_analysis from chip insights
+        convo_path = CHIP_INSIGHTS_DIR / "social-convo.jsonl"
+        if convo_path.exists():
+            try:
+                # Read the last pattern_analysis entry (most recent)
+                last_analysis = None
+                with open(convo_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                            if entry.get("observer") == "pattern_analysis":
+                                fields = entry.get("captured_data", {}).get("fields", {})
+                                if fields.get("sample_size", 0) > 0:
+                                    last_analysis = fields
+                        except json.JSONDecodeError:
+                            continue
+
+                if last_analysis:
+                    return {
+                        "source": "research_engine",
+                        "sample_size": last_analysis.get("sample_size", 0),
+                        "top_triggers": [
+                            {"trigger": t["trigger"], "count": t["count"], "avg_engagement": t["avg_engagement"]}
+                            for t in last_analysis.get("trigger_ranking", [])[:5]
+                        ],
+                        "top_strategies": [
+                            {"strategy": s["strategy"], "avg_engagement": s["avg_engagement"]}
+                            for s in last_analysis.get("strategy_ranking", [])[:5]
+                        ],
+                        "engagement_hooks": [
+                            h["hook"] for h in last_analysis.get("engagement_hooks", [])[:6]
+                            if isinstance(h, dict)
+                        ],
+                        "writing_patterns": [
+                            p["pattern"] for p in last_analysis.get("writing_patterns", [])[:5]
+                            if isinstance(p, dict)
+                        ],
+                        "replicable_lessons": last_analysis.get("replicable_lessons", [])[:5],
+                        "length_insight": last_analysis.get("length_effect", {}),
+                    }
+            except Exception:
+                pass
+
+        # Fallback: use static playbook from config
+        playbook = CONFIG.get("learned_playbook", {})
+        if playbook:
+            return {
+                "source": "static_playbook",
+                "top_triggers": playbook.get("top_triggers_by_engagement", [])[:5],
+                "top_strategies": playbook.get("top_strategies", [])[:5],
+                "engagement_hooks": [h.split(":")[0] for h in playbook.get("engagement_hooks", [])[:6]],
+                "writing_rules": playbook.get("writing_rules_from_data", [])[:5],
+                "reply_style": playbook.get("reply_style", {}),
+            }
+
+        return {"source": "none"}
+
     def get_personality_context(self, topic: Optional[str] = None) -> Dict:
         """Get personality context for content generation.
 
-        Returns a dict with opinion, growth, and identity info
-        that can inform tone and content.
+        Returns a dict with opinion, growth, identity info,
+        AND research-backed intelligence about what works.
         """
         result: Dict = {
             "identity": CONFIG.get("identity", {}),
             "principles": CONFIG.get("identity", {}).get(
                 "communication_principles", []
             ),
+            "learned_playbook": CONFIG.get("learned_playbook", {}),
         }
 
         # Pull relevant opinion from SparkVoice
@@ -498,7 +580,53 @@ class XVoice:
             g = growth[0]
             result["recent_growth"] = f"I used to {g.before}. Now I {g.after}."
 
+        # Pull research intelligence (what actually works on X)
+        result["research_intelligence"] = self.get_research_intelligence()
+
         return result
+
+    # ------ Evolution Integration ------
+
+    def _load_evolution_weights(self) -> Dict:
+        """Load evolved voice weights from x_evolution_state.json (cached 60s)."""
+        now = time.time()
+        if self._evolution_cache and (now - self._evolution_cache_ts) < 60:
+            return self._evolution_cache
+
+        if EVOLUTION_STATE.exists():
+            try:
+                state = json.loads(EVOLUTION_STATE.read_text(encoding="utf-8"))
+                self._evolution_cache = state.get("voice_weights", {})
+                self._evolution_cache_ts = now
+                return self._evolution_cache
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        self._evolution_cache = {}
+        self._evolution_cache_ts = now
+        return {}
+
+    def get_evolved_triggers(self) -> Dict[str, float]:
+        """Get evolved trigger weights. Higher = use more, lower = use less."""
+        weights = self._load_evolution_weights()
+        return weights.get("triggers", {})
+
+    def get_evolved_strategies(self) -> Dict[str, float]:
+        """Get evolved strategy weights."""
+        weights = self._load_evolution_weights()
+        return weights.get("strategies", {})
+
+    def get_preferred_triggers(self, top_n: int = 5) -> List[str]:
+        """Get the top N triggers Spark should favor based on evolution data."""
+        triggers = self.get_evolved_triggers()
+        if not triggers:
+            return []
+        return [t for t, _ in sorted(triggers.items(), key=lambda x: -x[1])[:top_n]]
+
+    def get_avoided_triggers(self) -> List[str]:
+        """Get triggers Spark should avoid based on evolution data."""
+        triggers = self.get_evolved_triggers()
+        return [t for t, w in triggers.items() if w < 0.6]
 
     def get_stats(self) -> Dict:
         """Get X Voice statistics."""
@@ -506,12 +634,21 @@ class XVoice:
         for p in self.user_profiles.values():
             warmth_dist[p.warmth] = warmth_dist.get(p.warmth, 0) + 1
 
+        evo_weights = self._load_evolution_weights()
+        research = self.get_research_intelligence()
         return {
             "tracked_users": len(self.user_profiles),
             "warmth_distribution": warmth_dist,
             "total_interactions": sum(
                 p.interaction_count for p in self.user_profiles.values()
             ),
+            "evolved_triggers": self.get_preferred_triggers(),
+            "avoided_triggers": self.get_avoided_triggers(),
+            "evolved_strategies": list(evo_weights.get("strategies", {}).keys()),
+            "evolution_active": bool(evo_weights.get("triggers") or evo_weights.get("strategies")),
+            "research_intelligence": research,
+            "communication_principles": len(CONFIG.get("identity", {}).get("communication_principles", [])),
+            "playbook_active": "learned_playbook" in CONFIG,
         }
 
 

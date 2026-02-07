@@ -404,14 +404,16 @@ class SparkResearcher:
             self._log(f"    Found {topic_total} tweets, {topic_high} high performers")
             time.sleep(self.SEARCH_DELAY)
 
-        # Store topic stats as a session summary
-        self.store_insight("x_social", "topic_cycle", {
-            "stats": topic_stats,
-            "total_searched": sum(s["total"] for s in topic_stats.values()),
-            "total_high_performers": sum(s["high_performers"] for s in topic_stats.values()),
-            "session_time": self.session_start.isoformat(),
-            "budget_used": self.session_tweet_reads,
-        })
+        # Store topic stats only if we found high performers (skip noise sessions)
+        total_hp = sum(s["high_performers"] for s in topic_stats.values())
+        if total_hp > 0:
+            self.store_insight("x_social", "topic_cycle", {
+                "stats": topic_stats,
+                "total_searched": sum(s["total"] for s in topic_stats.values()),
+                "total_high_performers": total_hp,
+                "session_time": self.session_start.isoformat(),
+                "budget_used": self.session_tweet_reads,
+            })
 
         self._log(f"  Topic search complete: {len(high_performers)} high performers found")
         self._log(f"  Budget used: {self.session_tweet_reads} reads ({self._budget_remaining()} remaining)")
@@ -554,8 +556,9 @@ class SparkResearcher:
             }
             account_insights.append(insight)
 
-            # Store as chip insight
-            self.store_insight("x_social", "influencer_study", insight)
+            # Store only accounts that had hits (skip noise)
+            if insight["hits"] > 0:
+                self.store_insight("x_social", "influencer_study", insight)
 
             # Update account in watchlist with new avg
             account["avg_likes"] = new_avg
@@ -681,7 +684,9 @@ class SparkResearcher:
             "llm_analyzed": sum(1 for hp in high_performers if hp.get("llm_analysis")),
         }
 
-        self.store_insight("social-convo", "pattern_analysis", patterns)
+        # Only store pattern analysis if we have actual data
+        if len(high_performers) > 0:
+            self.store_insight("social-convo", "pattern_analysis", patterns)
         self._log(f"  Analyzed {len(high_performers)} high performers")
         self._log(f"  Top triggers: {[t['trigger'] for t in trigger_ranking[:3]]}")
         return [patterns]
@@ -805,14 +810,15 @@ class SparkResearcher:
                     topic["tier"] = old_tier + 1
                     self._log(f"  Demoted '{name}' to tier {topic['tier']} (hit rate: {hit_rate:.0%})")
 
-        # Store evolution insight
-        self.store_insight("x_social", "social_learning", {
-            "type": "self_evolution",
-            "new_intents": new_intents,
-            "new_accounts_discovered": len(self.session_accounts_discovered),
-            "new_topics_discovered": len(self.state.get("discovered_topics", [])),
-            "total_intents": len(self.state.get("research_intents", [])),
-        })
+        # Store evolution insight only if something was actually discovered
+        if new_intents or self.session_accounts_discovered:
+            self.store_insight("x_social", "social_learning", {
+                "type": "self_evolution",
+                "new_intents": new_intents,
+                "new_accounts_discovered": len(self.session_accounts_discovered),
+                "new_topics_discovered": len(self.state.get("discovered_topics", [])),
+                "total_intents": len(self.state.get("research_intents", [])),
+            })
 
     # ── Main Entry Point ─────────────────────────────────────
 

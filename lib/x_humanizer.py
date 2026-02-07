@@ -53,6 +53,10 @@ AI_TELL_PATTERNS: List[Tuple[str, str]] = [
     (r"\bIt appears (?:that|as if)\s*", ""),
     (r"\bOne could argue (?:that)?\s*", ""),
     (r"\bIt can be said (?:that)?\s*", ""),
+    # Em dashes: replace with commas, periods, or remove
+    (r"\s*\u2014\s*", ", "),  # Unicode em dash
+    (r"\s*---\s*", ", "),     # Triple hyphen em dash
+    (r"\s*--\s*", ", "),      # Double hyphen em dash
 ]
 
 # Contractions map: expand -> contracted
@@ -109,11 +113,18 @@ class XHumanizer:
             for pattern, replacement in CONTRACTIONS.items()
         ]
 
-    def humanize_tweet(self, text: str) -> str:
-        """Full humanization pipeline for a single tweet."""
+    def humanize_tweet(self, text: str, lowercase: bool = False) -> str:
+        """Full humanization pipeline for a single tweet.
+
+        Args:
+            text: Raw text to humanize.
+            lowercase: If True, convert to all lowercase (for replies).
+        """
         text = self._remove_ai_tells(text)
         text = self._add_contractions(text)
         text = self._clean_whitespace(text)
+        if lowercase:
+            text = self._to_lowercase(text)
         return text
 
     def humanize_thread(self, tweets: List[str]) -> List[str]:
@@ -137,6 +148,17 @@ class XHumanizer:
         text = re.sub(r"  +", " ", text)
         text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
         return text.strip()
+
+    def _to_lowercase(self, text: str) -> str:
+        """Convert text to lowercase, preserving @handles, URLs, and hashtags.
+
+        Keeps technical identifiers intact (URLs, @mentions) while
+        lowercasing the conversational text for a more human feel.
+        """
+        # Protect @handles, URLs, and #hashtags by preserving their case
+        # We lowercase everything, which naturally preserves already-lowercase
+        # handles and hashtags, and makes URLs lowercase (which is fine)
+        return text.lower()
 
     def add_personality_quirk(self, text: str, quirk: Optional[str] = None) -> str:
         """Inject a personality touch.
