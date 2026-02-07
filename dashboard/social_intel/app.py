@@ -171,54 +171,82 @@ async def api_learning_flow():
 
 @app.get("/api/topics")
 async def api_topics():
-    """Topics Spark is tracking - blends research data with base topics."""
-    # Base topics (always shown)
-    base_topics = [
-        {"name": "Vibe Coding", "category": "core", "interest_level": 0.95, "trend": "rising"},
-        {"name": "Claude Code", "category": "core", "interest_level": 0.92, "trend": "rising"},
-        {"name": "AI Agents", "category": "core", "interest_level": 0.90, "trend": "stable"},
-        {"name": "Self-Improving AI", "category": "core", "interest_level": 0.88, "trend": "rising"},
-        {"name": "AGI", "category": "frontier", "interest_level": 0.85, "trend": "stable"},
-        {"name": "Machine Intelligence", "category": "frontier", "interest_level": 0.83, "trend": "rising"},
-        {"name": "Building in Public", "category": "culture", "interest_level": 0.80, "trend": "stable"},
-        {"name": "Learning in Public", "category": "culture", "interest_level": 0.78, "trend": "rising"},
-        {"name": "Agentic Systems", "category": "technical", "interest_level": 0.82, "trend": "rising"},
-        {"name": "AI Coding Tools", "category": "technical", "interest_level": 0.76, "trend": "rising"},
-        {"name": "Open Source AI", "category": "frontier", "interest_level": 0.70, "trend": "stable"},
-        {"name": "Prompt Engineering", "category": "technical", "interest_level": 0.65, "trend": "declining"},
-    ]
+    """Topics Spark is tracking - live from the research engine."""
+    from lib.x_research import DEFAULT_TOPICS, CATEGORY_MIN_LIKES
 
-    # Enrich with real research data if available
-    x_social = get_chip_insights("x_social")
-    topic_volumes: dict[str, int] = {}
-    for insight in x_social:
-        fields = insight.get("captured_data", {}).get("fields", {})
-        topic = fields.get("topic", "")
-        if topic and fields.get("total_engagement", 0) > 0:
-            topic_volumes[topic] = topic_volumes.get(topic, 0) + 1
-
-    # Update interest levels based on actual engagement volume
-    if topic_volumes:
-        max_vol = max(topic_volumes.values()) or 1
-        for bt in base_topics:
-            vol = topic_volumes.get(bt["name"], 0)
-            if vol > 0:
-                bt["interest_level"] = round(0.6 + 0.4 * (vol / max_vol), 2)
-                bt["tweets_found"] = vol
-
-    # Add discovered topics from research state
     state = read_json(RESEARCH_STATE_PATH)
-    discovered = state.get("discovered_topics", [])
-    for dt in discovered:
-        base_topics.append({
-            "name": dt["name"],
-            "category": "discovered",
-            "interest_level": 0.70,
-            "trend": "emerging",
-            "discovered": True,
+    topic_perf = state.get("topic_performance", {})
+    session_num = state.get("sessions_run", 0)
+
+    topics = []
+    for t in DEFAULT_TOPICS:
+        name = t["name"]
+        tier = t.get("tier", 1)
+        category = t.get("category", "core")
+        min_likes = CATEGORY_MIN_LIKES.get(category, 50)
+        perf = topic_perf.get(name, {})
+        hits = perf.get("hits", 0)
+        misses = perf.get("misses", 0)
+        total = hits + misses
+        hit_rate = round(hits / total, 2) if total > 0 else None
+        consecutive_zeros = perf.get("consecutive_zeros", 0)
+        skipped = consecutive_zeros >= 3
+
+        # Determine trend from hit rate
+        if total < 3:
+            trend = "new"
+        elif hit_rate and hit_rate > 0.5:
+            trend = "rising"
+        elif hit_rate and hit_rate > 0.2:
+            trend = "stable"
+        elif skipped:
+            trend = "paused"
+        else:
+            trend = "declining"
+
+        # Determine if topic runs this session
+        active_this_session = True
+        if tier == 2 and session_num % 2 != 0:
+            active_this_session = False
+        if tier == 3 and session_num % 3 != 0:
+            active_this_session = False
+        if skipped:
+            active_this_session = False
+
+        topics.append({
+            "name": name,
+            "category": category,
+            "tier": tier,
+            "query": t["query"],
+            "min_likes": min_likes,
+            "hit_rate": hit_rate,
+            "hits": hits,
+            "misses": misses,
+            "sessions_tracked": total,
+            "trend": trend,
+            "skipped": skipped,
+            "active_this_session": active_this_session,
         })
 
-    return {"active_topics": base_topics}
+    # Add discovered topics from research state
+    discovered = state.get("discovered_topics", [])
+    for dt in discovered:
+        topics.append({
+            "name": dt["name"],
+            "category": "discovered",
+            "tier": 2,
+            "query": dt.get("query", dt["name"]),
+            "min_likes": CATEGORY_MIN_LIKES.get("discovered", 50),
+            "hit_rate": None,
+            "hits": 0,
+            "misses": 0,
+            "sessions_tracked": 0,
+            "trend": "emerging",
+            "skipped": False,
+            "active_this_session": True,
+        })
+
+    return {"active_topics": topics, "session_num": session_num}
 
 
 @app.get("/api/social-patterns")

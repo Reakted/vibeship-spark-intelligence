@@ -524,6 +524,40 @@ body {
   text-align: right;
 }
 
+.topic-tier {
+  display: inline-block;
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 1px 6px;
+  border: 1px solid;
+  margin-bottom: 8px;
+}
+
+.topic-tier.tier-1 { color: var(--green); border-color: var(--green); }
+.topic-tier.tier-2 { color: var(--gold); border-color: var(--gold); }
+.topic-tier.tier-3 { color: var(--text-tertiary); border-color: var(--text-tertiary); }
+
+.topic-query {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+  font-weight: 300;
+  margin-bottom: 10px;
+  word-break: break-word;
+  font-style: italic;
+}
+
+.topic-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 8px;
+}
+
+.topic-stats .min-likes { color: var(--orange); }
+.topic-stats .hit-rate { color: var(--green); }
+
 .topic-trend {
   font-size: 10px;
   margin-top: 6px;
@@ -533,6 +567,23 @@ body {
 .topic-trend.stable { color: var(--text-tertiary); }
 .topic-trend.declining { color: var(--orange); }
 .topic-trend.emerging { color: var(--gold); }
+.topic-trend.new { color: var(--purple); }
+.topic-trend.paused { color: var(--red); }
+
+.topic-skipped {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: var(--red);
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.topic-inactive {
+  opacity: 0.45;
+}
 
 /* ═══════════════════════════════════════════════════════
    SOCIAL PATTERNS
@@ -1088,11 +1139,11 @@ body {
      ═══════════════════════════════════════════════════════ -->
 <section class="section fade-in" id="topics">
   <div class="section-header">
-    <div class="section-label"><span class="dot"></span> ACTIVE INTERESTS</div>
-    <h2 class="section-title">What Spark is paying attention to</h2>
+    <div class="section-label"><span class="dot"></span> RESEARCH TOPICS</div>
+    <h2 class="section-title">What Spark is searching for</h2>
     <p class="section-desc">
-      Topics tracked across X conversations, trends, and emerging patterns.
-      Interest levels shift based on what the timeline is actually discussing.
+      14 topics across 3 tiers. Tier 1 runs every session, Tier 2 every other, Tier 3 every third.
+      Only viral tweets pass the filter. Topics auto-promote and auto-pause based on hit rates.
     </p>
   </div>
 
@@ -1308,20 +1359,33 @@ async function loadTopics() {
   const data = await fetchJSON('/api/topics');
   if (!data) return;
 
+  const trendIcon = {rising:'&#9650;',declining:'&#9660;',emerging:'&#9733;',stable:'&#9644;',new:'&#9679;',paused:'&#10074;&#10074;'};
+  const tierLabel = {1:'TIER 1 &middot; EVERY SESSION',2:'TIER 2 &middot; EVERY OTHER',3:'TIER 3 &middot; EVERY 3RD'};
+
   const grid = document.getElementById('topics-grid');
-  grid.innerHTML = data.active_topics.map(t => `
-    <div class="topic-card">
+  grid.innerHTML = data.active_topics.map(t => {
+    const hrText = t.hit_rate !== null ? `${Math.round(t.hit_rate * 100)}%` : '--';
+    const inactive = !t.active_this_session ? ' topic-inactive' : '';
+    return `
+    <div class="topic-card${inactive}">
+      ${t.skipped ? '<div class="topic-skipped">PAUSED</div>' : ''}
+      <div class="topic-tier tier-${t.tier}">${tierLabel[t.tier] || 'TIER ' + t.tier}</div>
       <div class="topic-name">${t.name}</div>
       <div class="topic-category">${t.category}</div>
+      <div class="topic-query">${escapeHtml(t.query)}</div>
       <div class="topic-interest">
         <div class="topic-bar">
-          <div class="topic-bar-fill" style="width: ${t.interest_level * 100}%"></div>
+          <div class="topic-bar-fill" style="width: ${t.hit_rate !== null ? t.hit_rate * 100 : 0}%"></div>
         </div>
-        <div class="topic-value">${Math.round(t.interest_level * 100)}%</div>
+        <div class="topic-value">${hrText}</div>
       </div>
-      <div class="topic-trend ${t.trend}">${t.trend === 'rising' ? '&#9650;' : t.trend === 'declining' ? '&#9660;' : t.trend === 'emerging' ? '&#9733;' : '&#9644;'} ${t.trend}</div>
-    </div>
-  `).join('');
+      <div class="topic-stats">
+        <span class="min-likes">min ${t.min_likes} likes</span>
+        <span class="hit-rate">${t.hits}/${t.sessions_tracked} hits</span>
+      </div>
+      <div class="topic-trend ${t.trend}">${trendIcon[t.trend] || '&#9644;'} ${t.trend}</div>
+    </div>`;
+  }).join('');
 }
 
 async function loadPatterns() {
