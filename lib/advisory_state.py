@@ -111,6 +111,11 @@ class SessionState:
 
     # Advice already emitted (advice_id set)
     shown_advice_ids: List[str] = field(default_factory=list)
+    last_advisory_packet_id: str = ""
+    last_advisory_route: str = ""
+    last_advisory_tool: str = ""
+    last_advisory_advice_ids: List[str] = field(default_factory=list)
+    last_advisory_at: float = 0.0
 
     # Consecutive failures (for debugging phase detection)
     consecutive_failures: int = 0

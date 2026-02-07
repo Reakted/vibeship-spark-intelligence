@@ -36,8 +36,61 @@ REQUIRED_PACKET_FIELDS = {
     "updated_ts",
     "fresh_until_ts",
     "lineage",
+    "usage_count",
+    "emit_count",
+    "helpful_count",
+    "unhelpful_count",
+    "noisy_count",
+    "feedback_count",
+    "effectiveness_score",
 }
 REQUIRED_LINEAGE_FIELDS = {"sources", "memory_absent_declared"}
+
+
+def _to_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _compute_effectiveness_score(
+    *,
+    helpful_count: int,
+    unhelpful_count: int,
+    noisy_count: int,
+) -> float:
+    # Simple Bayesian estimate with neutral prior + noise penalty.
+    prior_good = 1.0
+    prior_bad = 1.0
+    effective_good = max(0.0, float(helpful_count)) + prior_good
+    effective_bad = max(0.0, float(unhelpful_count)) + prior_bad
+    score = effective_good / max(1.0, effective_good + effective_bad)
+    score -= min(0.35, max(0, int(noisy_count)) * 0.05)
+    return max(0.05, min(0.99, float(score)))
+
+
+def _normalize_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(packet or {})
+    out["usage_count"] = max(0, _to_int(out.get("usage_count", 0), 0))
+    out["emit_count"] = max(0, _to_int(out.get("emit_count", 0), 0))
+    out["helpful_count"] = max(0, _to_int(out.get("helpful_count", 0), 0))
+    out["unhelpful_count"] = max(0, _to_int(out.get("unhelpful_count", 0), 0))
+    out["noisy_count"] = max(0, _to_int(out.get("noisy_count", 0), 0))
+    out["feedback_count"] = max(0, _to_int(out.get("feedback_count", 0), 0))
+    out["effectiveness_score"] = _compute_effectiveness_score(
+        helpful_count=out["helpful_count"],
+        unhelpful_count=out["unhelpful_count"],
+        noisy_count=out["noisy_count"],
+    )
+    return out
 
 
 def _now() -> float:
@@ -158,6 +211,13 @@ def build_packet(
         "fresh_until_ts": created + max(30.0, float(ttl_s or DEFAULT_PACKET_TTL_S)),
         "invalidated": False,
         "invalidate_reason": "",
+        "usage_count": 0,
+        "emit_count": 0,
+        "helpful_count": 0,
+        "unhelpful_count": 0,
+        "noisy_count": 0,
+        "feedback_count": 0,
+        "effectiveness_score": 0.5,
     }
 
 
@@ -181,6 +241,7 @@ def validate_packet(packet: Dict[str, Any]) -> Tuple[bool, str]:
 
 
 def save_packet(packet: Dict[str, Any]) -> str:
+    packet = _normalize_packet(packet)
     ok, reason = validate_packet(packet)
     if not ok:
         raise ValueError(f"invalid packet: {reason}")
@@ -211,6 +272,13 @@ def save_packet(packet: Dict[str, Any]) -> str:
         "updated_ts": packet.get("updated_ts"),
         "fresh_until_ts": packet.get("fresh_until_ts"),
         "invalidated": bool(packet.get("invalidated", False)),
+        "usage_count": int(packet.get("usage_count", 0) or 0),
+        "emit_count": int(packet.get("emit_count", 0) or 0),
+        "helpful_count": int(packet.get("helpful_count", 0) or 0),
+        "unhelpful_count": int(packet.get("unhelpful_count", 0) or 0),
+        "noisy_count": int(packet.get("noisy_count", 0) or 0),
+        "feedback_count": int(packet.get("feedback_count", 0) or 0),
+        "effectiveness_score": float(packet.get("effectiveness_score", 0.5) or 0.5),
     }
     _prune_index(index)
     _save_index(index)
@@ -244,7 +312,7 @@ def get_packet(packet_id: str) -> Optional[Dict[str, Any]]:
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
-            return data
+            return _normalize_packet(data)
     except Exception:
         return None
     return None
@@ -306,6 +374,10 @@ def lookup_relaxed(
             score += 2.0
         if not tool_name and row.get("tool_name") == "*":
             score += 0.5
+        effectiveness = max(0.0, min(1.0, float(row.get("effectiveness_score", 0.5) or 0.5)))
+        score += effectiveness * 2.0
+        if effectiveness < 0.3:
+            score -= 0.5
         score += min(1.0, max(0.0, (float(row.get("updated_ts", 0.0)) / 1e10)))
         candidates.append((score, float(row.get("updated_ts", 0.0)), packet_id))
 
@@ -365,6 +437,106 @@ def invalidate_packets(
     return count
 
 
+def record_packet_usage(
+    packet_id: str,
+    *,
+    emitted: bool = False,
+    route: Optional[str] = None,
+) -> Dict[str, Any]:
+    packet = get_packet(packet_id)
+    if not packet:
+        return {"ok": False, "reason": "packet_not_found", "packet_id": packet_id}
+
+    packet["usage_count"] = int(packet.get("usage_count", 0) or 0) + 1
+    if emitted:
+        packet["emit_count"] = int(packet.get("emit_count", 0) or 0) + 1
+    packet["last_route"] = str(route or packet.get("last_route") or "")
+    packet["last_used_ts"] = _now()
+    packet = _normalize_packet(packet)
+    save_packet(packet)
+    return {
+        "ok": True,
+        "packet_id": packet_id,
+        "usage_count": int(packet.get("usage_count", 0) or 0),
+        "emit_count": int(packet.get("emit_count", 0) or 0),
+    }
+
+
+def record_packet_feedback(
+    packet_id: str,
+    *,
+    helpful: Optional[bool],
+    noisy: bool = False,
+    followed: bool = True,
+    source: str = "explicit",
+) -> Dict[str, Any]:
+    packet = get_packet(packet_id)
+    if not packet:
+        return {"ok": False, "reason": "packet_not_found", "packet_id": packet_id}
+
+    packet["feedback_count"] = int(packet.get("feedback_count", 0) or 0) + 1
+    if followed and helpful is True:
+        packet["helpful_count"] = int(packet.get("helpful_count", 0) or 0) + 1
+    elif followed and helpful is False:
+        packet["unhelpful_count"] = int(packet.get("unhelpful_count", 0) or 0) + 1
+    if noisy:
+        packet["noisy_count"] = int(packet.get("noisy_count", 0) or 0) + 1
+
+    packet["last_feedback"] = {
+        "helpful": helpful,
+        "noisy": bool(noisy),
+        "followed": bool(followed),
+        "source": str(source or "")[:80],
+        "ts": _now(),
+    }
+    packet = _normalize_packet(packet)
+    save_packet(packet)
+    return {
+        "ok": True,
+        "packet_id": packet_id,
+        "effectiveness_score": float(packet.get("effectiveness_score", 0.5) or 0.5),
+        "feedback_count": int(packet.get("feedback_count", 0) or 0),
+    }
+
+
+def record_packet_feedback_for_advice(
+    advice_id: str,
+    *,
+    helpful: Optional[bool],
+    noisy: bool = False,
+    followed: bool = True,
+    source: str = "explicit",
+) -> Dict[str, Any]:
+    advice = str(advice_id or "").strip()
+    if not advice:
+        return {"ok": False, "reason": "missing_advice_id"}
+
+    index = _load_index()
+    meta = index.get("packet_meta") or {}
+    ordered_ids = sorted(
+        meta.keys(),
+        key=lambda pid: float((meta.get(pid) or {}).get("updated_ts", 0.0)),
+        reverse=True,
+    )
+    for packet_id in ordered_ids:
+        packet = get_packet(packet_id)
+        if not packet:
+            continue
+        advice_rows = packet.get("advice_items") or []
+        for row in advice_rows:
+            if str((row or {}).get("advice_id") or "").strip() == advice:
+                result = record_packet_feedback(
+                    packet_id,
+                    helpful=helpful,
+                    noisy=noisy,
+                    followed=followed,
+                    source=source,
+                )
+                result["matched_advice_id"] = advice
+                return result
+    return {"ok": False, "reason": "packet_not_found_for_advice", "advice_id": advice}
+
+
 def enqueue_prefetch_job(job: Dict[str, Any]) -> str:
     _ensure_dirs()
     ts = _now()
@@ -397,11 +569,24 @@ def get_store_status() -> Dict[str, Any]:
             queue_depth = len([ln for ln in PREFETCH_QUEUE_FILE.read_text(encoding="utf-8").splitlines() if ln.strip()])
     except Exception:
         queue_depth = 0
+    usage_total = sum(int((row or {}).get("usage_count", 0) or 0) for row in meta.values())
+    emit_total = sum(int((row or {}).get("emit_count", 0) or 0) for row in meta.values())
+    feedback_total = sum(int((row or {}).get("feedback_count", 0) or 0) for row in meta.values())
+    avg_effectiveness = 0.0
+    if meta:
+        avg_effectiveness = sum(
+            float((row or {}).get("effectiveness_score", 0.5) or 0.5)
+            for row in meta.values()
+        ) / max(1, len(meta))
     return {
         "total_packets": total,
         "active_packets": active,
         "fresh_packets": fresh,
         "queue_depth": queue_depth,
+        "usage_total": usage_total,
+        "emit_total": emit_total,
+        "feedback_total": feedback_total,
+        "hit_rate": (emit_total / max(usage_total, 1)) if usage_total > 0 else None,
+        "avg_effectiveness_score": round(float(avg_effectiveness), 3),
         "index_file": str(INDEX_FILE),
     }
-

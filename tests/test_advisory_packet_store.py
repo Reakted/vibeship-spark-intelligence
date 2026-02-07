@@ -122,3 +122,77 @@ def test_prefetch_queue_append(monkeypatch, tmp_path):
     row = json.loads(lines[0])
     assert row["job_id"] == job_id
 
+
+def test_relaxed_lookup_prefers_higher_effectiveness(monkeypatch, tmp_path):
+    _patch_store_paths(monkeypatch, tmp_path)
+
+    stale = store.build_packet(
+        project_key="proj",
+        session_context_key="c1",
+        tool_name="Edit",
+        intent_family="auth_security",
+        task_plane="build_delivery",
+        advisory_text="Older packet.",
+        source_mode="prefetch",
+        advice_items=[{"advice_id": "old-a1", "text": "older"}],
+        lineage={"sources": ["prefetch"], "memory_absent_declared": False},
+        ttl_s=300,
+    )
+    better = store.build_packet(
+        project_key="proj",
+        session_context_key="c2",
+        tool_name="Edit",
+        intent_family="auth_security",
+        task_plane="build_delivery",
+        advisory_text="Better packet.",
+        source_mode="prefetch",
+        advice_items=[{"advice_id": "new-a1", "text": "better"}],
+        lineage={"sources": ["prefetch"], "memory_absent_declared": False},
+        ttl_s=300,
+    )
+    stale_id = store.save_packet(stale)
+    better_id = store.save_packet(better)
+
+    store.record_packet_feedback(stale_id, helpful=False, followed=True, source="test")
+    store.record_packet_feedback(stale_id, helpful=False, followed=True, source="test")
+    store.record_packet_feedback(better_id, helpful=True, followed=True, source="test")
+    store.record_packet_feedback(better_id, helpful=True, followed=True, source="test")
+
+    chosen = store.lookup_relaxed(
+        project_key="proj",
+        tool_name="Edit",
+        intent_family="auth_security",
+        task_plane="build_delivery",
+    )
+    assert chosen is not None
+    assert chosen["packet_id"] == better_id
+
+
+def test_record_packet_feedback_for_advice(monkeypatch, tmp_path):
+    _patch_store_paths(monkeypatch, tmp_path)
+    packet = store.build_packet(
+        project_key="proj",
+        session_context_key="ctx",
+        tool_name="Read",
+        intent_family="knowledge_alignment",
+        task_plane="build_delivery",
+        advisory_text="Read docs first.",
+        source_mode="prefetch",
+        advice_items=[{"advice_id": "aid-1", "text": "Read docs first."}],
+        lineage={"sources": ["prefetch"], "memory_absent_declared": False},
+        ttl_s=300,
+    )
+    packet_id = store.save_packet(packet)
+    result = store.record_packet_feedback_for_advice(
+        "aid-1",
+        helpful=False,
+        noisy=True,
+        followed=False,
+        source="test",
+    )
+    assert result.get("ok") is True
+    assert result.get("packet_id") == packet_id
+    updated = store.get_packet(packet_id)
+    assert updated is not None
+    assert int(updated.get("feedback_count", 0)) >= 1
+    assert int(updated.get("noisy_count", 0)) >= 1

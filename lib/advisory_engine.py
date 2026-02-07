@@ -18,6 +18,13 @@ ENGINE_LOG_MAX = 500
 MAX_ENGINE_MS = float(os.getenv("SPARK_ADVISORY_MAX_MS", "4000"))
 INCLUDE_MIND_IN_MEMORY = os.getenv("SPARK_ADVISORY_INCLUDE_MIND", "0") == "1"
 ENABLE_PREFETCH_QUEUE = os.getenv("SPARK_ADVISORY_PREFETCH_QUEUE", "1") != "0"
+ENABLE_INLINE_PREFETCH_WORKER = os.getenv("SPARK_ADVISORY_PREFETCH_INLINE", "1") != "0"
+try:
+    INLINE_PREFETCH_MAX_JOBS = max(
+        1, int(os.getenv("SPARK_ADVISORY_PREFETCH_INLINE_MAX_JOBS", "1") or 1)
+    )
+except Exception:
+    INLINE_PREFETCH_MAX_JOBS = 1
 
 
 def _project_key() -> str:
@@ -154,7 +161,13 @@ def on_pre_tool(
             suppress_tool_advice,
         )
         from .advisory_memory_fusion import build_memory_bundle
-        from .advisory_packet_store import build_packet, lookup_exact, lookup_relaxed, save_packet
+        from .advisory_packet_store import (
+            build_packet,
+            lookup_exact,
+            lookup_relaxed,
+            record_packet_usage,
+            save_packet,
+        )
         from .advisor import advise_on_tool
         from .advisory_gate import evaluate
         from .advisory_synthesizer import synthesize
@@ -225,6 +238,11 @@ def on_pre_tool(
 
         gate_result = evaluate(advice_items, state, tool_name, tool_input)
         if not gate_result.emitted:
+            if packet_id:
+                try:
+                    record_packet_usage(packet_id, emitted=False, route=route)
+                except Exception:
+                    pass
             save_state(state)
             _log_engine_event(
                 "no_emit",
@@ -319,6 +337,18 @@ def on_pre_tool(
             except Exception:
                 pass
 
+            state.last_advisory_packet_id = str(packet_id or "")
+            state.last_advisory_route = str(route or "")
+            state.last_advisory_tool = str(tool_name or "")
+            state.last_advisory_advice_ids = list(shown_ids[:20])
+            state.last_advisory_at = time.time()
+
+        if packet_id:
+            try:
+                record_packet_usage(packet_id, emitted=bool(emitted), route=route)
+            except Exception:
+                pass
+
         save_state(state)
 
         _log_engine_event(
@@ -374,6 +404,28 @@ def on_post_tool(
 
         if state.shown_advice_ids:
             _record_implicit_feedback(state, tool_name, success, resolved_trace_id)
+
+        try:
+            from .advisory_packet_store import record_packet_feedback
+
+            last_packet_id = str(state.last_advisory_packet_id or "").strip()
+            last_tool = str(state.last_advisory_tool or "").strip().lower()
+            age_s = time.time() - float(state.last_advisory_at or 0.0)
+            if (
+                last_packet_id
+                and last_tool
+                and last_tool == str(tool_name or "").strip().lower()
+                and age_s <= 900
+            ):
+                record_packet_feedback(
+                    last_packet_id,
+                    helpful=bool(success),
+                    noisy=False,
+                    followed=True,
+                    source="implicit_post_tool",
+                )
+        except Exception:
+            pass
 
         if tool_name in {"Edit", "Write"}:
             try:
@@ -443,6 +495,16 @@ def on_user_prompt(
                     "trace_id": None,
                 }
             )
+            if ENABLE_INLINE_PREFETCH_WORKER:
+                try:
+                    from .advisory_prefetch_worker import process_prefetch_queue
+
+                    process_prefetch_queue(
+                        max_jobs=INLINE_PREFETCH_MAX_JOBS,
+                        max_tools_per_job=3,
+                    )
+                except Exception as e:
+                    log_debug("advisory_engine", "inline prefetch worker failed", e)
     except Exception as e:
         log_debug("advisory_engine", "on_user_prompt failed", e)
 
@@ -551,6 +613,13 @@ def get_engine_status() -> Dict[str, Any]:
         status["packet_store"] = get_store_status()
     except Exception:
         status["packet_store"] = {"error": "unavailable"}
+
+    try:
+        from .advisory_prefetch_worker import get_worker_status
+
+        status["prefetch_worker"] = get_worker_status()
+    except Exception:
+        status["prefetch_worker"] = {"error": "unavailable"}
 
     try:
         if ENGINE_LOG.exists():
