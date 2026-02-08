@@ -82,6 +82,220 @@ DEPTH_API = "http://localhost:5555"
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "kimi-k2.5:cloud"  # Kimi 2.5 — strong engineering reasoning via Ollama cloud
 
+# ──────────────────────────────────────────────
+# DeepSeek Isolation — Answer Generation Only
+# See DEEPSEEK_ISOLATION_RULES.md for full spec
+# DeepSeek sees ONLY: question, topic, depth, mode, level info
+# DeepSeek NEVER sees: Spark internals, scores, knowledge, strategies
+# ──────────────────────────────────────────────
+
+# Sanitized prompt — NO Spark/Vibeship references, NO training context
+_DEEPSEEK_ANSWER_PROMPT = """You are answering a technical evaluation question.
+
+Domain: {domain_id}
+Topic: {topic}
+Depth Level: {depth} / {max_depth} ({level_name})
+Perspective: {level_lens}
+
+Question:
+{question}
+
+Provide a thorough, specific, and actionable answer.
+Reference concrete examples, specific values, and real-world tradeoffs."""
+
+_DEEPSEEK_LOG_PATH = Path.home() / ".spark" / "logs" / "deepseek_calls.jsonl"
+
+# Fields that are ALLOWED in DeepSeek prompts (whitelist)
+_ALLOWED_PROMPT_FIELDS = {
+    "question", "topic", "depth", "max_depth", "mode",
+    "level_name", "level_lens", "domain_id",
+}
+
+_MAX_ANSWER_LENGTH = 4000
+
+
+def _load_env_key(name: str) -> str:
+    """Load API key from env var, falling back to .env file."""
+    import os
+    val = os.environ.get(name, "")
+    if val:
+        return val
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line.startswith(f"{name}=") and not line.startswith("#"):
+                return line.split("=", 1)[1].strip().strip("'\"")
+    return ""
+
+
+class DepthAnswerGenerator:
+    """Isolated answer generator — model-swappable, prompt-sanitized.
+
+    DeepSeek (or any external provider) receives ONLY a sanitized prompt
+    with zero Spark/Vibeship context. Responses are treated as untrusted text.
+    """
+
+    PROVIDERS = {
+        "deepseek": {
+            "endpoint": "https://api.deepseek.com/v1/chat/completions",
+            "model": "deepseek-chat",
+            "key_env": "DEEPSEEK_API_KEY",
+        },
+        "ollama": {
+            "endpoint": OLLAMA_URL,
+            "model": OLLAMA_MODEL,
+            "key_env": None,
+        },
+    }
+
+    def __init__(self, provider: str = None):
+        import os
+        self.provider = provider or os.getenv("DEPTH_ANSWER_PROVIDER", "deepseek")
+        if self.provider not in self.PROVIDERS:
+            log.warning("Unknown provider %s, falling back to ollama", self.provider)
+            self.provider = "ollama"
+        self.config = self.PROVIDERS[self.provider]
+        self._api_key = ""
+        if self.config["key_env"]:
+            self._api_key = _load_env_key(self.config["key_env"])
+            if not self._api_key:
+                log.warning("No %s found, falling back to ollama", self.config["key_env"])
+                self.provider = "ollama"
+                self.config = self.PROVIDERS["ollama"]
+
+    async def generate(
+        self, question: str, topic: str, depth: int, max_depth: int,
+        domain_id: str, mode: str, level_name: str, level_lens: str,
+    ) -> Optional[str]:
+        """Generate answer using configured provider with sanitized prompt."""
+        prompt = self._build_sanitized_prompt(
+            question=question, topic=topic, depth=depth, max_depth=max_depth,
+            domain_id=domain_id, mode=mode, level_name=level_name,
+            level_lens=level_lens,
+        )
+
+        t0 = time.time()
+        raw = await self._call_api(prompt, depth)
+        latency_ms = int((time.time() - t0) * 1000)
+
+        answer = self._sanitize_response(raw)
+        self._log_call(domain_id, topic, depth, question, answer, latency_ms)
+        return answer
+
+    def _build_sanitized_prompt(self, **kwargs) -> str:
+        """Build prompt from ALLOWED fields only. Rejects any blocked content."""
+        for key in kwargs:
+            if key not in _ALLOWED_PROMPT_FIELDS:
+                raise ValueError(f"Blocked field in DeepSeek prompt: {key}")
+        return _DEEPSEEK_ANSWER_PROMPT.format(**kwargs)
+
+    async def _call_api(self, prompt: str, depth: int) -> Optional[str]:
+        """Call the configured provider API."""
+        timeout = 30.0 + (depth * 3.0)
+
+        if self.provider == "ollama":
+            return await self._call_ollama(prompt, timeout, depth)
+        else:
+            return await self._call_openai_compat(prompt, timeout)
+
+    async def _call_openai_compat(self, prompt: str, timeout: float) -> Optional[str]:
+        """Call OpenAI-compatible API (DeepSeek). Stateless, single-turn."""
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self._api_key}",
+            # No custom headers that reveal project identity
+        }
+        payload = {
+            "model": self.config["model"],
+            "messages": [{"role": "user", "content": prompt}],  # Single-turn only
+            "max_tokens": 1024,
+            "temperature": 0.7,
+        }
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.post(
+                        self.config["endpoint"], json=payload, headers=headers,
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        return data["choices"][0]["message"]["content"]
+                    else:
+                        log.warning(
+                            "%s API error %d: %s",
+                            self.provider, resp.status_code, resp.text[:200],
+                        )
+            except Exception as e:
+                log.warning("%s API error (attempt %d): %s", self.provider, attempt + 1, e)
+        return None
+
+    async def _call_ollama(self, prompt: str, timeout: float, depth: int) -> Optional[str]:
+        """Call local Ollama. Same sanitized prompt, no Spark context."""
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.post(
+                        self.config["endpoint"],
+                        json={
+                            "model": self.config["model"],
+                            "prompt": prompt,
+                            "stream": False,
+                            "options": {
+                                "temperature": 0.7 if depth > 4 else 0.8,
+                                "num_predict": 1024,
+                            },
+                        },
+                    )
+                    if resp.status_code == 200:
+                        text = resp.json().get("response", "").strip()
+                        if text and len(text) > 20 and not _is_gibberish(text):
+                            return text
+            except httpx.TimeoutException:
+                log.warning("Ollama timeout depth %d attempt %d", depth, attempt + 1)
+                timeout += 15.0
+            except Exception as e:
+                log.warning("Ollama error depth %d: %s", depth, e)
+                break
+        return None
+
+    def _sanitize_response(self, raw: Optional[str]) -> Optional[str]:
+        """Treat response as UNTRUSTED TEXT. Truncate, check coherence."""
+        if not raw:
+            return None
+        # Strip to plain text, truncate
+        answer = raw.strip()[:_MAX_ANSWER_LENGTH]
+        # Coherence check
+        if not answer or len(answer) < 20 or _is_gibberish(answer):
+            return None
+        return answer
+
+    def _log_call(
+        self, domain: str, topic: str, depth: int,
+        question: str, answer: Optional[str], latency_ms: int,
+    ):
+        """Log DeepSeek call with MINIMAL metadata. No full prompts/answers."""
+        if self.provider == "ollama":
+            return  # Only log external API calls
+        _DEEPSEEK_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "domain": domain,
+            "topic": topic,
+            "depth": depth,
+            "question_hash": hashlib.sha256(question.encode()).hexdigest()[:16],
+            "answer_length": len(answer) if answer else 0,
+            "latency_ms": latency_ms,
+            "model": self.config["model"],
+            "status": "success" if answer else "failure",
+        }
+        try:
+            with open(_DEEPSEEK_LOG_PATH, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception:
+            pass
+
+
 SPARK_DIR = Path.home() / ".spark"
 TRAINING_LOG = SPARK_DIR / "depth_training.jsonl"
 KNOWLEDGE_BASE = SPARK_DIR / "depth_knowledge.json"
@@ -1146,6 +1360,27 @@ DEPTH_GUIDANCE_CLASSIC = {
 }
 
 
+# Level name mapping for sanitized prompts
+_LEVEL_NAMES = {
+    1: "GROUND", 2: "DECOMPOSE", 3: "COMPARE", 4: "BREAK", 5: "OPTIMIZE",
+    6: "EDGE", 7: "EMPATHIZE", 8: "SCALE", 9: "INTEGRATE", 10: "SIMPLIFY",
+    11: "TEACH", 12: "PREDICT", 13: "INVENT", 14: "CRITIQUE", 15: "SYNTHESIZE",
+}
+_LEVEL_NAMES_CLASSIC = {
+    1: "SURFACE", 2: "STRUCTURE", 3: "ORIGINS", 4: "PURPOSE", 5: "ASSUMPTIONS",
+    6: "CONNECTIONS", 7: "PARADOX", 8: "IDENTITY", 9: "META", 10: "SILENCE",
+}
+
+# Singleton generator — initialized on first use
+_answer_generator: Optional[DepthAnswerGenerator] = None
+
+def _get_answer_generator() -> DepthAnswerGenerator:
+    global _answer_generator
+    if _answer_generator is None:
+        _answer_generator = DepthAnswerGenerator()
+    return _answer_generator
+
+
 async def _generate_answer(
     topic: str, depth: int, question: str,
     previous_answers: List[str] = None,
@@ -1155,9 +1390,26 @@ async def _generate_answer(
     domain: str = None,
     mode: str = "vibe",
 ) -> str:
-    """Generate an answer using Ollama with knowledge injection, pushback, and strategies."""
+    """Generate an answer. Routes to DeepSeek (sanitized) or Ollama (full context)."""
     lenses = _get_lenses(mode)
     lens = lenses.get(depth, "")
+
+    # --- DeepSeek path: sanitized prompt, zero Spark context ---
+    generator = _get_answer_generator()
+    if generator.provider != "ollama":
+        level_names = _LEVEL_NAMES_CLASSIC if mode == "classic" else _LEVEL_NAMES
+        max_depth = _get_max_depth(mode)
+        descriptions = _get_descriptions(mode)
+        answer = await generator.generate(
+            question=question, topic=topic, depth=depth, max_depth=max_depth,
+            domain_id=domain or mode, mode=mode,
+            level_name=level_names.get(depth, f"DEPTH_{depth}"),
+            level_lens=descriptions.get(depth, lens),
+        )
+        if answer:
+            return answer
+        # Fall through to Ollama if external provider fails
+        log.warning("External provider failed, falling back to Ollama")
 
     # Build pushback context (this is the key AGI upgrade)
     pushback_context = ""
