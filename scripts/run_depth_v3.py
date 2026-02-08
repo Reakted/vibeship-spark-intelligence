@@ -58,7 +58,7 @@ log = logging.getLogger("depth.v3.runner")
 REPORT_DIR = PROJECT_ROOT / "docs" / "reports"
 REPORT_FILE = REPORT_DIR / "DEPTH_V3_EVOLUTION_REPORT.md"
 
-AVAILABLE_DOMAINS = ["ui_ux", "debugging", "api_data_flow"]
+AVAILABLE_DOMAINS = ["ui_ux", "debugging", "api_data_flow", "system_design", "state_and_components", "shipping_and_ops"]
 
 
 def _now() -> str:

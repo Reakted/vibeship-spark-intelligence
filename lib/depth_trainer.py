@@ -404,6 +404,27 @@ TOPIC_UNIVERSE = {
         "churn analysis", "MVP scoping", "feedback loops",
         "growth metrics", "competitive analysis", "market fit",
     ],
+    "system_design": [
+        "database selection", "caching strategy", "authentication architecture",
+        "service boundaries", "message queues", "API gateway design",
+        "search infrastructure", "file storage architecture", "background job processing",
+        "rate limiting design", "multi-tenancy architecture", "event-driven design",
+        "configuration management", "logging infrastructure", "deployment topology",
+    ],
+    "state_and_components": [
+        "component composition patterns", "state lifting decisions", "custom hooks extraction",
+        "render optimization", "prop interface design", "form state management",
+        "server state vs client state", "context usage boundaries", "component lifecycle reasoning",
+        "error boundary placement", "suspense and loading states", "controlled vs uncontrolled inputs",
+        "derived state computation", "component testing strategy", "design system component API",
+    ],
+    "shipping_and_ops": [
+        "CI pipeline design", "testing pyramid strategy", "feature flag architecture",
+        "database migration safety", "deployment rollback patterns", "observability and alerting",
+        "zero-downtime deployments", "environment parity", "dependency update strategy",
+        "incident response playbooks", "release management", "infrastructure as code",
+        "secrets management", "performance budgets in CI", "progressive rollout strategy",
+    ],
     "classic_philosophical": [
         "truth", "knowledge", "consciousness", "free will",
         "ethics", "justice", "meaning", "existence",
