@@ -27,6 +27,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `META_RALPH.md`: quality gate and feedback loop
 - `SEMANTIC_ADVISOR_DESIGN.md`: semantic retrieval and advisor behavior
 - `docs/PROJECT_INTELLIGENCE.md`: project-level learning loop
+- `docs/architecture/PREDICTION_OUTCOME_LOOP.md`: prediction/outcome architecture, data contract, and integration plumbing
 
 ## Current Program Docs
 
