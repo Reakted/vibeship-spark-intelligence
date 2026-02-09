@@ -1,5 +1,6 @@
 import json
 import time
+from types import SimpleNamespace
 
 from lib import prediction_loop as pl
 from lib.queue import EventType, SparkEvent
@@ -149,3 +150,92 @@ def test_process_prediction_cycle_skips_auto_link_within_interval(monkeypatch):
     assert calls["count"] == 0
     assert stats["auto_link_processed"] == 0
     assert stats["auto_link_linked"] == 0
+
+
+def test_match_predictions_uses_type_adaptive_windows(tmp_path, monkeypatch):
+    now = time.time()
+    pred_file = tmp_path / "predictions.jsonl"
+    out_file = tmp_path / "outcomes.jsonl"
+    pred_rows = [
+        {
+            "prediction_id": "p1",
+            "insight_key": "ins:1",
+            "type": "principle",
+            "text": "prefer small PRs",
+            "expected_polarity": "pos",
+            "created_at": now - (2 * 24 * 3600),
+            "expires_at": now + 3600,
+        }
+    ]
+    outcome_rows = [
+        {
+            "outcome_id": "o1",
+            "text": "prefer small PRs",
+            "polarity": "pos",
+            "created_at": now - (24 * 3600),
+        }
+    ]
+    with pred_file.open("w", encoding="utf-8") as f:
+        for row in pred_rows:
+            f.write(json.dumps(row) + "\n")
+    with out_file.open("w", encoding="utf-8") as f:
+        for row in outcome_rows:
+            f.write(json.dumps(row) + "\n")
+
+    monkeypatch.setattr(pl, "PREDICTIONS_FILE", pred_file)
+    monkeypatch.setattr(pl, "OUTCOMES_FILE", out_file)
+    monkeypatch.setattr(pl, "embed_texts", lambda _texts: [])
+    monkeypatch.setattr(pl, "_load_state", lambda: {"matched_ids": []})
+    monkeypatch.setattr(pl, "_save_state", lambda _state: None)
+    monkeypatch.setattr(pl, "get_outcome_links", lambda limit=5000: [])
+    cog = SimpleNamespace(insights={}, _save_insights=lambda: None)
+    monkeypatch.setattr(pl, "get_cognitive_learner", lambda: cog)
+
+    stats = pl.match_predictions(max_age_s=6 * 3600, sim_threshold=0.5)
+    assert stats["matched"] == 1
+    assert stats["validated"] == 1
+
+
+def test_match_predictions_hard_link_beats_similarity(tmp_path, monkeypatch):
+    now = time.time()
+    pred_file = tmp_path / "predictions.jsonl"
+    out_file = tmp_path / "outcomes.jsonl"
+    pred_rows = [
+        {
+            "prediction_id": "p-link",
+            "insight_key": "ins:hard",
+            "type": "general",
+            "text": "completely unrelated prediction",
+            "expected_polarity": "pos",
+            "created_at": now - 60,
+            "expires_at": now + 3600,
+        }
+    ]
+    outcome_rows = [
+        {
+            "outcome_id": "o-link",
+            "text": "different words here",
+            "polarity": "pos",
+            "linked_insights": ["ins:hard"],
+            "created_at": now - 30,
+        }
+    ]
+    with pred_file.open("w", encoding="utf-8") as f:
+        for row in pred_rows:
+            f.write(json.dumps(row) + "\n")
+    with out_file.open("w", encoding="utf-8") as f:
+        for row in outcome_rows:
+            f.write(json.dumps(row) + "\n")
+
+    monkeypatch.setattr(pl, "PREDICTIONS_FILE", pred_file)
+    monkeypatch.setattr(pl, "OUTCOMES_FILE", out_file)
+    monkeypatch.setattr(pl, "embed_texts", lambda _texts: [])
+    monkeypatch.setattr(pl, "_load_state", lambda: {"matched_ids": []})
+    monkeypatch.setattr(pl, "_save_state", lambda _state: None)
+    monkeypatch.setattr(pl, "get_outcome_links", lambda limit=5000: [])
+    cog = SimpleNamespace(insights={}, _save_insights=lambda: None)
+    monkeypatch.setattr(pl, "get_cognitive_learner", lambda: cog)
+
+    stats = pl.match_predictions(max_age_s=6 * 3600, sim_threshold=0.95)
+    assert stats["matched"] == 1
+    assert stats["validated"] == 1

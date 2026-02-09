@@ -21,7 +21,7 @@ from lib.aha_tracker import get_aha_tracker, SurpriseType
 from lib.diagnostics import log_debug
 from lib.exposure_tracker import read_recent_exposures
 from lib.embeddings import embed_texts
-from lib.outcome_log import OUTCOMES_FILE, append_outcomes, make_outcome_id, auto_link_outcomes
+from lib.outcome_log import OUTCOMES_FILE, append_outcomes, make_outcome_id, auto_link_outcomes, get_outcome_links
 from lib.project_profile import list_profiles
 from lib.primitive_filter import is_primitive_text
 
@@ -53,6 +53,15 @@ SUCCESS_OUTCOME_TOOLS = {
     "Task",
     "NotebookEdit",
     "MultiEdit",
+}
+MATCH_WINDOW_BY_TYPE_S = {
+    "failure_pattern": 12 * 3600,
+    "workflow": 2 * 24 * 3600,
+    "preference": 3 * 24 * 3600,
+    "principle": 7 * 24 * 3600,
+    "project_milestone": 30 * 24 * 3600,
+    "project_done": 30 * 24 * 3600,
+    "general": 24 * 3600,
 }
 
 
@@ -451,14 +460,19 @@ def _cosine(a: List[float], b: List[float]) -> float:
     return max(0.0, min(1.0, dot / ((na ** 0.5) * (nb ** 0.5))))
 
 
+def _match_window_s(pred_type: str, default_window_s: float) -> float:
+    specific = float(MATCH_WINDOW_BY_TYPE_S.get(pred_type or "general", 0.0))
+    return max(float(default_window_s or 0.0), specific)
+
+
 def match_predictions(
     *,
     max_age_s: float = 6 * 3600,
     sim_threshold: float = 0.72,
 ) -> Dict[str, int]:
     """Match predictions to outcomes and update insight reliability."""
-    preds = _load_jsonl(PREDICTIONS_FILE, limit=400)
-    outcomes = _load_jsonl(OUTCOMES_FILE, limit=400)
+    preds = _load_jsonl(PREDICTIONS_FILE, limit=1200)
+    outcomes = _load_jsonl(OUTCOMES_FILE, limit=1200)
     if not preds or not outcomes:
         return {"matched": 0, "validated": 0, "contradicted": 0, "surprises": 0}
 
@@ -466,14 +480,27 @@ def match_predictions(
     matched_ids = set(state.get("matched_ids") or [])
     now = time.time()
 
-    # Filter to recent predictions/outcomes
-    preds = [p for p in preds if (now - float(p.get("created_at") or 0.0)) <= max_age_s]
-    outcomes = [o for o in outcomes if (now - float(o.get("created_at") or 0.0)) <= max_age_s]
+    max_window = max(float(max_age_s or 0.0), max(MATCH_WINDOW_BY_TYPE_S.values()))
+    preds = [p for p in preds if (now - float(p.get("created_at") or 0.0)) <= max_window]
+    outcomes = [o for o in outcomes if (now - float(o.get("created_at") or 0.0)) <= max_window]
 
     pred_texts = [p.get("text") or "" for p in preds]
     outcome_texts = [o.get("text") or "" for o in outcomes]
     pred_vecs = embed_texts(pred_texts) or []
     out_vecs = embed_texts(outcome_texts) or []
+
+    outcome_link_map: Dict[str, set] = {}
+    try:
+        for link in get_outcome_links(limit=5000):
+            outcome_id = link.get("outcome_id")
+            insight_key = link.get("insight_key")
+            if not outcome_id or not insight_key:
+                continue
+            if outcome_id not in outcome_link_map:
+                outcome_link_map[outcome_id] = set()
+            outcome_link_map[outcome_id].add(insight_key)
+    except Exception:
+        outcome_link_map = {}
 
     def similarity(i: int, j: int) -> float:
         if pred_vecs and out_vecs:
@@ -492,26 +519,51 @@ def match_predictions(
             continue
         pred_pol = pred.get("expected_polarity")
         pred_type = pred.get("type") or "general"
+        pred_created = float(pred.get("created_at") or 0.0)
+        window_s = _match_window_s(pred_type, max_age_s)
+        if pred_created and (now - pred_created) > window_s:
+            continue
+        window_end = (pred_created + window_s) if pred_created else now
+        if expires:
+            window_end = min(window_end, expires)
         insight_key = pred.get("insight_key")
         insight = cog.insights.get(insight_key) if insight_key else None
 
         best = None
         best_sim = 0.0
-        linked_hits = []
-        if insight_key:
-            for outcome in outcomes:
-                links = outcome.get("linked_insights") or []
-                if isinstance(links, list) and insight_key in links:
-                    linked_hits.append(outcome)
+        hard_hits: Dict[str, Tuple[int, float, Dict]] = {}
+
+        def _add_hard_hit(outcome: Dict, rank: int) -> None:
+            oid = str(outcome.get("outcome_id") or f"anon:{id(outcome)}")
+            ts = float(outcome.get("created_at") or 0.0)
+            current = hard_hits.get(oid)
+            if not current or rank > current[0] or (rank == current[0] and ts > current[1]):
+                hard_hits[oid] = (rank, ts, outcome)
+
         # Hard link by entity_id (project milestones/done)
         entity_id = pred.get("entity_id")
         if entity_id:
             for outcome in outcomes:
                 if outcome.get("entity_id") == entity_id:
-                    linked_hits.append(outcome)
-        if linked_hits:
-            linked_hits.sort(key=lambda o: float(o.get("created_at") or 0.0), reverse=True)
-            best = linked_hits[0]
+                    _add_hard_hit(outcome, rank=4)
+        if insight_key:
+            for outcome in outcomes:
+                links = outcome.get("linked_insights") or []
+                if isinstance(links, list) and insight_key in links:
+                    _add_hard_hit(outcome, rank=3)
+                oid = outcome.get("outcome_id")
+                linked_insights = outcome_link_map.get(str(oid)) if oid else None
+                if linked_insights and insight_key in linked_insights:
+                    _add_hard_hit(outcome, rank=3)
+        pred_trace = pred.get("trace_id")
+        if pred_trace:
+            for outcome in outcomes:
+                if outcome.get("trace_id") == pred_trace:
+                    _add_hard_hit(outcome, rank=2)
+
+        if hard_hits:
+            ranked_hits = sorted(hard_hits.values(), key=lambda item: (item[0], item[1]), reverse=True)
+            best = ranked_hits[0][2]
             best_sim = 1.0
 
         pred_sid = pred.get("session_id")
@@ -525,8 +577,11 @@ def match_predictions(
             outcome = outcomes[j]
             if best is not None:
                 break
-            if outcome.get("created_at") and pred.get("created_at"):
-                if float(outcome["created_at"]) < float(pred["created_at"]):
+            outcome_created = float(outcome.get("created_at") or 0.0)
+            if pred_created:
+                if outcome_created and outcome_created < pred_created:
+                    continue
+                if outcome_created and outcome_created > window_end:
                     continue
             sim = similarity(i, j)
             if sim > best_sim:
