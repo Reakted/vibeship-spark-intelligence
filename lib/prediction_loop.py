@@ -46,6 +46,14 @@ NEGATIVE_OUTCOME = {
     "no", "wrong", "redo", "change", "fix", "not", "doesnt", "doesn't", "broken",
     "still", "bad", "failed", "issue", "bug",
 }
+SUCCESS_OUTCOME_TOOLS = {
+    "Edit",
+    "Write",
+    "Bash",
+    "Task",
+    "NotebookEdit",
+    "MultiEdit",
+}
 
 
 def _load_state() -> Dict:
@@ -341,6 +349,37 @@ def collect_outcomes(limit: int = 200) -> Dict[str, int]:
                 "tool": tool,
                 "text": text,
                 "polarity": "neg",
+                "created_at": ev.timestamp,
+                "session_id": ev.session_id,
+            }
+            if trace_id:
+                row["trace_id"] = trace_id
+            rows.append(row)
+        elif ev.event_type == EventType.POST_TOOL:
+            tool = ev.tool_name or ""
+            if tool not in SUCCESS_OUTCOME_TOOLS:
+                continue
+            detail = ""
+            tool_input = ev.tool_input or {}
+            if isinstance(tool_input, dict):
+                for key in ("command", "path", "file_path", "query"):
+                    value = tool_input.get(key)
+                    if value:
+                        detail = str(value).strip()
+                        break
+            if not detail:
+                payload = (ev.data or {}).get("payload") or {}
+                if isinstance(payload, dict):
+                    detail = str(payload.get("summary") or payload.get("text") or "").strip()
+            text = f"{tool} success"
+            if detail:
+                text = f"{tool} success: {detail[:180]}"
+            row = {
+                "outcome_id": make_outcome_id(str(ev.timestamp), tool, "success", text[:120]),
+                "event_type": "tool_success",
+                "tool": tool,
+                "text": text,
+                "polarity": "pos",
                 "created_at": ev.timestamp,
                 "session_id": ev.session_id,
             }

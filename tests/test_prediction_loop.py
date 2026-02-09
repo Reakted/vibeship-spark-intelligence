@@ -1,6 +1,7 @@
 import json
 
 from lib import prediction_loop as pl
+from lib.queue import EventType, SparkEvent
 
 
 def _read_jsonl(path):
@@ -49,3 +50,39 @@ def test_build_predictions_applies_source_budgets(tmp_path, monkeypatch):
     assert by_source.get("chip_merge", 0) <= 2
     assert by_source.get("sync_context", 0) <= 2
     assert by_source.get("spark_inject", 0) <= 2
+
+
+def test_collect_outcomes_captures_post_tool_success(monkeypatch):
+    events = [
+        SparkEvent(
+            event_type=EventType.POST_TOOL,
+            session_id="s1",
+            timestamp=123.0,
+            data={"trace_id": "trace-1"},
+            tool_name="Bash",
+            tool_input={"command": "pytest -q"},
+        )
+    ]
+
+    monkeypatch.setattr(pl, "count_events", lambda: len(events))
+    monkeypatch.setattr(pl, "read_events", lambda limit, offset: events[offset : offset + limit])
+    monkeypatch.setattr(pl, "_load_state", lambda: {"offset": 0, "matched_ids": []})
+    monkeypatch.setattr(pl, "_save_state", lambda _state: None)
+
+    captured = {"rows": []}
+
+    def _capture(rows):
+        captured["rows"] = list(rows)
+        return len(captured["rows"])
+
+    monkeypatch.setattr(pl, "append_outcomes", _capture)
+    stats = pl.collect_outcomes(limit=20)
+
+    assert stats["processed"] == 1
+    assert stats["outcomes"] == 1
+    assert len(captured["rows"]) == 1
+    row = captured["rows"][0]
+    assert row["event_type"] == "tool_success"
+    assert row["polarity"] == "pos"
+    assert row["tool"] == "Bash"
+    assert "success" in row["text"]
