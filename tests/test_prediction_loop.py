@@ -1,4 +1,5 @@
 import json
+import time
 
 from lib import prediction_loop as pl
 from lib.queue import EventType, SparkEvent
@@ -86,3 +87,65 @@ def test_collect_outcomes_captures_post_tool_success(monkeypatch):
     assert row["polarity"] == "pos"
     assert row["tool"] == "Bash"
     assert "success" in row["text"]
+
+
+def test_process_prediction_cycle_runs_auto_link_when_due(monkeypatch):
+    saved_states = []
+    state = {"offset": 0, "matched_ids": [], "last_auto_link_ts": 0.0}
+    calls = {"count": 0}
+
+    monkeypatch.setenv("SPARK_PREDICTION_AUTO_LINK", "1")
+    monkeypatch.setenv("SPARK_PREDICTION_AUTO_LINK_INTERVAL_S", "60")
+    monkeypatch.setattr(pl, "build_predictions", lambda: 1)
+    monkeypatch.setattr(pl, "build_project_predictions", lambda: 0)
+    monkeypatch.setattr(pl, "collect_outcomes", lambda limit=200: {"processed": 1, "outcomes": 1})
+    monkeypatch.setattr(
+        pl,
+        "match_predictions",
+        lambda: {"matched": 0, "validated": 0, "contradicted": 0, "surprises": 0},
+    )
+    monkeypatch.setattr(pl, "_load_state", lambda: dict(state))
+    monkeypatch.setattr(pl, "_save_state", lambda s: saved_states.append(dict(s)))
+
+    def _auto_link(**_kwargs):
+        calls["count"] += 1
+        return {"processed": 5, "linked": 2, "skipped": 3}
+
+    monkeypatch.setattr(pl, "auto_link_outcomes", _auto_link)
+
+    stats = pl.process_prediction_cycle(limit=120)
+
+    assert calls["count"] == 1
+    assert stats["auto_link_processed"] == 5
+    assert stats["auto_link_linked"] == 2
+    assert stats["auto_link_skipped"] == 3
+    assert any((s.get("last_auto_link_ts") or 0) > 0 for s in saved_states)
+
+
+def test_process_prediction_cycle_skips_auto_link_within_interval(monkeypatch):
+    calls = {"count": 0}
+    now = time.time()
+
+    monkeypatch.setenv("SPARK_PREDICTION_AUTO_LINK", "1")
+    monkeypatch.setenv("SPARK_PREDICTION_AUTO_LINK_INTERVAL_S", "3600")
+    monkeypatch.setattr(pl, "build_predictions", lambda: 0)
+    monkeypatch.setattr(pl, "build_project_predictions", lambda: 0)
+    monkeypatch.setattr(pl, "collect_outcomes", lambda limit=200: {"processed": 0, "outcomes": 0})
+    monkeypatch.setattr(
+        pl,
+        "match_predictions",
+        lambda: {"matched": 0, "validated": 0, "contradicted": 0, "surprises": 0},
+    )
+    monkeypatch.setattr(pl, "_load_state", lambda: {"offset": 0, "matched_ids": [], "last_auto_link_ts": now})
+    monkeypatch.setattr(pl, "_save_state", lambda _state: None)
+
+    def _auto_link(**_kwargs):
+        calls["count"] += 1
+        return {"processed": 1, "linked": 1, "skipped": 0}
+
+    monkeypatch.setattr(pl, "auto_link_outcomes", _auto_link)
+    stats = pl.process_prediction_cycle(limit=50)
+
+    assert calls["count"] == 0
+    assert stats["auto_link_processed"] == 0
+    assert stats["auto_link_linked"] == 0

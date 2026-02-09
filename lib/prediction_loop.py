@@ -21,7 +21,7 @@ from lib.aha_tracker import get_aha_tracker, SurpriseType
 from lib.diagnostics import log_debug
 from lib.exposure_tracker import read_recent_exposures
 from lib.embeddings import embed_texts
-from lib.outcome_log import OUTCOMES_FILE, append_outcomes, make_outcome_id
+from lib.outcome_log import OUTCOMES_FILE, append_outcomes, make_outcome_id, auto_link_outcomes
 from lib.project_profile import list_profiles
 from lib.primitive_filter import is_primitive_text
 
@@ -393,6 +393,41 @@ def collect_outcomes(limit: int = 200) -> Dict[str, int]:
     return {"processed": processed, "outcomes": len(rows)}
 
 
+def _load_auto_link_config() -> Tuple[bool, float, int, float]:
+    enabled = str(os.environ.get("SPARK_PREDICTION_AUTO_LINK", "1")).strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    interval_s = 300.0
+    limit = 80
+    min_similarity = 0.25
+
+    raw_interval = os.environ.get("SPARK_PREDICTION_AUTO_LINK_INTERVAL_S")
+    if raw_interval:
+        try:
+            interval_s = max(30.0, min(24 * 3600.0, float(raw_interval)))
+        except Exception:
+            pass
+
+    raw_limit = os.environ.get("SPARK_PREDICTION_AUTO_LINK_LIMIT")
+    if raw_limit:
+        try:
+            limit = max(10, min(1000, int(raw_limit)))
+        except Exception:
+            pass
+
+    raw_sim = os.environ.get("SPARK_PREDICTION_AUTO_LINK_MIN_SIM")
+    if raw_sim:
+        try:
+            min_similarity = max(0.05, min(0.95, float(raw_sim)))
+        except Exception:
+            pass
+
+    return enabled, interval_s, limit, min_similarity
+
+
 def _token_overlap(a: str, b: str) -> float:
     a_t = set(_normalize(a).split())
     b_t = set(_normalize(b).split())
@@ -557,7 +592,17 @@ def match_predictions(
 
 def process_prediction_cycle(limit: int = 200) -> Dict[str, int]:
     """Full prediction cycle: build -> outcomes -> match."""
-    stats = {"predictions": 0, "outcomes": 0, "matched": 0, "validated": 0, "contradicted": 0, "surprises": 0}
+    stats = {
+        "predictions": 0,
+        "outcomes": 0,
+        "auto_link_processed": 0,
+        "auto_link_linked": 0,
+        "auto_link_skipped": 0,
+        "matched": 0,
+        "validated": 0,
+        "contradicted": 0,
+        "surprises": 0,
+    }
     try:
         stats["predictions"] = build_predictions()
     except Exception as e:
@@ -571,6 +616,30 @@ def process_prediction_cycle(limit: int = 200) -> Dict[str, int]:
         stats["outcomes"] = outcome_stats.get("outcomes", 0)
     except Exception as e:
         log_debug("prediction", "collect_outcomes failed", e)
+    try:
+        enabled, interval_s, auto_link_limit, min_similarity = _load_auto_link_config()
+        if enabled:
+            state = _load_state()
+            last_ts = float(state.get("last_auto_link_ts") or 0.0)
+            now = time.time()
+            if (now - last_ts) >= interval_s:
+                auto_stats = auto_link_outcomes(
+                    min_similarity=min_similarity,
+                    limit=min(limit, auto_link_limit),
+                    dry_run=False,
+                )
+                stats["auto_link_processed"] = int(auto_stats.get("processed", 0) or 0)
+                stats["auto_link_linked"] = int(auto_stats.get("linked", 0) or 0)
+                stats["auto_link_skipped"] = int(auto_stats.get("skipped", 0) or 0)
+                state["last_auto_link_ts"] = now
+                state["last_auto_link_stats"] = {
+                    "processed": stats["auto_link_processed"],
+                    "linked": stats["auto_link_linked"],
+                    "skipped": stats["auto_link_skipped"],
+                }
+                _save_state(state)
+    except Exception as e:
+        log_debug("prediction", "auto_link_outcomes failed", e)
     try:
         match_stats = match_predictions()
         stats.update({k: match_stats.get(k, 0) for k in ("matched", "validated", "contradicted", "surprises")})
