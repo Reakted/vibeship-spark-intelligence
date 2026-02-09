@@ -327,3 +327,81 @@ def test_match_predictions_excludes_test_namespace(tmp_path, monkeypatch):
     stats = pl.match_predictions(max_age_s=6 * 3600, sim_threshold=0.5)
     assert stats["matched"] == 1
     assert stats["validated"] == 1
+
+
+def test_get_prediction_state_reports_prod_only_kpis(tmp_path, monkeypatch):
+    now = time.time()
+    pred_file = tmp_path / "predictions.jsonl"
+    out_file = tmp_path / "outcomes.jsonl"
+    pred_rows = [
+        {
+            "prediction_id": "p1",
+            "text": "prod one",
+            "created_at": now - 100,
+            "namespace": "prod",
+        },
+        {
+            "prediction_id": "p2",
+            "text": "prod two",
+            "created_at": now - 90,
+            "namespace": "prod",
+        },
+        {
+            "prediction_id": "pt",
+            "text": "test one",
+            "created_at": now - 80,
+            "namespace": "test",
+        },
+    ]
+    outcome_rows = [
+        {
+            "outcome_id": "o-linked",
+            "text": "prod outcome linked",
+            "created_at": now - 70,
+            "namespace": "prod",
+        },
+        {
+            "outcome_id": "o-unlinked",
+            "text": "prod outcome unlinked",
+            "created_at": now - 60,
+            "namespace": "prod",
+        },
+        {
+            "outcome_id": "o-test",
+            "text": "test outcome",
+            "created_at": now - 50,
+            "namespace": "test",
+        },
+    ]
+    with pred_file.open("w", encoding="utf-8") as f:
+        for row in pred_rows:
+            f.write(json.dumps(row) + "\n")
+    with out_file.open("w", encoding="utf-8") as f:
+        for row in outcome_rows:
+            f.write(json.dumps(row) + "\n")
+
+    monkeypatch.setattr(pl, "PREDICTIONS_FILE", pred_file)
+    monkeypatch.setattr(pl, "OUTCOMES_FILE", out_file)
+    monkeypatch.setattr(pl, "get_outcome_links", lambda limit=5000: [{"outcome_id": "o-linked", "insight_key": "i1"}])
+    monkeypatch.setattr(
+        pl,
+        "_load_state",
+        lambda: {
+            "matched_ids": ["p1"],
+            "match_history": [
+                {"prediction_id": "p1", "matched_at": now - 40, "namespace": "prod", "validated": True},
+                {"prediction_id": "pt", "matched_at": now - 40, "namespace": "test", "validated": True},
+            ],
+            "last_run_ts": now - 30,
+            "last_stats": {"matched": 1, "validated": 1},
+        },
+    )
+
+    state = pl.get_prediction_state()
+    kpis = state["kpis"]
+    assert kpis["predictions"] == 2
+    assert kpis["outcomes"] == 2
+    assert kpis["prediction_to_outcome_ratio"] == 1.0
+    assert kpis["unlinked_outcomes"] == 1
+    assert kpis["coverage"] == 0.5
+    assert kpis["validated_per_100_predictions"] == 50.0

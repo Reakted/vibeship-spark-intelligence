@@ -527,6 +527,7 @@ def match_predictions(
 
     state = _load_state()
     matched_ids = set(state.get("matched_ids") or [])
+    match_history = list(state.get("match_history") or [])
     now = time.time()
 
     max_window = max(float(max_age_s or 0.0), max(MATCH_WINDOW_BY_TYPE_S.values()))
@@ -675,6 +676,16 @@ def match_predictions(
         else:
             stats["contradicted"] += 1
 
+        match_history.append(
+            {
+                "prediction_id": pred_id,
+                "prediction_created_at": pred_created,
+                "matched_at": now,
+                "namespace": pred.get("namespace") or "prod",
+                "validated": bool(validated),
+            }
+        )
+
         if not insight:
             continue
 
@@ -707,6 +718,7 @@ def match_predictions(
         cog._save_insights()
 
     state["matched_ids"] = list(matched_ids)[-500:]
+    state["match_history"] = match_history[-5000:]
     state["last_run_ts"] = time.time()
     state["last_stats"] = stats
     _save_state(state)
@@ -771,11 +783,82 @@ def process_prediction_cycle(limit: int = 200) -> Dict[str, int]:
     return stats
 
 
+def _compute_loop_kpis(window_s: float = 7 * 24 * 3600) -> Dict[str, float]:
+    now = time.time()
+    since = now - float(window_s or 0.0)
+
+    preds = _load_jsonl(PREDICTIONS_FILE, limit=5000)
+    outcomes = _load_jsonl(OUTCOMES_FILE, limit=5000)
+    preds = [
+        p
+        for p in preds
+        if float(p.get("created_at") or 0.0) >= since and _row_namespace(p) == "prod"
+    ]
+    outcomes = [
+        o
+        for o in outcomes
+        if float(o.get("created_at") or 0.0) >= since and _row_namespace(o) == "prod"
+    ]
+
+    pred_count = len(preds)
+    outcome_count = len(outcomes)
+    ratio = (pred_count / outcome_count) if outcome_count > 0 else float(pred_count)
+
+    linked_ids = set()
+    try:
+        for link in get_outcome_links(limit=5000):
+            created_at = float(link.get("created_at") or 0.0)
+            if created_at and created_at < since:
+                continue
+            oid = link.get("outcome_id")
+            if oid:
+                linked_ids.add(str(oid))
+    except Exception:
+        linked_ids = set()
+
+    unlinked = 0
+    for outcome in outcomes:
+        links = outcome.get("linked_insights") or []
+        if isinstance(links, list) and len(links) > 0:
+            continue
+        oid = outcome.get("outcome_id")
+        if oid and str(oid) in linked_ids:
+            continue
+        unlinked += 1
+
+    state = _load_state()
+    history = list(state.get("match_history") or [])
+    history = [
+        h
+        for h in history
+        if float(h.get("matched_at") or 0.0) >= since
+        and str(h.get("namespace") or "prod") == "prod"
+    ]
+    matched_count = len(history)
+    validated_count = sum(1 for h in history if bool(h.get("validated")))
+    coverage = (matched_count / pred_count) if pred_count > 0 else 0.0
+    validated_per_100 = (validated_count * 100.0 / pred_count) if pred_count > 0 else 0.0
+
+    return {
+        "window_days": round(window_s / (24 * 3600), 2),
+        "predictions": pred_count,
+        "outcomes": outcome_count,
+        "prediction_to_outcome_ratio": round(ratio, 3),
+        "unlinked_outcomes": int(unlinked),
+        "coverage": round(coverage, 3),
+        "validated_per_100_predictions": round(validated_per_100, 2),
+        "matched_predictions": int(matched_count),
+        "validated_predictions": int(validated_count),
+    }
+
+
 def get_prediction_state() -> Dict:
     state = _load_state()
+    kpis = _compute_loop_kpis()
     return {
         "last_run_ts": state.get("last_run_ts"),
         "last_stats": state.get("last_stats") or {},
         "offset": state.get("offset", 0),
         "matched_count": len(state.get("matched_ids") or []),
+        "kpis": kpis,
     }

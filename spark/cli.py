@@ -218,6 +218,7 @@ def cmd_status(args):
     pstate = get_prediction_state()
     plast_ts = pstate.get("last_run_ts")
     plast_stats = pstate.get("last_stats") or {}
+    pkpis = pstate.get("kpis") or {}
     if plast_ts:
         age_s = max(0, int(time.time() - float(plast_ts)))
         print("🧭 Prediction Loop")
@@ -228,6 +229,14 @@ def cmd_status(args):
             f"+{plast_stats.get('validated', 0)} / -{plast_stats.get('contradicted', 0)} "
             f"(matched {plast_stats.get('matched', 0)}, surprises {plast_stats.get('surprises', 0)})"
         )
+        if pkpis:
+            print(
+                f"   KPIs ({pkpis.get('window_days', 7)}d): "
+                f"ratio {pkpis.get('prediction_to_outcome_ratio', 0):.2f}, "
+                f"unlinked {pkpis.get('unlinked_outcomes', 0)}, "
+                f"coverage {pkpis.get('coverage', 0):.1%}, "
+                f"validated/100 {pkpis.get('validated_per_100_predictions', 0):.1f}"
+            )
     else:
         print("🧭 Prediction Loop")
         print("   Last Run: Never")
@@ -759,6 +768,18 @@ def cmd_outcome_stats(args):
     print(f"   Validated: {coverage['insights_validated']}")
     print(f"   Coverage: {coverage['outcome_coverage']:.1%}")
     print(f"   Validation Rate: {coverage['validation_rate']:.1%}")
+    print()
+    pstate = get_prediction_state()
+    kpis = pstate.get("kpis") or {}
+    if kpis:
+        print("[SPARK] Prediction/Outcome Loop KPIs")
+        print(f"   Window: {kpis.get('window_days')} days")
+        print(f"   Predictions: {kpis.get('predictions')}")
+        print(f"   Outcomes: {kpis.get('outcomes')}")
+        print(f"   Prediction:Outcome Ratio: {kpis.get('prediction_to_outcome_ratio'):.3f}")
+        print(f"   Unlinked Outcomes: {kpis.get('unlinked_outcomes')}")
+        print(f"   Coverage: {kpis.get('coverage', 0):.1%}")
+        print(f"   Validated per 100 Predictions: {kpis.get('validated_per_100_predictions'):.2f}")
 
 
 def cmd_outcome_validate(args):
