@@ -41,6 +41,35 @@ def _format_context(context: str, config: Optional[dict] = None) -> str:
             parts.append(f"Last sync: {last_sync}")
         sections.append("## 📊 Session Stats\n" + " | ".join(parts))
 
+    # Latest Activity (from bridge heartbeat)
+    try:
+        from ..bridge_cycle import read_bridge_heartbeat
+        hb = read_bridge_heartbeat()
+        if hb:
+            hb_ts = hb.get("ts", 0)
+            hb_stats = hb.get("stats", {})
+            age_min = (time.time() - hb_ts) / 60 if hb_ts else None
+            activity_parts = []
+            if age_min is not None:
+                activity_parts.append(f"Last cycle: {age_min:.0f}m ago")
+            pp = int(hb_stats.get("pattern_processed") or 0)
+            if pp:
+                activity_parts.append(f"Patterns: {pp}")
+            cl = int(hb_stats.get("content_learned") or 0)
+            if cl:
+                activity_parts.append(f"Content learned: {cl}")
+            cm = (hb_stats.get("chip_merge") or {})
+            merged = int(cm.get("merged") or 0)
+            if merged:
+                activity_parts.append(f"Insights merged: {merged}")
+            errs = hb_stats.get("errors") or []
+            if errs:
+                activity_parts.append(f"Errors: {', '.join(errs)}")
+            if activity_parts:
+                sections.append("## ⚡ Latest Activity\n" + " | ".join(activity_parts))
+    except Exception:
+        pass  # graceful — don't break context generation
+
     # Self-report quick reference
     sections.append("""## 💬 How to Self-Report
 

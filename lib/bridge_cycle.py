@@ -28,6 +28,13 @@ from lib.diagnostics import log_debug
 
 
 BRIDGE_HEARTBEAT_FILE = Path.home() / ".spark" / "bridge_worker_heartbeat.json"
+
+# --- OpenClaw notification integration ---
+SPARK_OPENCLAW_NOTIFY = os.environ.get("SPARK_OPENCLAW_NOTIFY", "1").strip().lower() not in {
+    "0", "false", "no", "off"
+}
+_NOTIFY_COOLDOWN_S = 300  # 5 minutes
+_last_notify_time: float = 0.0
 BRIDGE_STEP_TIMEOUT_S = float(os.environ.get("SPARK_BRIDGE_STEP_TIMEOUT_S", "45"))
 BRIDGE_DISABLE_TIMEOUTS = os.environ.get("SPARK_BRIDGE_DISABLE_TIMEOUTS", "0").strip().lower() in {
     "1", "true", "yes", "on"
@@ -362,7 +369,65 @@ def run_bridge_cycle(
             except Exception as e:
                 log_debug("bridge_worker", "meta_ralph flush failed", e)
 
+    # --- OpenClaw notification (event-driven push) ---
+    if SPARK_OPENCLAW_NOTIFY:
+        _maybe_notify_openclaw(stats)
+
     return stats
+
+
+def _maybe_notify_openclaw(stats: Dict[str, Any]) -> None:
+    """Push a wake event to OpenClaw if this cycle found something significant."""
+    global _last_notify_time
+
+    now = time.time()
+    if now - _last_notify_time < _NOTIFY_COOLDOWN_S:
+        return
+
+    findings: list[str] = []
+
+    # Check pipeline / pattern processing
+    pattern_count = int(stats.get("pattern_processed") or 0)
+    if pattern_count > 0:
+        findings.append(f"{pattern_count} patterns processed")
+
+    # Check chip merge for high-quality merges
+    chip_merge = stats.get("chip_merge") or {}
+    merged = int(chip_merge.get("merged") or 0)
+    if merged > 0:
+        findings.append(f"{merged} insights merged")
+
+    # Check auto-tuner adjustments
+    auto_tuner = stats.get("auto_tuner") or {}
+    tuner_changes = int(auto_tuner.get("changes") or 0) + int(auto_tuner.get("health_applied") or 0)
+    if tuner_changes > 0:
+        findings.append(f"auto-tuner made {tuner_changes} adjustments")
+
+    # Check validation for contradictions / surprises
+    validation = stats.get("validation") or {}
+    surprises = int(validation.get("surprises") or 0)
+    if surprises > 0:
+        findings.append(f"{surprises} contradictions detected")
+
+    # Check content learning
+    content_learned = int(stats.get("content_learned") or 0)
+    if content_learned >= 3:
+        findings.append(f"{content_learned} content patterns learned")
+
+    if not findings:
+        return
+
+    try:
+        from lib.openclaw_notify import notify_agent, wake_agent
+
+        summary = "Spark bridge cycle: " + ", ".join(findings)
+        notify_agent(summary, priority="normal")
+        wake_agent(
+            f"🔮 Spark found something — read SPARK_CONTEXT.md and SPARK_NOTIFICATIONS.md. Summary: {summary}"
+        )
+        _last_notify_time = now
+    except Exception as e:
+        log_debug("bridge_worker", f"openclaw notify failed: {e}", None)
 
 
 def write_bridge_heartbeat(stats: Dict[str, Any]) -> bool:
