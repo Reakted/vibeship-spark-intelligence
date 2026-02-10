@@ -201,7 +201,13 @@ def synthesize_advisory(
     pattern_text = "\n".join(f"- {p}" for p in patterns[:15])
     insight_text = "\n".join(f"- {i}" for i in insights[:15])
 
-    prompt = f"""You are Spark Intelligence, observing a live coding session. Based on ONLY the data below, produce 2-4 specific recommendations.
+    prompt = f"""You are Spark Intelligence, observing a live coding session on the vibeship-spark-intelligence project.
+
+SYSTEM INVENTORY (what actually exists — do NOT reference anything outside this list):
+- Services: sparkd (port 8787, HTTP event ingestion), bridge_worker (background processing), openclaw_tailer (captures OpenClaw sessions), Spark Pulse dashboard (port 8765, uvicorn)
+- Key files: lib/bridge_cycle.py (main processing loop), lib/llm.py (Claude CLI integration), lib/cognitive_learner.py (insight storage), lib/feedback_loop.py (agent feedback), lib/agent_feedback.py (report helpers)
+- Tools available: Python scripts, PowerShell, git, Claude CLI (OAuth), OpenClaw cron/workspace files
+- NO MCP tools, NO Streamlit, NO external APIs, NO databases. This is a file-based Python system.
 
 WHAT'S HAPPENING NOW (patterns from this session):
 {pattern_text}
@@ -213,6 +219,7 @@ LEARNED INSIGHTS (from past sessions):
 
 CRITICAL RULES:
 - ONLY recommend things supported by the data above. If the patterns show file edits, talk about those files. If they show errors, address those errors.
+- NEVER reference tools, services, or capabilities not in the SYSTEM INVENTORY above.
 - Never produce generic coding tips like "batch operations" or "use linting" — those are useless.
 - Reference specific files, functions, or behaviors you can see in the data.
 - If the data is too vague to make specific recommendations, say "Insufficient data for specific advice" instead of making something up.

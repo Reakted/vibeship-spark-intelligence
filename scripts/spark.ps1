@@ -50,7 +50,7 @@ function Start-Spark {
 
     Stop-Spark -Quiet
 
-    $env:SPARK_EMBEDDINGS = "0"
+    $env:SPARK_EMBED_BACKEND = "tfidf"
 
     $sparkd = Start-Process python -ArgumentList "$REPO\sparkd.py" -WorkingDirectory $REPO -WindowStyle Hidden -PassThru
     Start-Sleep 1
