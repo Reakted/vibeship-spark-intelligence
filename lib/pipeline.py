@@ -661,7 +661,8 @@ def run_processing_cycle(
 
         pattern_cycle_ok = True
         metrics.events_processed = len(events)
-        metrics.processed_events = list(events)
+        # Only keep lightweight references, not full event objects (memory leak fix)
+        metrics.processed_events = events  # share reference, don't copy
     except Exception as e:
         metrics.errors.append(f"pattern_detection: {str(e)[:100]}")
         log_debug("pipeline", "pattern detection failed", e)

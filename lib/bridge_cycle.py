@@ -157,6 +157,8 @@ def run_bridge_cycle(
         # --- Get events (single source, used by all downstream) ---
         if pipeline_metrics and getattr(pipeline_metrics, "processed_events", None):
             events = pipeline_metrics.processed_events
+            # Release reference from metrics to prevent memory accumulation
+            pipeline_metrics.processed_events = []
         else:
             events = read_recent_events(40)
 
@@ -368,6 +370,28 @@ def run_bridge_cycle(
                 meta_ralph.end_batch()
             except Exception as e:
                 log_debug("bridge_worker", "meta_ralph flush failed", e)
+
+        # --- Memory cleanup (prevent accumulation across cycles) ---
+        # Clear event references to allow GC
+        events = None
+        user_prompt_events = None
+        edit_write_events = None
+        chip_events = None
+        pipeline_metrics = None
+        try:
+            # Clear aggregator session pattern cache to prevent unbounded growth
+            from lib.pattern_detection.aggregator import get_aggregator
+            agg = get_aggregator()
+            if hasattr(agg, '_session_patterns'):
+                # Keep only last 5 sessions
+                keys = list(agg._session_patterns.keys())
+                if len(keys) > 5:
+                    for k in keys[:-5]:
+                        del agg._session_patterns[k]
+        except Exception:
+            pass
+        import gc
+        gc.collect()
 
     # --- OpenClaw notification (event-driven push) ---
     if SPARK_OPENCLAW_NOTIFY:
