@@ -741,7 +741,7 @@ class ChipRuntime:
         return f"{event_type}:{tool}" if event_type else str(tool)
 
     # Maximum chip insight file size before rotation (10 MB)
-    CHIP_MAX_BYTES = 10 * 1024 * 1024
+    CHIP_MAX_BYTES = 2 * 1024 * 1024  # 2MB per chip (was 10MB — 44MB total was excessive)
 
     def _store_insight(self, insight: ChipInsight):
         """Store an insight to disk with size-based rotation."""
