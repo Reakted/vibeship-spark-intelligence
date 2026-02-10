@@ -1,46 +1,131 @@
-# Spark Intelligence
+<p align="center">
+  <img src="logo.png" alt="Spark Intelligence" width="120">
+  <h1 align="center">⚡ Spark Intelligence</h1>
+  <p align="center">
+    <strong>Your AI agent gets smarter every day. Automatically.</strong>
+  </p>
+  <p align="center">
+    <img src="https://img.shields.io/badge/python-3.10+-blue?style=flat-square" alt="Python">
+    <img src="https://img.shields.io/badge/no_API_keys-Claude_OAuth-green?style=flat-square" alt="OAuth">
+    <img src="https://img.shields.io/badge/embeddings-OFF_(free)-orange?style=flat-square" alt="Embeddings">
+    <img src="https://img.shields.io/badge/platform-Win%20%7C%20Mac%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform">
+  </p>
+</p>
 
-Spark is a self-evolving intelligence layer for agent workflows.
-It captures signals, distills learnings, validates outcomes, and reuses proven guidance in future decisions.
+---
 
-Navigation hub: `docs/GLOSSARY.md`
+## What is this?
 
-## Start
+Spark Intelligence is a **self-evolution layer** for AI coding agents. It watches your interactions, detects patterns in your preferences and workflow, and feeds intelligence back to your agent — making it genuinely better over time.
 
-1. Install and boot services: `docs/QUICKSTART.md`
-2. Read runtime architecture: `Intelligence_Flow.md`
-3. Tune behavior: `TUNEABLES.md`
-4. Use full docs map: `docs/DOCS_INDEX.md`
+**Not a chatbot. Not a wrapper. A learning engine.**
 
-## Production Hardening Notes
+```
+You code → Spark learns → Agent adapts → You code better → Spark learns more
+```
 
-- `sparkd` now enforces `SPARKD_TOKEN` across all mutating `POST` routes (`/ingest`, `/process`, `/reflect`, etc.).
-- Bridge cycles run both prompt validation and outcome-linked validation.
-- Queue rotation and queue consumption use temp-file + replace semantics to reduce data-loss windows.
-- Meta-Ralph dashboard binds to `127.0.0.1` by default.
-- CI workflow is defined in `.github/workflows/ci.yml` (`ruff` critical checks + pytest gates).
+## Install (one command)
 
-## Core Runtime Docs
+```powershell
+# Windows
+git clone https://github.com/vibeforge1111/spark-openclaw-installer.git; cd spark-openclaw-installer; .\install.ps1
+```
 
-- `Intelligence_Flow.md`
-- `Intelligence_Flow_Map.md`
-- `EIDOS_GUIDE.md`
-- `META_RALPH.md`
-- `SEMANTIC_ADVISOR_DESIGN.md`
-- `docs/PROGRAM_STATUS.md`
-- `PRODUCTION_READINESS.md`
-- `docs/VISION.md`
+```bash
+# Mac/Linux
+git clone https://github.com/vibeforge1111/spark-openclaw-installer.git && cd spark-openclaw-installer && ./install.sh
+```
 
-## Strategic Docs Kept Active
+The installer handles everything: Python deps, OpenClaw, Claude CLI, config files, and starts the services. **No API keys needed** — Claude OAuth only.
 
-- `MoE_Plan.md`
-- `Path to AGI.md`
-- `EVOLUTION_CHIPS_RESEARCH.md`
+## What You Get
 
-## Documentation Consolidation
+```
+┌─────────────────────────── Spark Pulse Dashboard (:8765) ──────────────────────────┐
+│                                                                                     │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌────────────────┐  ┌───────────────┐  │
+│  │ 🧠 Neural View   │  │ 📊 Learnings     │  │ 🔮 Patterns    │  │ ⚡ Advisories │  │
+│  │                  │  │                  │  │                │  │               │  │
+│  │  ╭──╮   ╭──╮    │  │ • Prefers TS     │  │ Direct style   │  │ [HIGH] User   │  │
+│  │  │▓▓│╌╌╌│▓▓│    │  │ • Short funcs    │  │ Func > OOP     │  │ prefers...    │  │
+│  │  ╰──╯   ╰──╯    │  │ • Dark themes    │  │ Test-first     │  │               │  │
+│  │    ╲    ╱        │  │ • const > let    │  │ Speed > perf   │  │ [MED] When    │  │
+│  │     ╭──╮         │  │                  │  │                │  │ debugging...  │  │
+│  │     │▓▓│         │  │ 42 learnings     │  │ 8 patterns     │  │ 3 active      │  │
+│  └─────────────────┘  └──────────────────┘  └────────────────┘  └───────────────┘  │
+│                                                                                     │
+│  advice_action_rate: 67% ████████████████████░░░░░░░░░░  |  EIDOS depth: 3/15      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
 
-Superseded planning and historical docs have been moved to:
-- `docs/archive/`
-- `docs/reports/`
+## Architecture
 
-Use `docs/DOCS_INDEX.md` as the source of truth for active docs.
+```
+┌──────────────────────────────────────────────────┐
+│              Your Coding Agent (OpenClaw)          │
+│                                                    │
+│  SOUL.md ← identity    SPARK_CONTEXT.md ← learns  │
+│                         SPARK_ADVISORY.md ← warns  │
+└─────────────────────┬──────────────────────────────┘
+                      │ interactions
+         ┌────────────┴────────────┐
+         │    Spark Intelligence    │
+         │                         │
+         │  Tailer → captures      │
+         │  Patterns → detects     │
+         │  EIDOS → distills       │
+         │  Bridge → Claude review │
+         │  sparkd API → :8787     │
+         └────────────┬────────────┘
+                      │ feeds
+         ┌────────────┴────────────┐
+         │    Spark Pulse :8765     │
+         │  Real-time dashboard     │
+         └─────────────────────────┘
+```
+
+## How It Works
+
+1. **Capture** — Spark watches your agent's workspace for interactions
+2. **Detect** — Pattern detection identifies preferences, corrections, frustrations
+3. **Distill** — The EIDOS framework creates deep behavioral models
+4. **Advise** — Claude reviews patterns and generates actionable advisories
+5. **Adapt** — Your agent reads advisories and adjusts its behavior
+6. **Feedback** — You rate what works, Spark learns from that too
+
+## Commands
+
+```bash
+spark start              # Start all services
+spark stop               # Stop everything
+spark status             # Health check + metrics
+spark learn "insight"    # Teach Spark manually
+spark bridge             # Trigger advisory cycle
+```
+
+## Key Design Decisions
+
+| Decision | Why |
+|----------|-----|
+| **SPARK_EMBEDDINGS=0** | No embedding API costs. Pattern matching works great without them. |
+| **Claude OAuth only** | No API keys to manage, leak, or rotate. Just `/login` once. |
+| **Local-first** | All data stays on your machine. Only bridge calls touch Claude. |
+| **File-based integration** | SPARK_CONTEXT.md is just a file. Works with any agent that reads files. |
+
+## Documentation
+
+- **[Onboarding Guide](docs/ONBOARDING.md)** — New user? Start here
+- **[TUNEABLES.md](TUNEABLES.md)** — All configurable parameters
+- **[EIDOS Guide](EIDOS_GUIDE.md)** — How the distillation framework works
+- **[Intelligence Flow](Intelligence_Flow.md)** — Data flow documentation
+
+## Related Repos
+
+- [spark-openclaw-installer](https://github.com/vibeforge1111/spark-openclaw-installer) — One-click installer
+- [vibeship-spark-pulse](https://github.com/vibeforge1111/vibeship-spark-pulse) — Neural visualization dashboard
+
+---
+
+<p align="center">
+  <sub>Built by <a href="https://github.com/vibeforge1111">Vibeforge</a> — AI agents that evolve</sub>
+</p>
