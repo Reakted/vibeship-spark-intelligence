@@ -363,6 +363,91 @@ def run_bridge_cycle(
         except Exception as e:
             log_debug("bridge_worker", f"auto-tuner failed ({e})", None)
 
+        # --- LLM-powered intelligence (Claude OAuth) ---
+        # Only run when we have meaningful data to analyze
+        patterns_found = stats.get("pattern_processed", 0)
+        insights_merged = (stats.get("chip_merge") or {}).get("merged", 0)
+
+        if patterns_found >= 5 or insights_merged >= 2:
+            try:
+                from lib.llm import synthesize_advisory, interpret_patterns
+                from lib.cognitive_learner import get_cognitive_learner, CognitiveCategory
+
+                # 1. Synthesize advisory from recent patterns + insights
+                cog = get_cognitive_learner()
+                recent_insights = []
+                try:
+                    for cat in CognitiveCategory:
+                        items = cog.get_insights(cat, limit=5)
+                        for item in items:
+                            if isinstance(item, dict):
+                                recent_insights.append(item.get("insight", str(item)))
+                            else:
+                                recent_insights.append(str(item))
+                except Exception:
+                    pass
+
+                pattern_summaries = []
+                if pipeline_metrics:
+                    pm = stats.get("pipeline", {})
+                    ly = pm.get("learning_yield", {})
+                    if ly.get("patterns_detected"):
+                        pattern_summaries.append(f"{ly['patterns_detected']} patterns detected")
+                    if ly.get("error_patterns_found"):
+                        pattern_summaries.append(f"{ly['error_patterns_found']} error patterns found")
+                    if ly.get("tool_effectiveness_updates"):
+                        pattern_summaries.append(f"{ly['tool_effectiveness_updates']} tool effectiveness updates")
+
+                if recent_insights or pattern_summaries:
+                    advisory = synthesize_advisory(
+                        patterns=pattern_summaries,
+                        insights=recent_insights[:10],
+                    )
+                    if advisory:
+                        stats["llm_advisory"] = advisory
+                        # Write advisory to SPARK_CONTEXT for agent consumption
+                        _write_llm_advisory(advisory)
+                        log_debug("bridge_worker", f"LLM advisory generated ({len(advisory)} chars)", None)
+
+            except Exception as e:
+                log_debug("bridge_worker", f"LLM advisory failed ({e})", None)
+                stats["errors"].append("llm_advisory")
+
+        # EIDOS distillation (less frequent — every 10th cycle with patterns)
+        try:
+            from lib.llm import distill_eidos
+            cycle_count = stats.get("pipeline", {}).get("health", {}).get("queue_depth_before", 0)
+            # Use a simple file counter
+            _eidos_counter_file = Path.home() / ".spark" / "eidos_llm_counter.txt"
+            counter = 0
+            if _eidos_counter_file.exists():
+                try:
+                    counter = int(_eidos_counter_file.read_text().strip())
+                except Exception:
+                    counter = 0
+            counter += 1
+            _eidos_counter_file.write_text(str(counter))
+
+            if counter % 10 == 0 and patterns_found > 0:
+                # Gather behavioral observations
+                observations = []
+                if stats.get("llm_advisory"):
+                    observations.append(f"Advisory: {stats['llm_advisory'][:200]}")
+                chip_stats = stats.get("chips", {})
+                if chip_stats.get("insights_captured"):
+                    observations.append(f"Captured {chip_stats['insights_captured']} chip insights")
+                if stats.get("auto_tuner", {}).get("health_recs"):
+                    observations.append(f"Auto-tuner made {stats['auto_tuner']['health_recs']} recommendations")
+
+                if observations:
+                    eidos_update = distill_eidos(observations)
+                    if eidos_update:
+                        stats["eidos_distillation"] = eidos_update
+                        _append_eidos_update(eidos_update)
+                        log_debug("bridge_worker", "EIDOS distillation complete", None)
+        except Exception as e:
+            log_debug("bridge_worker", f"EIDOS distillation failed ({e})", None)
+
     finally:
         # --- Flush all deferred saves (single write per file) ---
         if cognitive:
@@ -405,6 +490,40 @@ def run_bridge_cycle(
     return stats
 
 
+def _write_llm_advisory(advisory: str) -> None:
+    """Write LLM-generated advisory to SPARK_CONTEXT supplement."""
+    try:
+        advisory_file = Path.home() / ".spark" / "llm_advisory.md"
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        content = f"# Spark Advisory ({timestamp})\n\n{advisory}\n"
+        advisory_file.write_text(content, encoding="utf-8")
+
+        # Also append to OpenClaw workspace if available
+        workspace = Path.home() / ".openclaw" / "workspace"
+        if workspace.exists():
+            ctx_file = workspace / "SPARK_ADVISORY.md"
+            ctx_file.write_text(content, encoding="utf-8")
+    except Exception as e:
+        log_debug("bridge_worker", f"Failed to write advisory: {e}", None)
+
+
+def _append_eidos_update(update: str) -> None:
+    """Append EIDOS distillation to the EIDOS log."""
+    try:
+        eidos_file = Path.home() / ".spark" / "eidos_distillations.jsonl"
+        import json
+        from datetime import datetime
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "distillation": update,
+        }
+        with open(eidos_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as e:
+        log_debug("bridge_worker", f"Failed to append EIDOS update: {e}", None)
+
+
 def _maybe_notify_openclaw(stats: Dict[str, Any]) -> None:
     """Push a wake event to OpenClaw if this cycle found something significant."""
     global _last_notify_time
@@ -443,6 +562,14 @@ def _maybe_notify_openclaw(stats: Dict[str, Any]) -> None:
     if content_learned >= 3:
         findings.append(f"{content_learned} content patterns learned")
 
+    # Check LLM advisory generation
+    if stats.get("llm_advisory"):
+        findings.append("LLM advisory generated")
+
+    # Check EIDOS distillation
+    if stats.get("eidos_distillation"):
+        findings.append("EIDOS identity updated")
+
     if not findings:
         return
 
@@ -475,6 +602,8 @@ def write_bridge_heartbeat(stats: Dict[str, Any]) -> bool:
                 "chips": stats.get("chips") or {},
                 "chip_merge": stats.get("chip_merge") or {},
                 "sync": stats.get("sync") or {},
+                "llm_advisory": bool(stats.get("llm_advisory")),
+                "eidos_distillation": bool(stats.get("eidos_distillation")),
                 "errors": stats.get("errors") or [],
             },
         }
