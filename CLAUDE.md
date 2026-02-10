@@ -176,7 +176,7 @@ def main():
 <!-- SPARK_LEARNINGS_START -->
 ## Spark Bootstrap
 Auto-loaded high-confidence learnings from ~/.spark/cognitive_insights.json
-Last updated: 2026-02-11T02:46:52
+Last updated: 2026-02-11T02:51:30
 
 - [user_understanding] ## ðŸš¨ PRIMARY RULES
 
