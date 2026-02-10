@@ -74,7 +74,7 @@ class SparkVoice:
     def _load(self) -> Dict:
         if VOICE_FILE.exists():
             try:
-                return json.loads(VOICE_FILE.read_text())
+                return json.loads(VOICE_FILE.read_text(encoding="utf-8"))
             except:
                 pass
         return {
@@ -87,7 +87,7 @@ class SparkVoice:
     
     def _save(self):
         SPARK_DIR.mkdir(parents=True, exist_ok=True)
-        VOICE_FILE.write_text(json.dumps(self.data, indent=2))
+        VOICE_FILE.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
     
     def record_interaction(self):
         """Track that an interaction happened."""

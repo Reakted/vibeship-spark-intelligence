@@ -178,7 +178,7 @@ def read_pending_convo_events(limit: int = 100) -> List[Dict[str, Any]]:
         return []
 
     try:
-        lines = CONVO_EVENTS_FILE.read_text().splitlines()
+        lines = CONVO_EVENTS_FILE.read_text(encoding="utf-8").splitlines()
         events = []
         for line in lines[-limit:]:
             if line.strip():

@@ -185,7 +185,7 @@ class SparkAdvisor:
         """Load effectiveness tracking data."""
         if EFFECTIVENESS_FILE.exists():
             try:
-                data = json.loads(EFFECTIVENESS_FILE.read_text())
+                data = json.loads(EFFECTIVENESS_FILE.read_text(encoding="utf-8"))
                 return self._normalize_effectiveness(data)
             except Exception:
                 pass
@@ -266,7 +266,7 @@ class SparkAdvisor:
     def _load_metrics(self) -> Dict[str, Any]:
         if ADVISOR_METRICS.exists():
             try:
-                return json.loads(ADVISOR_METRICS.read_text())
+                return json.loads(ADVISOR_METRICS.read_text(encoding="utf-8"))
             except Exception:
                 pass
         return {
@@ -281,7 +281,7 @@ class SparkAdvisor:
     def _save_metrics(self, metrics: Dict[str, Any]) -> None:
         try:
             ADVISOR_METRICS.parent.mkdir(parents=True, exist_ok=True)
-            ADVISOR_METRICS.write_text(json.dumps(metrics, indent=2))
+            ADVISOR_METRICS.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
         except Exception:
             pass
 
@@ -406,7 +406,7 @@ class SparkAdvisor:
             # Fallback to simple write if atomic fails
             fallback = self._normalize_effectiveness(self.effectiveness)
             self.effectiveness = fallback
-            EFFECTIVENESS_FILE.write_text(json.dumps(fallback, indent=2))
+            EFFECTIVENESS_FILE.write_text(json.dumps(fallback, indent=2), encoding="utf-8")
 
     def _mark_outcome_counted(
         self,

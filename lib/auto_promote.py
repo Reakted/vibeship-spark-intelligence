@@ -36,7 +36,7 @@ def _should_run() -> bool:
     interval_s = _load_promotion_config_interval()
     try:
         if LAST_PROMOTION_FILE.exists():
-            last_ts = float(LAST_PROMOTION_FILE.read_text().strip())
+            last_ts = float(LAST_PROMOTION_FILE.read_text(encoding="utf-8").strip())
             if time.time() - last_ts < interval_s:
                 return False
     except Exception:
@@ -48,7 +48,7 @@ def _mark_run():
     """Record that promotion ran now."""
     try:
         LAST_PROMOTION_FILE.parent.mkdir(parents=True, exist_ok=True)
-        LAST_PROMOTION_FILE.write_text(str(time.time()))
+        LAST_PROMOTION_FILE.write_text(str(time.time()), encoding="utf-8")
     except Exception:
         pass
 

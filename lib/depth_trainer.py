@@ -128,7 +128,7 @@ def _load_env_key(name: str) -> str:
         return val
     env_path = Path(__file__).resolve().parent.parent / ".env"
     if env_path.exists():
-        for line in env_path.read_text().splitlines():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line.startswith(f"{name}=") and not line.startswith("#"):
                 return line.split("=", 1)[1].strip().strip("'\"")

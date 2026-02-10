@@ -333,10 +333,18 @@ def run_bridge_cycle(
             from lib.auto_tuner import AutoTuner
             tuner = AutoTuner()
             if tuner.should_run():
+                # Phase 1: Source boost optimization (existing)
                 report = tuner.run()
+                # Phase 2: Broader system health recommendations
+                health = tuner.measure_system_health()
+                recs = tuner.compute_recommendations(health)
+                tune_mode = tuner._config.get("mode", "suggest")
+                applied = tuner.apply_recommendations(recs, mode=tune_mode)
                 stats["auto_tuner"] = {
                     "changes": len(report.changes),
                     "skipped": len(report.skipped),
+                    "health_recs": len(recs),
+                    "health_applied": len(applied),
                 }
         except Exception as e:
             log_debug("bridge_worker", f"auto-tuner failed ({e})", None)

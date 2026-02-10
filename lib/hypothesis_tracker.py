@@ -155,7 +155,7 @@ class HypothesisTracker:
         """Load existing hypotheses."""
         if self.HYPOTHESES_FILE.exists():
             try:
-                data = json.loads(self.HYPOTHESES_FILE.read_text())
+                data = json.loads(self.HYPOTHESES_FILE.read_text(encoding="utf-8"))
                 for h_data in data.get("hypotheses", []):
                     h = Hypothesis.from_dict(h_data)
                     self.hypotheses[h.hypothesis_id] = h
@@ -170,7 +170,7 @@ class HypothesisTracker:
             "hypotheses": [h.to_dict() for h in self.hypotheses.values()],
             "observation_buffer": self._observation_buffer,
         }
-        self.HYPOTHESES_FILE.write_text(json.dumps(data, indent=2))
+        self.HYPOTHESES_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def _extract_pattern(self, observation: str) -> str:
         """Extract a normalizable pattern from an observation."""

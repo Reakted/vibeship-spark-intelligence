@@ -345,7 +345,7 @@ class ImportanceScorer:
         answers_file = Path.home() / ".spark" / "project_answers.json"
         if answers_file.exists():
             try:
-                self.question_answers = json.loads(answers_file.read_text())
+                self.question_answers = json.loads(answers_file.read_text(encoding="utf-8"))
             except Exception:
                 pass
 
@@ -579,7 +579,7 @@ class ImportanceScorer:
         feedback_file = Path.home() / ".spark" / "importance_feedback.json"
         if feedback_file.exists():
             try:
-                self._feedback_log = json.loads(feedback_file.read_text())
+                self._feedback_log = json.loads(feedback_file.read_text(encoding="utf-8"))
             except Exception:
                 pass
 
@@ -696,7 +696,7 @@ class ImportanceScorer:
         feedback_file = Path.home() / ".spark" / "importance_feedback.json"
         try:
             feedback_file.parent.mkdir(parents=True, exist_ok=True)
-            feedback_file.write_text(json.dumps(self._feedback_log, indent=2))
+            feedback_file.write_text(json.dumps(self._feedback_log, indent=2), encoding="utf-8")
         except Exception:
             pass
 

@@ -100,7 +100,7 @@ class MindBridge:
         """Load sync state from disk."""
         if SYNC_STATE_FILE.exists():
             try:
-                return json.loads(SYNC_STATE_FILE.read_text())
+                return json.loads(SYNC_STATE_FILE.read_text(encoding="utf-8"))
             except Exception:
                 pass
         return {"synced_hashes": [], "last_sync": None}
@@ -109,7 +109,7 @@ class MindBridge:
         """Save sync state to disk."""
         SYNC_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         self.sync_state["last_sync"] = datetime.now().isoformat()
-        SYNC_STATE_FILE.write_text(json.dumps(self.sync_state, indent=2))
+        SYNC_STATE_FILE.write_text(json.dumps(self.sync_state, indent=2), encoding="utf-8")
     
     def _insight_hash(self, insight: CognitiveInsight) -> str:
         """Generate unique hash for an insight."""

@@ -96,11 +96,11 @@ class MarkdownWriter:
         # Create template files if they don't exist
         learnings_file = self.learnings_dir / "LEARNINGS.md"
         if not learnings_file.exists():
-            learnings_file.write_text(self._learnings_header())
+            learnings_file.write_text(self._learnings_header(), encoding="utf-8")
         
         errors_file = self.learnings_dir / "ERRORS.md"
         if not errors_file.exists():
-            errors_file.write_text(self._errors_header())
+            errors_file.write_text(self._errors_header(), encoding="utf-8")
     
     def _learnings_header(self) -> str:
         """Generate header for LEARNINGS.md"""
@@ -257,7 +257,7 @@ Review and validate this insight. If confirmed, consider promoting to CLAUDE.md 
         written_file = self.learnings_dir / ".written_insights.txt"
         written_hashes = set()
         if written_file.exists():
-            written_hashes = set(written_file.read_text().strip().split("\n"))
+            written_hashes = set(written_file.read_text(encoding="utf-8").strip().split("\n"))
         
         new_hashes = []
         for key, insight in cognitive.insights.items():
@@ -284,12 +284,12 @@ Review and validate this insight. If confirmed, consider promoting to CLAUDE.md 
         
         learnings_file = self.learnings_dir / "LEARNINGS.md"
         if learnings_file.exists():
-            content = learnings_file.read_text()
+            content = learnings_file.read_text(encoding="utf-8")
             learnings_count = content.count("## [LRN-")
         
         errors_file = self.learnings_dir / "ERRORS.md"
         if errors_file.exists():
-            content = errors_file.read_text()
+            content = errors_file.read_text(encoding="utf-8")
             errors_count = content.count("## [ERR-")
         
         return {

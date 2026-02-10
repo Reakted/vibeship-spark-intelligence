@@ -194,7 +194,7 @@ class CuriosityEngine:
         """Load existing knowledge gaps."""
         if self.GAPS_FILE.exists():
             try:
-                data = json.loads(self.GAPS_FILE.read_text())
+                data = json.loads(self.GAPS_FILE.read_text(encoding="utf-8"))
                 for gap_data in data.get("gaps", []):
                     gap = KnowledgeGap.from_dict(gap_data)
                     self.gaps[gap.gap_id] = gap
@@ -209,7 +209,7 @@ class CuriosityEngine:
             "gaps": [g.to_dict() for g in self.gaps.values()],
             "success_rates": self.question_success_rate,
         }
-        self.GAPS_FILE.write_text(json.dumps(data, indent=2))
+        self.GAPS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def identify_gaps(self, insight_text: str, context: str = "") -> List[KnowledgeGap]:
         """

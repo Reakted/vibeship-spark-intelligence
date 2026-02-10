@@ -613,7 +613,7 @@ def update_spark_context(query: Optional[str] = None):
     If query is provided, we tailor the context to that task.
     """
     context = generate_active_context(query=query)
-    SPARK_CONTEXT_FILE.write_text(context)
+    SPARK_CONTEXT_FILE.write_text(context, encoding="utf-8")
     return context
 
 
@@ -622,7 +622,7 @@ def inject_to_memory(insight: str, category: str = "spark") -> bool:
     if not MEMORY_FILE.exists():
         return False
     
-    content = MEMORY_FILE.read_text()
+    content = MEMORY_FILE.read_text(encoding="utf-8")
     timestamp = datetime.now().strftime("%Y-%m-%d")
     
     # Find or create Spark Learnings section
@@ -638,7 +638,7 @@ def inject_to_memory(insight: str, category: str = "spark") -> bool:
     if len(parts) == 2:
         content = parts[0] + marker + "\n" + new_line + parts[1].lstrip("\n")
     
-    MEMORY_FILE.write_text(content)
+    MEMORY_FILE.write_text(content, encoding="utf-8")
     return True
 
 

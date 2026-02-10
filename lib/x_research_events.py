@@ -90,7 +90,7 @@ def read_pending_research_events(limit: int = 100) -> List[Dict[str, Any]]:
         return []
 
     try:
-        lines = RESEARCH_EVENTS_FILE.read_text().splitlines()
+        lines = RESEARCH_EVENTS_FILE.read_text(encoding="utf-8").splitlines()
         events = []
         for line in lines[-limit:]:
             if line.strip():

@@ -569,7 +569,7 @@ class ConvoAnalyzer:
         if REPLY_LOG.exists():
             try:
                 reply_count = sum(
-                    1 for line in REPLY_LOG.read_text().splitlines() if line.strip()
+                    1 for line in REPLY_LOG.read_text(encoding="utf-8").splitlines() if line.strip()
                 )
             except Exception:
                 pass

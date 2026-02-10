@@ -731,12 +731,12 @@ class Promoter:
             file_path = self.project_dir / "PROJECT.md"
 
             if file_path.exists():
-                content = file_path.read_text()
+                content = file_path.read_text(encoding="utf-8")
                 new_content = self._upsert_block(content, block, PROJECT_SECTION)
             else:
                 new_content = f"# Project\n\n{PROJECT_SECTION}\n\n{block}\n"
 
-            file_path.write_text(new_content)
+            file_path.write_text(new_content, encoding="utf-8")
             print("[SPARK] Updated PROJECT.md from project profile")
             return True
         except Exception as e:

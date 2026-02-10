@@ -57,7 +57,7 @@ def _load_active_episodes() -> Dict[str, str]:
     """Load session_id -> episode_id mapping."""
     try:
         if ACTIVE_EPISODES_FILE.exists():
-            return json.loads(ACTIVE_EPISODES_FILE.read_text())
+            return json.loads(ACTIVE_EPISODES_FILE.read_text(encoding="utf-8"))
     except Exception:
         pass
     return {}
@@ -67,7 +67,7 @@ def _save_active_episodes(mapping: Dict[str, str]):
     """Save session_id -> episode_id mapping."""
     try:
         ACTIVE_EPISODES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        ACTIVE_EPISODES_FILE.write_text(json.dumps(mapping))
+        ACTIVE_EPISODES_FILE.write_text(json.dumps(mapping), encoding="utf-8")
     except Exception:
         pass
 
@@ -77,7 +77,7 @@ def _load_active_step(session_id: str) -> Optional[Dict]:
     try:
         if ACTIVE_STEPS_FILE.exists():
             try:
-                steps = json.loads(ACTIVE_STEPS_FILE.read_text())
+                steps = json.loads(ACTIVE_STEPS_FILE.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, ValueError):
                 return None  # Corrupted file, skip gracefully
             return steps.get(session_id)
@@ -93,7 +93,7 @@ def _save_active_step(session_id: str, step_data: Optional[Dict]):
         steps = {}
         if ACTIVE_STEPS_FILE.exists():
             try:
-                steps = json.loads(ACTIVE_STEPS_FILE.read_text())
+                steps = json.loads(ACTIVE_STEPS_FILE.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, ValueError):
                 steps = {}  # Reset on corruption
 
@@ -109,7 +109,7 @@ def _save_active_step(session_id: str, step_data: Optional[Dict]):
 
         # Atomic write to prevent corruption
         tmp = ACTIVE_STEPS_FILE.with_suffix('.tmp')
-        tmp.write_text(json.dumps(steps))
+        tmp.write_text(json.dumps(steps), encoding="utf-8")
         tmp.replace(ACTIVE_STEPS_FILE)
     except Exception:
         pass
@@ -119,7 +119,7 @@ def _load_pending_goals() -> Dict[str, str]:
     """Load session_id -> goal mapping for goals that arrived before episode creation."""
     try:
         if PENDING_GOALS_FILE.exists():
-            data = json.loads(PENDING_GOALS_FILE.read_text())
+            data = json.loads(PENDING_GOALS_FILE.read_text(encoding="utf-8"))
             # Clean entries older than 10 min
             cutoff = time.time() - 600
             return {k: v for k, v in data.items()
@@ -135,7 +135,7 @@ def _save_pending_goal(session_id: str, goal: str):
         PENDING_GOALS_FILE.parent.mkdir(parents=True, exist_ok=True)
         pending = _load_pending_goals()
         pending[session_id] = {"goal": goal, "ts": time.time()}
-        PENDING_GOALS_FILE.write_text(json.dumps(pending))
+        PENDING_GOALS_FILE.write_text(json.dumps(pending), encoding="utf-8")
     except Exception:
         pass
 
@@ -147,7 +147,7 @@ def _consume_pending_goal(session_id: str) -> str:
         if session_id in pending:
             goal = pending[session_id].get("goal", "")
             del pending[session_id]
-            PENDING_GOALS_FILE.write_text(json.dumps(pending))
+            PENDING_GOALS_FILE.write_text(json.dumps(pending), encoding="utf-8")
             return goal
     except Exception:
         pass

@@ -140,7 +140,7 @@ class SyncTracker:
                 for k, v in self.adapters.items()
             }
         }
-        SYNC_STATS_FILE.write_text(json.dumps(data, indent=2))
+        SYNC_STATS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     @classmethod
     def load(cls) -> "SyncTracker":
@@ -149,7 +149,7 @@ class SyncTracker:
 
         if SYNC_STATS_FILE.exists():
             try:
-                data = json.loads(SYNC_STATS_FILE.read_text())
+                data = json.loads(SYNC_STATS_FILE.read_text(encoding="utf-8"))
                 tracker.last_full_sync = data.get("last_full_sync")
                 tracker.total_syncs = data.get("total_syncs", 0)
 

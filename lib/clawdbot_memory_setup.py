@@ -32,11 +32,11 @@ CONFIG_PATH = Path.home() / ".clawdbot" / "clawdbot.json"
 def _load_config() -> Dict[str, Any]:
     if not CONFIG_PATH.exists():
         raise FileNotFoundError(f"Missing config: {CONFIG_PATH}")
-    return json.loads(CONFIG_PATH.read_text())
+    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
 def _save_config(cfg: Dict[str, Any]):
-    CONFIG_PATH.write_text(json.dumps(cfg, indent=2) + "\n")
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
 
 
 def _ensure_path(cfg: Dict[str, Any], path: str) -> Dict[str, Any]:

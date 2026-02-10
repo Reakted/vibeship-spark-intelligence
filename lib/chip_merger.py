@@ -58,7 +58,7 @@ def _load_merge_state() -> Dict[str, Any]:
     if not MERGE_STATE_FILE.exists():
         return {"merged_hashes": [], "last_merge": None}
     try:
-        return json.loads(MERGE_STATE_FILE.read_text())
+        return json.loads(MERGE_STATE_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {"merged_hashes": [], "last_merge": None}
 
@@ -66,7 +66,7 @@ def _load_merge_state() -> Dict[str, Any]:
 def _save_merge_state(state: Dict[str, Any]):
     """Save the merge state."""
     MERGE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    MERGE_STATE_FILE.write_text(json.dumps(state, indent=2))
+    MERGE_STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
 def _hash_insight(chip_id: str, content: str, timestamp: str) -> str:

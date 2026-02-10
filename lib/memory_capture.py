@@ -192,28 +192,28 @@ def _load_pending() -> Dict[str, Any]:
     if not PENDING_FILE.exists():
         return {"items": []}
     try:
-        return json.loads(PENDING_FILE.read_text())
+        return json.loads(PENDING_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {"items": []}
 
 
 def _save_pending(d: Dict[str, Any]) -> None:
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    PENDING_FILE.write_text(json.dumps(d, indent=2, sort_keys=True))
+    PENDING_FILE.write_text(json.dumps(d, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _state() -> Dict[str, Any]:
     if not STATE_FILE.exists():
         return {}
     try:
-        return json.loads(STATE_FILE.read_text())
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception:
         return {}
 
 
 def _save_state(d: Dict[str, Any]) -> None:
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(d, indent=2, sort_keys=True))
+    STATE_FILE.write_text(json.dumps(d, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _make_id(session_id: str, text: str) -> str:

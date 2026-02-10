@@ -29,6 +29,11 @@ from typing import Any, Dict, List, Optional
 SPARK_DIR = Path.home() / ".spark"
 TUNEABLES_PATH = SPARK_DIR / "tuneables.json"
 EFFECTIVENESS_PATH = SPARK_DIR / "advisor" / "effectiveness.json"
+COGNITIVE_INSIGHTS_PATH = SPARK_DIR / "cognitive_insights.json"
+META_RALPH_PATH = SPARK_DIR / "meta_ralph.json"
+EIDOS_DB_PATH = SPARK_DIR / "eidos.db"
+TUNE_LOG_PATH = SPARK_DIR / "auto_tune_log.jsonl"
+TUNEABLE_HISTORY_DIR = SPARK_DIR / "tuneable_history"
 
 
 @dataclass
@@ -75,11 +80,38 @@ class TuningReport:
         return "\n".join(lines)
 
 
+@dataclass
+class SystemHealth:
+    """Comprehensive system health metrics."""
+    advice_action_rate: float = 0.0
+    distillation_rate: float = 0.0
+    promotion_throughput: int = 0
+    top_sources: List[str] = field(default_factory=list)
+    weak_sources: List[str] = field(default_factory=list)
+    cognitive_growth: float = 0.0
+    feedback_loop_closure: float = 0.0
+    total_advice_given: int = 0
+    total_followed: int = 0
+    total_helpful: int = 0
+
+
+@dataclass
+class TuneRecommendation:
+    """A single tuneable adjustment recommendation."""
+    section: str
+    key: str
+    current_value: Any
+    recommended_value: Any
+    reason: str
+    confidence: float = 0.5
+    impact: str = "medium"
+
+
 def _read_json(path: Path) -> dict:
     """Read a JSON file, returning empty dict on error."""
     try:
         if path.exists():
-            return json.loads(path.read_text())
+            return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         pass
     return {}
@@ -89,7 +121,7 @@ def _write_json_atomic(path: Path, data: dict):
     """Write JSON atomically via temp file + replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=4))
+    tmp.write_text(json.dumps(data, indent=4), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -140,6 +172,229 @@ class AutoTuner:
         """Read per-source effectiveness from the advisor."""
         data = _read_json(EFFECTIVENESS_PATH)
         return data.get("by_source", {})
+
+    def measure_system_health(self) -> SystemHealth:
+        """Read all data sources and compute comprehensive system health."""
+        health = SystemHealth()
+
+        # --- Advisor effectiveness ---
+        eff = _read_json(EFFECTIVENESS_PATH)
+        health.total_advice_given = int(eff.get("total_advice_given", 0))
+        health.total_followed = int(eff.get("total_followed", 0))
+        health.total_helpful = int(eff.get("total_helpful", 0))
+        health.advice_action_rate = (
+            health.total_followed / max(health.total_advice_given, 1)
+        )
+
+        by_source = eff.get("by_source", {})
+        source_rates: Dict[str, float] = {}
+        for src, stats in by_source.items():
+            total = int(stats.get("total", 0))
+            helpful = int(stats.get("helpful", 0))
+            if total >= self.MIN_SAMPLES:
+                source_rates[src] = helpful / total
+
+        if source_rates:
+            ranked = sorted(source_rates.items(), key=lambda x: x[1], reverse=True)
+            avg_rate = sum(v for _, v in ranked) / len(ranked)
+            health.top_sources = [s for s, r in ranked if r > avg_rate][:5]
+            health.weak_sources = [s for s, r in ranked if r < avg_rate * 0.5][:5]
+
+        # --- Cognitive insights ---
+        try:
+            cog = _read_json(COGNITIVE_INSIGHTS_PATH)
+            insights = cog.get("insights", [])
+            if isinstance(insights, list):
+                health.cognitive_growth = float(len(insights))
+                validated = sum(
+                    1 for i in insights
+                    if isinstance(i, dict) and i.get("times_validated", 0) > 0
+                )
+                if insights:
+                    health.feedback_loop_closure = validated / len(insights)
+        except Exception:
+            pass
+
+        # --- EIDOS distillation rate ---
+        try:
+            if EIDOS_DB_PATH.exists():
+                import sqlite3
+                conn = sqlite3.connect(str(EIDOS_DB_PATH))
+                cur = conn.cursor()
+                try:
+                    cur.execute("SELECT COUNT(*) FROM distillations")
+                    dist_count = cur.fetchone()[0]
+                    cur.execute("SELECT COUNT(*) FROM episodes")
+                    ep_count = cur.fetchone()[0]
+                    health.distillation_rate = dist_count / max(ep_count, 1)
+                except Exception:
+                    pass
+                finally:
+                    conn.close()
+        except Exception:
+            pass
+
+        # --- Meta-Ralph ---
+        try:
+            mr = _read_json(META_RALPH_PATH)
+            promotions = mr.get("promotions", [])
+            if isinstance(promotions, list):
+                # Count promotions in last 24h
+                cutoff = time.time() - 86400
+                recent = [
+                    p for p in promotions
+                    if isinstance(p, dict) and p.get("ts", 0) > cutoff
+                ]
+                health.promotion_throughput = len(recent)
+        except Exception:
+            pass
+
+        return health
+
+    def compute_recommendations(self, health: SystemHealth) -> List[TuneRecommendation]:
+        """Compute tuning recommendations based on system health."""
+        recs: List[TuneRecommendation] = []
+        tuneables = _read_json(self.tuneables_path)
+        advisor_cfg = tuneables.get("advisor", {})
+        promotion_cfg = tuneables.get("promotion", {})
+
+        # --- Advisor: MIN_RANK_SCORE ---
+        current_mrs = float(advisor_cfg.get("min_rank_score", 0.35))
+        if health.advice_action_rate < 0.05 and health.total_advice_given > 50:
+            recs.append(TuneRecommendation(
+                section="advisor", key="min_rank_score",
+                current_value=current_mrs, recommended_value=0.25,
+                reason=f"Action rate {health.advice_action_rate:.1%} < 5% — lower threshold to surface more advice",
+                confidence=0.7, impact="medium",
+            ))
+        elif health.advice_action_rate > 0.20 and health.total_advice_given > 50:
+            recs.append(TuneRecommendation(
+                section="advisor", key="min_rank_score",
+                current_value=current_mrs, recommended_value=0.45,
+                reason=f"Action rate {health.advice_action_rate:.1%} > 20% — tighten filtering",
+                confidence=0.7, impact="low",
+            ))
+
+        # --- Advisor: MAX_ADVICE_ITEMS ---
+        current_mai = int(advisor_cfg.get("max_advice_items", 8))
+        if health.advice_action_rate < 0.05 and current_mai > 5:
+            recs.append(TuneRecommendation(
+                section="advisor", key="max_advice_items",
+                current_value=current_mai, recommended_value=5,
+                reason="Most advice ignored — reduce count for focus",
+                confidence=0.6, impact="low",
+            ))
+        elif health.advice_action_rate > 0.15 and current_mai < 10:
+            recs.append(TuneRecommendation(
+                section="advisor", key="max_advice_items",
+                current_value=current_mai, recommended_value=10,
+                reason="User follows most advice — allow more items",
+                confidence=0.6, impact="low",
+            ))
+
+        # --- Promotion tuning ---
+        current_pt = float(promotion_cfg.get("threshold", 0.7))
+        if health.promotion_throughput < 2:
+            recs.append(TuneRecommendation(
+                section="promotion", key="threshold",
+                current_value=current_pt, recommended_value=max(0.5, current_pt - 0.1),
+                reason=f"Only {health.promotion_throughput} promotions/day — lower threshold",
+                confidence=0.6, impact="medium",
+            ))
+        elif health.promotion_throughput > 20:
+            recs.append(TuneRecommendation(
+                section="promotion", key="threshold",
+                current_value=current_pt, recommended_value=min(0.9, current_pt + 0.1),
+                reason=f"{health.promotion_throughput} promotions/day — raise threshold to reduce noise",
+                confidence=0.6, impact="medium",
+            ))
+
+        # --- Meta-Ralph quality threshold ---
+        mr_cfg = tuneables.get("meta_ralph", {})
+        current_qt = int(mr_cfg.get("quality_threshold", 4))
+        if health.feedback_loop_closure < 0.3 and health.cognitive_growth > 50:
+            recs.append(TuneRecommendation(
+                section="meta_ralph", key="quality_threshold",
+                current_value=current_qt, recommended_value=min(6, current_qt + 1),
+                reason=f"Low feedback closure ({health.feedback_loop_closure:.0%}) with many insights — raise quality bar",
+                confidence=0.5, impact="medium",
+            ))
+
+        return recs
+
+    def apply_recommendations(
+        self,
+        recs: List[TuneRecommendation],
+        mode: str = "suggest",
+    ) -> List[TuneRecommendation]:
+        """Apply recommendations with safety constraints.
+
+        Modes:
+            suggest: Log only, don't apply.
+            conservative: Apply only high-confidence (>0.8), low-impact changes.
+            moderate: Apply medium+ confidence (>0.5) changes.
+            aggressive: Apply all recommendations.
+        """
+        max_changes = int(self._config.get("max_changes_per_cycle", 3))
+
+        if mode == "suggest":
+            applied: List[TuneRecommendation] = []
+        elif mode == "conservative":
+            applied = [r for r in recs if r.confidence > 0.8 and r.impact == "low"]
+        elif mode == "moderate":
+            applied = [r for r in recs if r.confidence > 0.5]
+        else:  # aggressive
+            applied = list(recs)
+
+        applied = applied[:max_changes]
+
+        if applied:
+            # Snapshot current tuneables for rollback
+            try:
+                TUNEABLE_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+                snapshot_path = TUNEABLE_HISTORY_DIR / f"tuneables_{ts}.json"
+                current = _read_json(self.tuneables_path)
+                snapshot_path.write_text(
+                    json.dumps(current, indent=2), encoding="utf-8"
+                )
+                # Keep only last 5 snapshots
+                snapshots = sorted(TUNEABLE_HISTORY_DIR.glob("tuneables_*.json"))
+                for old in snapshots[:-5]:
+                    try:
+                        old.unlink()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Apply changes
+            tuneables = _read_json(self.tuneables_path)
+            for rec in applied:
+                section = tuneables.setdefault(rec.section, {})
+                section[rec.key] = rec.recommended_value
+
+            tuneables["updated_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            _write_json_atomic(self.tuneables_path, tuneables)
+
+            # Log to auto_tune_log.jsonl
+            try:
+                with open(TUNE_LOG_PATH, "a", encoding="utf-8") as f:
+                    for rec in applied:
+                        entry = {
+                            "ts": time.time(),
+                            "section": rec.section,
+                            "key": rec.key,
+                            "old": rec.current_value,
+                            "new": rec.recommended_value,
+                            "reason": rec.reason,
+                            "confidence": rec.confidence,
+                        }
+                        f.write(json.dumps(entry) + "\n")
+            except Exception:
+                pass
+
+        return applied
 
     def compute_ideal_boost(self, effectiveness: float, global_avg: float) -> float:
         """Compute the ideal boost for a source based on its effectiveness.

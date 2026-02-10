@@ -164,7 +164,7 @@ def _load_pipeline_state() -> Dict:
 def _save_pipeline_state(state: Dict) -> None:
     PIPELINE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     PIPELINE_STATE_FILE.write_text(
-        json.dumps(state, indent=2), encoding="utf-8"
+        json.dumps(state, indent=2), encoding="utf-8",
     )
 
 
@@ -183,7 +183,7 @@ def _save_pipeline_metrics(metrics: ProcessingMetrics) -> None:
     # Keep last 100 entries for trend analysis
     entries = entries[-100:]
     PIPELINE_METRICS_FILE.write_text(
-        json.dumps(entries, indent=2), encoding="utf-8"
+        json.dumps(entries, indent=2), encoding="utf-8",
     )
 
 

@@ -33,7 +33,7 @@ def check_settings_json() -> Tuple[bool, str]:
         return False, "Missing: ~/.claude/settings.json not found"
 
     try:
-        settings = json.loads(SETTINGS_FILE.read_text())
+        settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
         hooks = settings.get("hooks", {})
 
         required = ["PreToolUse", "PostToolUse", "PostToolUseFailure"]
@@ -115,7 +115,7 @@ def check_effectiveness() -> Tuple[bool, str]:
         return False, "No effectiveness.json found"
 
     try:
-        data = json.loads(EFFECTIVENESS.read_text())
+        data = json.loads(EFFECTIVENESS.read_text(encoding="utf-8"))
         total = data.get("total_advice_given", 0)
         followed = data.get("total_followed", 0)
         helpful = data.get("total_helpful", 0)

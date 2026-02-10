@@ -170,7 +170,7 @@ class ContradictionDetector:
         """Load existing contradictions."""
         if self.CONTRADICTIONS_FILE.exists():
             try:
-                data = json.loads(self.CONTRADICTIONS_FILE.read_text())
+                data = json.loads(self.CONTRADICTIONS_FILE.read_text(encoding="utf-8"))
                 self.contradictions = [Contradiction.from_dict(c) for c in data]
             except Exception:
                 pass
@@ -179,7 +179,7 @@ class ContradictionDetector:
         """Save contradictions to disk."""
         self.CONTRADICTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
         data = [c.to_dict() for c in self.contradictions]
-        self.CONTRADICTIONS_FILE.write_text(json.dumps(data, indent=2))
+        self.CONTRADICTIONS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def _get_embedding(self, text: str) -> Optional[List[float]]:
         """Get embedding for text."""
