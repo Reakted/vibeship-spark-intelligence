@@ -192,8 +192,11 @@ def run_bridge_cycle(
             if et == EventType.USER_PROMPT:
                 user_prompt_events.append(ev)
 
-            # Content learning + cognitive signals: Edit/Write
-            if et == EventType.POST_TOOL and tool in ("Edit", "Write"):
+            # Content learning + cognitive signals: Edit/Write (case-insensitive)
+            if et == EventType.POST_TOOL and tool.lower() in ("edit", "write"):
+                # Some adapters put tool_input in payload instead of top-level
+                if not ev.tool_input and (ev.data or {}).get("payload", {}).get("tool_input"):
+                    ev.tool_input = (ev.data or {}).get("payload", {}).get("tool_input", {})
                 edit_write_events.append(ev)
 
             # Chip events: all events
@@ -300,8 +303,10 @@ def run_bridge_cycle(
             stats["errors"].append("cognitive_signals")
             log_debug("bridge_worker", "cognitive signal extraction failed", e)
 
-        # --- Chip processing (uses pre-built chip_events list) ---
-        ok, chip_stats, error = _run_step("chips", process_chip_events, chip_events, project_path)
+        # --- Chip processing (uses pre-built chip_events list, capped for speed) ---
+        # Cap at 30 events to keep cycle time under 30s (was 60s+ with 67 events x 13 chips)
+        capped_chip_events = chip_events[-30:] if len(chip_events) > 30 else chip_events
+        ok, chip_stats, error = _run_step("chips", process_chip_events, capped_chip_events, project_path, timeout_s=30)
         if ok:
             stats["chips"] = chip_stats or {}
         else:

@@ -186,6 +186,60 @@ def _call_claude_unix(
         return None
 
 
+def _detect_project_context() -> str:
+    """Detect current project from recent events or git."""
+    try:
+        import subprocess
+        # Check most common working directories from recent events
+        from lib.queue import read_recent_events
+        events = read_recent_events(20)
+        dirs = set()
+        for ev in events:
+            cwd = (ev.data or {}).get("cwd") or (ev.tool_input or {}).get("workdir", "")
+            if cwd:
+                dirs.add(str(cwd))
+            # Also check file paths for project root hints
+            ti = ev.tool_input or {}
+            fp = ti.get("file_path") or ti.get("path") or ""
+            if fp and ("Desktop" in fp or "repos" in fp or "projects" in fp):
+                # Extract project directory
+                parts = Path(fp).parts
+                for i, p in enumerate(parts):
+                    if p in ("Desktop", "repos", "projects") and i + 1 < len(parts):
+                        dirs.add(str(Path(*parts[:i+2])))
+                        break
+
+        if dirs:
+            # Get git info for most common dir
+            from collections import Counter
+            most_common = Counter(dirs).most_common(1)[0][0]
+            try:
+                r = subprocess.run(
+                    ["git", "log", "--oneline", "-3"],
+                    capture_output=True, text=True, timeout=5, cwd=most_common
+                )
+                repo_name = Path(most_common).name
+                recent_commits = r.stdout.strip() if r.returncode == 0 else ""
+                # Get recently changed files
+                r2 = subprocess.run(
+                    ["git", "diff", "--name-only", "HEAD~3", "HEAD"],
+                    capture_output=True, text=True, timeout=5, cwd=most_common
+                )
+                changed = r2.stdout.strip() if r2.returncode == 0 else ""
+                ctx = f"Project: {repo_name} ({most_common})"
+                if recent_commits:
+                    ctx += f"\nRecent commits:\n{recent_commits}"
+                if changed:
+                    files = changed.split("\n")[:10]
+                    ctx += f"\nRecently changed files: {', '.join(files)}"
+                return ctx
+            except Exception:
+                return f"Working directory: {most_common}"
+    except Exception:
+        pass
+    return ""
+
+
 def synthesize_advisory(
     patterns: list,
     insights: list,
@@ -201,7 +255,15 @@ def synthesize_advisory(
     pattern_text = "\n".join(f"- {p}" for p in patterns[:15])
     insight_text = "\n".join(f"- {i}" for i in insights[:15])
 
-    prompt = f"""You are Spark Intelligence, observing a live coding session on the vibeship-spark-intelligence project.
+    # Auto-detect project context
+    project_ctx = _detect_project_context()
+    project_name = "the current project"
+    if project_ctx:
+        # Extract project name from first line
+        if "Project: " in project_ctx:
+            project_name = project_ctx.split("Project: ")[1].split(" (")[0]
+
+    prompt = f"""You are Spark Intelligence, observing a live coding session on {project_name}.
 
 SYSTEM INVENTORY (what actually exists — do NOT reference anything outside this list):
 - Services: sparkd (port 8787, HTTP event ingestion), bridge_worker (background processing), openclaw_tailer (captures OpenClaw sessions), Spark Pulse dashboard (port 8765, uvicorn)
@@ -215,7 +277,8 @@ WHAT'S HAPPENING NOW (patterns from this session):
 LEARNED INSIGHTS (from past sessions):
 {insight_text}
 
-{f"CONTEXT: {context}" if context else ""}
+{f"PROJECT CONTEXT:\n{project_ctx}" if project_ctx else ""}
+{f"ADDITIONAL CONTEXT: {context}" if context else ""}
 
 CRITICAL RULES:
 - ONLY recommend things supported by the data above. If the patterns show file edits, talk about those files. If they show errors, address those errors.
