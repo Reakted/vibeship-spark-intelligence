@@ -10,6 +10,11 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `Intelligence_Flow.md`: runtime flow, data stores, tuneables
 - `Intelligence_Flow_Map.md`: high-level system map
 
+## Integrations
+
+- `docs/OPENCLAW_INTEGRATION.md`: OpenClaw agent integration (capture, context sync, notifications, services)
+- `docs/LLM_INTEGRATION.md`: Claude CLI LLM integration (advisory synthesis, EIDOS distillation, PowerShell bridge)
+
 ## Operator Runbooks
 
 - `TUNEABLES.md`: tuneable parameters and thresholds
