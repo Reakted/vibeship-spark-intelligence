@@ -491,6 +491,8 @@ def run_bridge_cycle(
     return stats
 
 
+import re
+
 # --- Noise patterns to filter from insights before LLM prompt ---
 _INSIGHT_NOISE_PATTERNS = [
     "Strong reasoning on",       # depth forge benchmark scores
@@ -528,8 +530,8 @@ def _is_noise_insight(text: str) -> bool:
     for pattern in _INSIGHT_NOISE_PATTERNS:
         if pattern.lower() in t:
             return True
-    # Skip very short insights (< 20 chars) — too vague to be useful
-    if len(text.strip()) < 20:
+    # Skip very short insights — too vague to be useful
+    if len(text.strip()) < 30:
         return True
     # Skip raw transcript fragments
     if _looks_like_raw_transcript(text):
@@ -542,6 +544,15 @@ def _is_noise_insight(text: str) -> bool:
         return True
     # Skip "User prefers:" followed by very short/vague content
     if text.startswith("User prefers:") and len(text) < 40:
+        return True
+    # Skip markdown tables and headers stored as insights
+    if text.strip().startswith("|") or text.strip().startswith("##"):
+        return True
+    # Skip docstrings/code stored as insights
+    if text.strip().startswith('"""') or text.strip().startswith("def ") or text.strip().startswith("class "):
+        return True
+    # Skip Python constants/assignments stored as insights
+    if re.match(r'^[A-Z_]+ = ', text.strip()):
         return True
     return False
 
