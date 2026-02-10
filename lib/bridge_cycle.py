@@ -128,6 +128,15 @@ def run_bridge_cycle(
             stats["errors"].append("context")
             log_debug("bridge_worker", f"context update failed ({error})", None)
 
+        # --- Feedback loop: ingest agent self-reports ---
+        try:
+            from lib.feedback_loop import ingest_reports
+            ok, feedback_stats, error = _run_step("feedback", ingest_reports)
+            if ok and feedback_stats:
+                stats["feedback"] = feedback_stats
+        except Exception as e:
+            log_debug("bridge_worker", f"feedback ingestion failed ({e})", None)
+
         # --- Memory capture ---
         ok, memory_stats, error = _run_step("memory", process_recent_memory_events, limit=memory_limit)
         if ok:
