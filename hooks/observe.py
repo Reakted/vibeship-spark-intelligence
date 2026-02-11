@@ -68,6 +68,7 @@ CHECKIN_MIN_S = int(os.environ.get("SPARK_OUTCOME_CHECKIN_MIN_S", "1800"))
 ADVICE_FEEDBACK_ENABLED = os.environ.get("SPARK_ADVICE_FEEDBACK", "1") == "1"
 ADVICE_FEEDBACK_PROMPT = os.environ.get("SPARK_ADVICE_FEEDBACK_PROMPT", "1") == "1"
 ADVICE_FEEDBACK_MIN_S = int(os.environ.get("SPARK_ADVICE_FEEDBACK_MIN_S", "600"))
+PRETOOL_BUDGET_MS = float(os.environ.get("SPARK_OBSERVE_PRETOOL_BUDGET_MS", "2500"))
 
 # ===== Session Failure Tracking =====
 # Track which tools failed in this session so we can detect recovery patterns.
@@ -437,6 +438,7 @@ def main():
     
     # ===== PreToolUse: Make prediction + Advisory Engine + EIDOS step creation =====
     if event_type == EventType.PRE_TOOL and tool_name:
+        pretool_start_ms = time.time() * 1000.0
         trace_id = _make_trace_id(session_id, tool_name, hook_event, time.time())
         prediction = make_prediction(tool_name, tool_input)
 
@@ -453,27 +455,35 @@ def main():
             )
             if emitted_text:
                 log_debug("observe", f"Advisory engine emitted for {tool_name}: {len(emitted_text)} chars", None)
+            elapsed_ms = (time.time() * 1000.0) - pretool_start_ms
+            if elapsed_ms > PRETOOL_BUDGET_MS:
+                log_debug("observe", f"OBS_PRETOOL_BUDGET_EXCEEDED:{tool_name}:{elapsed_ms:.1f}ms>{PRETOOL_BUDGET_MS:.0f}ms", None)
         except Exception as e:
-            log_debug("observe", "advisory engine failed, falling back to legacy advisor", e)
+            log_debug("observe", "advisory engine failed, considering legacy fallback", e)
             # Fallback: legacy advisor (fire-and-forget, no emission)
-            try:
-                from lib.advisor import advise_on_tool
-                advice = advise_on_tool(tool_name, tool_input, trace_id=trace_id)
-                if advice:
-                    log_debug("observe", f"Legacy advisor: {len(advice)} items for {tool_name}", None)
-                    if ADVICE_FEEDBACK_ENABLED:
-                        try:
-                            from lib.advice_feedback import record_advice_request
-                            record_advice_request(
-                                session_id=session_id,
-                                tool=tool_name,
-                                advice_ids=[a.advice_id for a in advice],
-                                min_interval_s=ADVICE_FEEDBACK_MIN_S,
-                            )
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+            # Fail-open: skip fallback if pretool budget is already exhausted.
+            elapsed_ms = (time.time() * 1000.0) - pretool_start_ms
+            if elapsed_ms > PRETOOL_BUDGET_MS:
+                log_debug("observe", f"OBS_PRETOOL_SKIP_LEGACY_FALLBACK:{tool_name}:{elapsed_ms:.1f}ms", None)
+            else:
+                try:
+                    from lib.advisor import advise_on_tool
+                    advice = advise_on_tool(tool_name, tool_input, trace_id=trace_id)
+                    if advice:
+                        log_debug("observe", f"Legacy advisor: {len(advice)} items for {tool_name}", None)
+                        if ADVICE_FEEDBACK_ENABLED:
+                            try:
+                                from lib.advice_feedback import record_advice_request
+                                record_advice_request(
+                                    session_id=session_id,
+                                    tool=tool_name,
+                                    advice_ids=[a.advice_id for a in advice],
+                                    min_interval_s=ADVICE_FEEDBACK_MIN_S,
+                                )
+                            except Exception as feedback_err:
+                                log_debug("observe", "OBS_LEGACY_FEEDBACK_RECORD_FAILED", feedback_err)
+                except Exception as fallback_err:
+                    log_debug("observe", "OBS_LEGACY_FALLBACK_FAILED", fallback_err)
         save_prediction(session_id, tool_name, prediction)
 
         # EIDOS: Create step and check control plane

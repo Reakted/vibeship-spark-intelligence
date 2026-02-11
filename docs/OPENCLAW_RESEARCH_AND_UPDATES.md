@@ -127,6 +127,24 @@ For each change:
   - real-time impact: 2, live-use value: 1, modularity gain: 2
 - **Decision:** keep
 
+### [2026-02-11 15:40 GMT+4] P1-2 — Hook fail-open budget hardening (PreToolUse)
+- **Goal:** Keep hook responsiveness stable under advisory failures/slowdowns.
+- **Changes made:**
+  - `hooks/observe.py`
+  - Added `SPARK_OBSERVE_PRETOOL_BUDGET_MS` (default `2500ms`).
+  - Added pretool elapsed-time measurement and budget exceed logs:
+    - `OBS_PRETOOL_BUDGET_EXCEEDED`
+  - On advisory engine failure, legacy fallback is now budget-aware (skipped if budget already exhausted):
+    - `OBS_PRETOOL_SKIP_LEGACY_FALLBACK`
+  - Replaced silent fallback errors with structured logs:
+    - `OBS_LEGACY_FEEDBACK_RECORD_FAILED`
+    - `OBS_LEGACY_FALLBACK_FAILED`
+- **Validation result:** better
+  - `python -m py_compile hooks/observe.py` passed
+- **Carmack alignment score (0-6):** 6
+  - real-time impact: 2, live-use value: 2, modularity gain: 2
+- **Decision:** keep
+
 ---
 
 ## Metrics to watch each session
