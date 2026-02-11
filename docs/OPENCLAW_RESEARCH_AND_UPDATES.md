@@ -145,6 +145,20 @@ For each change:
   - real-time impact: 2, live-use value: 2, modularity gain: 2
 - **Decision:** keep
 
+### [2026-02-11 15:41 GMT+4] P2-1 — Context env var normalization (alias-safe)
+- **Goal:** Remove config ambiguity around agent context env knobs.
+- **Changes made:**
+  - `lib/orchestration.py`
+  - Canonicalized char-budget var to `SPARK_AGENT_CONTEXT_MAX_CHARS`.
+  - Added backward-compatible alias: `SPARK_AGENT_CONTEXT_LIMIT` (same semantic: max chars).
+  - Introduced `SPARK_AGENT_CONTEXT_ITEM_LIMIT` for compact-context item count.
+  - `TUNEABLES.md` updated to match runtime behavior.
+- **Validation result:** better
+  - `python -m py_compile lib/orchestration.py` passed.
+- **Carmack alignment score (0-6):** 5
+  - real-time impact: 1, live-use value: 2, modularity gain: 2
+- **Decision:** keep
+
 ---
 
 ## Metrics to watch each session

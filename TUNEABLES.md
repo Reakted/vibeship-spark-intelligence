@@ -748,7 +748,9 @@ System-wide configuration via environment variables.
 |----------|---------|-------------|
 | `SPARK_NO_WATCHDOG` | `false` | **Disable watchers.** Set to `true` to turn off all watcher enforcement. Use for debugging only. |
 | `SPARK_OUTCOME_AUTO_LINK` | `true` | **Auto-link outcomes.** Automatically link outcomes to their originating Steps. |
-| `SPARK_AGENT_CONTEXT_LIMIT` | `8000` | **Agent context tokens.** Maximum tokens for agent context injection. |
+| `SPARK_AGENT_CONTEXT_MAX_CHARS` | `1200` | **Agent context char budget.** Canonical max chars for injected compact context. |
+| `SPARK_AGENT_CONTEXT_LIMIT` | alias | Backward-compatible alias for `SPARK_AGENT_CONTEXT_MAX_CHARS`. |
+| `SPARK_AGENT_CONTEXT_ITEM_LIMIT` | unset | Optional max number of compact context items (falls back to function default). |
 | `SPARK_DEBUG` | `false` | **Debug mode.** Enables verbose logging across all components. |
 | `SPARK_MIND_PORT` | `8080` | **Mind API port.** Port for Mind persistent memory service. |
 | `SPARKD_PORT` | `8787` | **sparkd port.** Port for ingest/health. |

@@ -40,16 +40,23 @@ def inject_agent_context(
     if not _env_truthy("SPARK_AGENT_INJECT"):
         return prompt
 
-    max_chars_raw = os.environ.get("SPARK_AGENT_CONTEXT_MAX_CHARS", "").strip()
+    # Backward-compatible env handling:
+    # - SPARK_AGENT_CONTEXT_MAX_CHARS is canonical for char budget
+    # - SPARK_AGENT_CONTEXT_LIMIT is accepted as alias for char budget
+    # - SPARK_AGENT_CONTEXT_ITEM_LIMIT controls number of compact context items
+    max_chars_raw = (
+        os.environ.get("SPARK_AGENT_CONTEXT_MAX_CHARS", "").strip()
+        or os.environ.get("SPARK_AGENT_CONTEXT_LIMIT", "").strip()
+    )
     try:
         max_chars = int(max_chars_raw) if max_chars_raw else 1200
     except Exception:
         max_chars = 1200
 
-    limit_raw = os.environ.get("SPARK_AGENT_CONTEXT_LIMIT", "").strip()
-    if limit_raw:
+    item_limit_raw = os.environ.get("SPARK_AGENT_CONTEXT_ITEM_LIMIT", "").strip()
+    if item_limit_raw:
         try:
-            limit = max(1, int(limit_raw))
+            limit = max(1, int(item_limit_raw))
         except Exception:
             pass
 
