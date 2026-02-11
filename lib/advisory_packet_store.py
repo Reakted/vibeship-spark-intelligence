@@ -530,9 +530,12 @@ def record_packet_feedback(
         return {"ok": False, "reason": "packet_not_found", "packet_id": packet_id}
 
     packet["feedback_count"] = int(packet.get("feedback_count", 0) or 0) + 1
-    if followed and helpful is True:
+    # Count effectiveness outcomes for both explicit and implicit feedback.
+    # `followed` remains valuable metadata for analysis, but should not block
+    # score updates when a post-tool outcome clearly indicates helpful/unhelpful.
+    if helpful is True:
         packet["helpful_count"] = int(packet.get("helpful_count", 0) or 0) + 1
-    elif followed and helpful is False:
+    elif helpful is False:
         packet["unhelpful_count"] = int(packet.get("unhelpful_count", 0) or 0) + 1
     if noisy:
         packet["noisy_count"] = int(packet.get("noisy_count", 0) or 0) + 1

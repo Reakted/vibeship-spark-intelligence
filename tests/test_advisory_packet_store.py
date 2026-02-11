@@ -168,6 +168,37 @@ def test_relaxed_lookup_prefers_higher_effectiveness(monkeypatch, tmp_path):
     assert chosen["packet_id"] == better_id
 
 
+def test_implicit_feedback_updates_effectiveness_even_when_not_followed(monkeypatch, tmp_path):
+    _patch_store_paths(monkeypatch, tmp_path)
+    packet = store.build_packet(
+        project_key="proj",
+        session_context_key="ctx",
+        tool_name="Edit",
+        intent_family="auth_security",
+        task_plane="build_delivery",
+        advisory_text="Use safer edit path.",
+        source_mode="prefetch",
+        lineage={"sources": ["prefetch"], "memory_absent_declared": False},
+        ttl_s=300,
+    )
+    packet_id = store.save_packet(packet)
+    before = store.get_packet(packet_id)
+    before_score = float((before or {}).get("effectiveness_score", 0.5))
+
+    store.record_packet_feedback(
+        packet_id,
+        helpful=False,
+        noisy=False,
+        followed=False,
+        source="implicit_post_tool",
+    )
+
+    after = store.get_packet(packet_id)
+    assert after is not None
+    assert int(after.get("unhelpful_count", 0)) >= 1
+    assert float(after.get("effectiveness_score", 0.5)) < before_score
+
+
 def test_record_packet_feedback_for_advice(monkeypatch, tmp_path):
     _patch_store_paths(monkeypatch, tmp_path)
     packet = store.build_packet(

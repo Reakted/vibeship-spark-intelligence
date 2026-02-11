@@ -88,6 +88,23 @@ For each change:
   - Validates only matching packet invalidates for `file_hint="lib/bridge_cycle.py"`.
 - **Validation result:** better
   - Local test run: `python -m pytest tests/test_advisory_packet_store.py -q` → `9 passed`.
+- **Carmack alignment score (0-6):** 5
+  - real-time impact: 2, live-use value: 2, modularity gain: 1
+- **Decision:** keep
+
+### [2026-02-11 15:35 GMT+4] P0-2 — Implicit feedback affects packet effectiveness
+- **Goal:** Ensure post-tool implicit outcomes actually update packet effectiveness ranking.
+- **Baseline issue:** feedback with `followed=False` did not update helpful/unhelpful counts, so effectiveness scores barely changed in real use.
+- **Changes made:**
+  - `lib/advisory_packet_store.py`
+  - `record_packet_feedback` now updates helpful/unhelpful counts whenever `helpful` is provided (explicit or implicit), while preserving `followed` as metadata.
+- **Test coverage added:**
+  - `tests/test_advisory_packet_store.py::test_implicit_feedback_updates_effectiveness_even_when_not_followed`
+  - Verifies implicit unhelpful feedback decreases effectiveness score.
+- **Validation result:** better
+  - Local test run: `python -m pytest tests/test_advisory_packet_store.py -q` → `10 passed`.
+- **Carmack alignment score (0-6):** 6
+  - real-time impact: 2, live-use value: 2, modularity gain: 2
 - **Decision:** keep
 
 ---
@@ -101,3 +118,31 @@ For each change:
 - `pattern_processed` + `chip_merge.merged`
 - Queue depth before/after
 - Heartbeat freshness and error count
+
+---
+
+## Carmack Alignment Criteria (applied to every patch)
+
+Use this as a decision filter for P0/P1/P2 work.
+
+### 1) Constraint-first (real-time usefulness)
+- Define explicit loop constraints before patching (latency, freshness, retry budget).
+- Prefer changes that improve live cycle responsiveness and reliability under real workload.
+
+### 2) Experience-first validation
+- Do not rely on synthetic-only success.
+- Every change must be validated in active project flow (real prompts, real tool activity, real queue/heartbeat behavior).
+
+### 3) Modularity over monolith
+- Prefer small, composable changes with clear boundaries and ownership.
+- Reward patches that reduce blast radius and make failures easier to localize.
+
+### 4) Scoring rubric per change (0-2 each)
+- **Real-time impact:** does it improve active-loop performance or freshness?
+- **Live-use value:** does it improve outcomes in actual work sessions?
+- **Modularity gain:** does it reduce coupling / improve observability?
+
+**Total score (0-6):**
+- 5-6 = keep and expand
+- 3-4 = keep with follow-up
+- 0-2 = rollback or redesign
