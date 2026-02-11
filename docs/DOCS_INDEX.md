@@ -19,6 +19,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 ## Operator Runbooks
 
 - `TUNEABLES.md`: tuneable parameters and thresholds
+- `docs/OPENCLAW_RESEARCH_AND_UPDATES.md`: experiment log for OpenClaw tuning changes, outcomes, and keep/rollback decisions
 - `docs/adapters.md`: event adapters and schema boundaries
 - `docs/claude_code.md`: Claude Code integration
 - `docs/cursor.md`: Cursor and VS Code integration

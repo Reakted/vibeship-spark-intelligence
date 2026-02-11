@@ -70,6 +70,10 @@ class ChipRuntime:
             self.min_insight_confidence = 0.7
         self.min_insight_confidence = max(0.0, min(1.0, self.min_insight_confidence))
         self.gate_mode = str(os.getenv("SPARK_CHIP_GATE_MODE", "balanced")).strip().lower()
+        try:
+            self.max_active_chips_per_event = max(1, int(os.getenv("SPARK_CHIP_EVENT_ACTIVE_LIMIT", "6") or 6))
+        except Exception:
+            self.max_active_chips_per_event = 6
         self.global_safety_policy = SafetyPolicy(
             block_patterns=[
                 r"\bdecept(?:ive|ion)\b",
@@ -105,12 +109,45 @@ class ChipRuntime:
         if not active_chips:
             return insights
 
+        active_chips = self._select_event_relevant_chips(active_chips, content)
+        if not active_chips:
+            return insights
+
         # Route event to matching chips/observers
         matches = self.router.route_event(event, active_chips)
         if not matches:
             return insights
 
         return self._process_matches(matches, event)
+
+    def _select_event_relevant_chips(self, active_chips: List[Chip], content: str) -> List[Chip]:
+        """Limit per-event chip fan-out to the most relevant active chips.
+
+        Active chips can accumulate over time. This keeps runtime focused by
+        choosing only chips that match the current event content best.
+        """
+        if not active_chips:
+            return []
+        if len(active_chips) <= self.max_active_chips_per_event:
+            return active_chips
+
+        ranked = []
+        for chip in active_chips:
+            try:
+                matches = chip.matches_content(content or "")
+                score = len(matches)
+            except Exception:
+                score = 0
+            ranked.append((chip, score))
+
+        ranked.sort(key=lambda x: x[1], reverse=True)
+        selected = [chip for chip, score in ranked if score > 0][: self.max_active_chips_per_event]
+
+        # Fallback: if nothing scored > 0 (very sparse content), keep first N.
+        if not selected:
+            selected = [chip for chip, _ in ranked[: self.max_active_chips_per_event]]
+
+        return selected
 
     def process_event_for_chips(self, event: Dict[str, Any], chips: List[Chip]) -> List[ChipInsight]:
         """Process an event for a specific list of chips (no activation changes)."""
@@ -832,14 +869,23 @@ def process_chip_events(events: List[Dict[str, Any]], project_path: str = None) 
         'insights_captured': 0,
         'chips_activated': [],
     }
+    chips_used = set()
 
     for event in events:
         insights = runtime.process_event(event, project_path)
         stats['events_processed'] += 1
         stats['insights_captured'] += len(insights)
+        for ins in insights:
+            try:
+                chips_used.add(ins.chip_id)
+            except Exception:
+                pass
 
-    # Track which chips are active
-    active = runtime.registry.get_active_chips(project_path)
-    stats['chips_activated'] = [c.id for c in active]
+    # Report chips actually used this cycle (fallback to active list if none captured)
+    if chips_used:
+        stats['chips_activated'] = sorted(chips_used)
+    else:
+        active = runtime.registry.get_active_chips(project_path)
+        stats['chips_activated'] = [c.id for c in active[: runtime.max_active_chips_per_event]]
 
     return stats
