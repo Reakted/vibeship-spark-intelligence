@@ -413,10 +413,16 @@ def run_bridge_cycle(
                         insights=recent_insights[:10],
                     )
                     if advisory:
-                        stats["llm_advisory"] = advisory
-                        # Write advisory to SPARK_CONTEXT for agent consumption
-                        _write_llm_advisory(advisory)
-                        log_debug("bridge_worker", f"LLM advisory generated ({len(advisory)} chars)", None)
+                        pruned_advisory, dropped = _prune_redundant_advisory(advisory, events or [])
+                        if dropped:
+                            log_debug("bridge_worker", f"Pruned {dropped} redundant advisory items", None)
+                        if pruned_advisory.strip():
+                            stats["llm_advisory"] = pruned_advisory
+                            # Write advisory to SPARK_CONTEXT for agent consumption
+                            _write_llm_advisory(pruned_advisory)
+                            log_debug("bridge_worker", f"LLM advisory generated ({len(pruned_advisory)} chars)", None)
+                        else:
+                            log_debug("bridge_worker", "Skipped advisory after redundancy pruning (no actionable items)", None)
 
             except Exception as e:
                 log_debug("bridge_worker", f"LLM advisory failed ({e})", None)
@@ -745,6 +751,82 @@ def _is_generic_advisory(text: str) -> bool:
         return matches >= 2
     generic_lines = sum(1 for l in lines if any(p in l.lower() for p in _GENERIC_ADVISORY_PHRASES))
     return generic_lines > len(lines) / 2
+
+
+def _recent_exec_commands(events: list, limit: int = 12) -> list[str]:
+    """Extract recent exec commands from this cycle's events (newest first)."""
+    cmds: list[str] = []
+    for ev in reversed(events or []):
+        try:
+            if ev.event_type != EventType.POST_TOOL:
+                continue
+            if (ev.tool_name or "").strip().lower() != "exec":
+                continue
+            ti = ev.tool_input or {}
+            cmd = str(ti.get("command") or "").strip().lower()
+            if cmd:
+                cmds.append(cmd)
+            if len(cmds) >= limit:
+                break
+        except Exception:
+            continue
+    return cmds
+
+
+def _line_matches_recent_action(line: str, recent_cmds: list[str]) -> bool:
+    """Return True when an advisory line recommends something already done recently."""
+    l = line.lower()
+
+    # 1) Direct command repetition via backticks: `openclaw session-status`
+    for cmd in re.findall(r"`([^`]+)`", line):
+        c = cmd.strip().lower()
+        if not c:
+            continue
+        if any(c in rc or rc in c for rc in recent_cmds):
+            return True
+
+    # 2) High-signal heuristic for codex usage checks already completed
+    if any("session-status" in rc for rc in recent_cmds):
+        if "session-status" in l or ("codex" in l and "usage" in l):
+            return True
+
+    return False
+
+
+def _prune_redundant_advisory(advisory: str, events: list) -> tuple[str, int]:
+    """Drop advisory bullets that repeat actions already done in the recent window."""
+    if not advisory.strip():
+        return advisory, 0
+
+    recent_cmds = _recent_exec_commands(events)
+    if not recent_cmds:
+        return advisory, 0
+
+    lines = advisory.splitlines()
+    kept: list[str] = []
+    dropped = 0
+
+    for line in lines:
+        stripped = line.strip()
+        is_bullet = bool(re.match(r"^\d+\.\s+", stripped))
+        if is_bullet and _line_matches_recent_action(stripped, recent_cmds):
+            dropped += 1
+            continue
+        kept.append(line)
+
+    # Re-number numbered bullets after pruning to keep output clean.
+    out: list[str] = []
+    bullet_i = 1
+    for line in kept:
+        stripped = line.strip()
+        if re.match(r"^\d+\.\s+", stripped):
+            text = re.sub(r"^\d+\.\s+", "", stripped)
+            out.append(f"{bullet_i}. {text}")
+            bullet_i += 1
+        else:
+            out.append(line)
+
+    return "\n".join(out).strip() + "\n", dropped
 
 
 def _maybe_notify_openclaw(stats: Dict[str, Any]) -> None:
