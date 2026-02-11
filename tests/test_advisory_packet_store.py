@@ -198,6 +198,46 @@ def test_record_packet_feedback_for_advice(monkeypatch, tmp_path):
     assert int(updated.get("noisy_count", 0)) >= 1
 
 
+def test_invalidate_packets_with_file_hint_matches_full_packet(monkeypatch, tmp_path):
+    _patch_store_paths(monkeypatch, tmp_path)
+
+    p_hit = store.build_packet(
+        project_key="proj",
+        session_context_key="ctx1",
+        tool_name="Edit",
+        intent_family="auth_security",
+        task_plane="build_delivery",
+        advisory_text="Update lib/bridge_cycle.py and re-run validation.",
+        source_mode="prefetch",
+        advice_items=[{"advice_id": "a1", "text": "Touch bridge_cycle.py only"}],
+        lineage={"sources": ["prefetch"], "memory_absent_declared": False},
+        ttl_s=300,
+    )
+    p_miss = store.build_packet(
+        project_key="proj",
+        session_context_key="ctx2",
+        tool_name="Edit",
+        intent_family="auth_security",
+        task_plane="build_delivery",
+        advisory_text="Update lib/advisor.py with safer ranking.",
+        source_mode="prefetch",
+        advice_items=[{"advice_id": "a2", "text": "Touch advisor.py"}],
+        lineage={"sources": ["prefetch"], "memory_absent_declared": False},
+        ttl_s=300,
+    )
+
+    hit_id = store.save_packet(p_hit)
+    miss_id = store.save_packet(p_miss)
+
+    count = store.invalidate_packets(project_key="proj", file_hint="lib/bridge_cycle.py", reason="edited_file")
+    assert count == 1
+
+    hit_packet = store.get_packet(hit_id)
+    miss_packet = store.get_packet(miss_id)
+    assert hit_packet is not None and bool(hit_packet.get("invalidated")) is True
+    assert miss_packet is not None and bool(miss_packet.get("invalidated")) is False
+
+
 def test_packet_store_apply_config_updates_defaults(monkeypatch, tmp_path):
     _patch_store_paths(monkeypatch, tmp_path)
     monkeypatch.setattr(store, "DEFAULT_PACKET_TTL_S", 900.0)

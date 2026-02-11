@@ -77,6 +77,19 @@ For each change:
 - **Validation status:** pending (next 3-6 cycles)
 - **Initial decision:** keep for trial
 
+### [2026-02-11 14:57 GMT+4] P0-1 — Packet invalidation correctness (`file_hint`)
+- **Goal:** Ensure file-scoped invalidation actually removes stale advisory packets after edits.
+- **Baseline issue:** `invalidate_packets(..., file_hint=...)` matched only `packet_meta`, but metadata does not store `advisory_text`/`advice_items`, so many stale packets were not invalidated.
+- **Changes made:**
+  - `lib/advisory_packet_store.py`
+  - `invalidate_packets` now loads full packet via `get_packet(packet_id)` when `file_hint` is provided and matches against full `advisory_text` + serialized `advice_items`.
+- **Test coverage added:**
+  - `tests/test_advisory_packet_store.py::test_invalidate_packets_with_file_hint_matches_full_packet`
+  - Validates only matching packet invalidates for `file_hint="lib/bridge_cycle.py"`.
+- **Validation result:** better
+  - Local test run: `python -m pytest tests/test_advisory_packet_store.py -q` → `9 passed`.
+- **Decision:** keep
+
 ---
 
 ## Metrics to watch each session

@@ -468,15 +468,21 @@ def invalidate_packets(
             continue
 
         # If file_hint given, only invalidate packets that reference
-        # the same file (by filename match in advisory text or items).
+        # the same file (by filename match in advisory text or advice items).
+        # NOTE: packet_meta intentionally does not store advisory_text/advice_items,
+        # so we must read full packet for reliable matching.
         if file_hint_lower:
-            pkt_text = str(item.get("advisory_text") or "").lower()
             pkt_tool = str(item.get("tool_name") or "").lower()
-            items_text = str(item.get("advice_items") or "").lower()
+            packet = get_packet(packet_id)
+            pkt_text = str((packet or {}).get("advisory_text") or "").lower()
+            items_blob = (packet or {}).get("advice_items") or []
+            items_text = json.dumps(items_blob, ensure_ascii=False).lower()
+
             if file_hint_lower not in pkt_text and file_hint_lower not in items_text:
-                # Also skip wildcard baseline packets — those aren't file-specific
+                # Also skip wildcard baseline packets — those aren't file-specific.
                 if pkt_tool == "*":
                     continue
+                continue
 
         to_invalidate.append(packet_id)
     count = 0
