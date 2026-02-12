@@ -4,13 +4,16 @@ Advisory Engine: orchestrator for direct-path advisory and predictive packets.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .diagnostics import log_debug
+from .error_taxonomy import build_error_fields
 
 ENGINE_ENABLED = os.getenv("SPARK_ADVISORY_ENGINE", "1") != "0"
 ENGINE_LOG = Path.home() / ".spark" / "advisory_engine.jsonl"
@@ -19,6 +22,9 @@ MAX_ENGINE_MS = float(os.getenv("SPARK_ADVISORY_MAX_MS", "4000"))
 INCLUDE_MIND_IN_MEMORY = os.getenv("SPARK_ADVISORY_INCLUDE_MIND", "0") == "1"
 ENABLE_PREFETCH_QUEUE = os.getenv("SPARK_ADVISORY_PREFETCH_QUEUE", "1") != "0"
 ENABLE_INLINE_PREFETCH_WORKER = os.getenv("SPARK_ADVISORY_PREFETCH_INLINE", "1") != "0"
+ADVISORY_TEXT_REPEAT_COOLDOWN_S = float(
+    os.getenv("SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S", "1800")
+)
 try:
     INLINE_PREFETCH_MAX_JOBS = max(
         1, int(os.getenv("SPARK_ADVISORY_PREFETCH_INLINE_MAX_JOBS", "1") or 1)
@@ -46,6 +52,7 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     global ENABLE_PREFETCH_QUEUE
     global ENABLE_INLINE_PREFETCH_WORKER
     global INLINE_PREFETCH_MAX_JOBS
+    global ADVISORY_TEXT_REPEAT_COOLDOWN_S
 
     applied: List[str] = []
     warnings: List[str] = []
@@ -85,6 +92,16 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
         except Exception:
             warnings.append("invalid_prefetch_inline_max_jobs")
 
+    if "advisory_text_repeat_cooldown_s" in cfg:
+        try:
+            ADVISORY_TEXT_REPEAT_COOLDOWN_S = max(
+                0.0,
+                min(86400.0, float(cfg.get("advisory_text_repeat_cooldown_s") or 0.0)),
+            )
+            applied.append("advisory_text_repeat_cooldown_s")
+        except Exception:
+            warnings.append("invalid_advisory_text_repeat_cooldown_s")
+
     return {"applied": applied, "warnings": warnings}
 
 
@@ -96,6 +113,7 @@ def get_engine_config() -> Dict[str, Any]:
         "prefetch_queue_enabled": bool(ENABLE_PREFETCH_QUEUE),
         "prefetch_inline_enabled": bool(ENABLE_INLINE_PREFETCH_WORKER),
         "prefetch_inline_max_jobs": int(INLINE_PREFETCH_MAX_JOBS),
+        "advisory_text_repeat_cooldown_s": float(ADVISORY_TEXT_REPEAT_COOLDOWN_S),
     }
 
 
@@ -211,6 +229,34 @@ def _baseline_text(intent_family: str) -> str:
     return defaults.get(intent_family, defaults["emergent_other"])
 
 
+def _text_fingerprint(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "").strip().lower())
+    if not cleaned:
+        return ""
+    return hashlib.sha1(cleaned.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def _duplicate_repeat_state(state, advisory_text: str) -> Dict[str, Any]:
+    now = time.time()
+    fingerprint = _text_fingerprint(advisory_text)
+    last_fingerprint = str(getattr(state, "last_advisory_text_fingerprint", "") or "")
+    last_at = float(getattr(state, "last_advisory_at", 0.0) or 0.0)
+    age_s = max(0.0, now - last_at) if last_at > 0 else None
+    repeat = bool(
+        fingerprint
+        and ADVISORY_TEXT_REPEAT_COOLDOWN_S > 0
+        and fingerprint == last_fingerprint
+        and age_s is not None
+        and age_s < ADVISORY_TEXT_REPEAT_COOLDOWN_S
+    )
+    return {
+        "repeat": repeat,
+        "fingerprint": fingerprint,
+        "age_s": round(age_s, 2) if age_s is not None else None,
+        "cooldown_s": float(ADVISORY_TEXT_REPEAT_COOLDOWN_S),
+    }
+
+
 def on_pre_tool(
     session_id: str,
     tool_name: str,
@@ -317,6 +363,9 @@ def on_pre_tool(
                     "task_plane": task_plane,
                     "memory_absent_declared": bool(memory_bundle.get("memory_absent_declared")),
                     "stage_ms": stage_ms,
+                    "delivery_mode": "none",
+                    "error_kind": "no_hit",
+                    "error_code": "AE_NO_ADVICE",
                 },
             )
             return None
@@ -358,24 +407,66 @@ def on_pre_tool(
                         "packet_id": packet_id,
                         "memory_absent_declared": bool(memory_bundle.get("memory_absent_declared")),
                         "stage_ms": stage_ms,
+                        "delivery_mode": "none",
+                        "error_kind": "policy",
+                        "error_code": "AE_GATE_SUPPRESSED",
                     },
                 )
                 return None
 
             # Emit the fallback deterministic text
+            repeat_meta = _duplicate_repeat_state(state, fallback_text)
+            if repeat_meta["repeat"]:
+                save_state(state)
+                _log_engine_event(
+                    "duplicate_suppressed",
+                    tool_name,
+                    len(advice_items),
+                    0,
+                    start_ms,
+                    extra={
+                        "route": route,
+                        "intent_family": intent_family,
+                        "task_plane": task_plane,
+                        "packet_id": packet_id,
+                        "stage_ms": stage_ms,
+                        "delivery_mode": "none",
+                        "error_kind": "policy",
+                        "error_code": "AE_DUPLICATE_SUPPRESSED",
+                        "advisory_fingerprint": repeat_meta["fingerprint"],
+                        "repeat_age_s": repeat_meta["age_s"],
+                        "repeat_cooldown_s": repeat_meta["cooldown_s"],
+                    },
+                )
+                return None
+
+            fallback_emitted = False
+            fallback_error: Optional[Dict[str, Any]] = None
             try:
                 from .advisory_emitter import emit_advisory
-                emit_advisory(gate_result, fallback_text, advice_items, authority="note")
+                fallback_emitted = bool(
+                    emit_advisory(gate_result, fallback_text, advice_items, authority="note")
+                )
+                if fallback_emitted:
+                    state.last_advisory_text_fingerprint = repeat_meta["fingerprint"]
             except Exception as e:
                 log_debug("advisory_engine", "AE_FALLBACK_EMIT_FAILED", e)
+                fallback_error = build_error_fields(str(e), "AE_FALLBACK_EMIT_FAILED")
             save_state(state)
             _log_engine_event(
-                "fallback_emit",
+                "fallback_emit" if fallback_emitted else "fallback_emit_failed",
                 tool_name,
                 len(advice_items),
-                1,
+                1 if fallback_emitted else 0,
                 start_ms,
-                extra={"route": route, "intent_family": intent_family, "packet_id": packet_id, "stage_ms": stage_ms},
+                extra={
+                    "route": route,
+                    "intent_family": intent_family,
+                    "packet_id": packet_id,
+                    "stage_ms": stage_ms,
+                    "delivery_mode": "fallback" if fallback_emitted else "none",
+                    **(fallback_error or {}),
+                },
             )
             return fallback_text
 
@@ -411,6 +502,37 @@ def on_pre_tool(
                 force_mode="programmatic",
             )
         _mark("synth", t_synth)
+
+        repeat_meta = _duplicate_repeat_state(state, synth_text)
+        if repeat_meta["repeat"]:
+            if packet_id:
+                try:
+                    record_packet_usage(packet_id, emitted=False, route=f"{route}_repeat_suppressed")
+                except Exception as e:
+                    log_debug("advisory_engine", "AE_PKT_USAGE_REPEAT_SUPPRESS_FAILED", e)
+            save_state(state)
+            _log_engine_event(
+                "duplicate_suppressed",
+                tool_name,
+                len(advice_items),
+                len(gate_result.emitted),
+                start_ms,
+                extra={
+                    "route": route,
+                    "intent_family": intent_family,
+                    "task_plane": task_plane,
+                    "packet_id": packet_id,
+                    "memory_absent_declared": bool(memory_bundle.get("memory_absent_declared")),
+                    "stage_ms": stage_ms,
+                    "delivery_mode": "none",
+                    "error_kind": "policy",
+                    "error_code": "AE_DUPLICATE_SUPPRESSED",
+                    "advisory_fingerprint": repeat_meta["fingerprint"],
+                    "repeat_age_s": repeat_meta["age_s"],
+                    "repeat_cooldown_s": repeat_meta["cooldown_s"],
+                },
+            )
+            return None
 
         t_emit = time.time() * 1000.0
         emitted = emit_advisory(gate_result, synth_text, advice_items)
@@ -465,6 +587,7 @@ def on_pre_tool(
             state.last_advisory_tool = str(tool_name or "")
             state.last_advisory_advice_ids = list(shown_ids[:20])
             state.last_advisory_at = time.time()
+            state.last_advisory_text_fingerprint = repeat_meta["fingerprint"]
 
         if packet_id:
             try:
@@ -488,12 +611,21 @@ def on_pre_tool(
                 "memory_absent_declared": bool(memory_bundle.get("memory_absent_declared")),
                 "intent_confidence": float(intent_info.get("confidence", 0.0) or 0.0),
                 "stage_ms": stage_ms,
+                "delivery_mode": "live" if emitted else "none",
             },
         )
         return synth_text if emitted else None
 
     except Exception as e:
         log_debug("advisory_engine", f"on_pre_tool failed for {tool_name}", e)
+        _log_engine_event(
+            "engine_error",
+            tool_name,
+            0,
+            0,
+            start_ms,
+            extra=build_error_fields(str(e), "AE_ON_PRE_TOOL_FAILED"),
+        )
         return None
 
 
@@ -507,6 +639,7 @@ def on_post_tool(
 ) -> None:
     if not ENGINE_ENABLED:
         return
+    start_ms = time.time() * 1000.0
 
     try:
         from .advisory_state import (
@@ -576,6 +709,14 @@ def on_post_tool(
         save_state(state)
     except Exception as e:
         log_debug("advisory_engine", f"on_post_tool failed for {tool_name}", e)
+        _log_engine_event(
+            "post_tool_error",
+            tool_name,
+            0,
+            0,
+            start_ms,
+            extra=build_error_fields(str(e), "AE_ON_POST_TOOL_FAILED"),
+        )
 
 
 def on_user_prompt(
@@ -584,6 +725,7 @@ def on_user_prompt(
 ) -> None:
     if not ENGINE_ENABLED:
         return
+    start_ms = time.time() * 1000.0
 
     try:
         from .advisory_state import load_state, record_user_intent, save_state
@@ -645,6 +787,14 @@ def on_user_prompt(
                     log_debug("advisory_engine", "inline prefetch worker failed", e)
     except Exception as e:
         log_debug("advisory_engine", "on_user_prompt failed", e)
+        _log_engine_event(
+            "user_prompt_error",
+            "*",
+            0,
+            0,
+            start_ms,
+            extra=build_error_fields(str(e), "AE_ON_USER_PROMPT_FAILED"),
+        )
 
 
 def _record_implicit_feedback(

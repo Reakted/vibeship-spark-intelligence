@@ -116,6 +116,7 @@ class SessionState:
     last_advisory_tool: str = ""
     last_advisory_advice_ids: List[str] = field(default_factory=list)
     last_advisory_at: float = 0.0
+    last_advisory_text_fingerprint: str = ""
 
     # Consecutive failures (for debugging phase detection)
     consecutive_failures: int = 0
