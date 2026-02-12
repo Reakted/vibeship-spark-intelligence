@@ -184,6 +184,18 @@ Operational contract (locked):
 - Shadow: `benchmarks/data/advisory_realism_eval_v1.json`
 - Contract file: `benchmarks/data/advisory_realism_operating_contract_v1.json`
 
+One-command primary + shadow run with compact pass/fail dashboard:
+
+```bash
+python scripts/run_advisory_realism_contract.py
+```
+
+With explicit per-run timeout:
+
+```bash
+python scripts/run_advisory_realism_contract.py --run-timeout-s 1200
+```
+
 Primary run:
 
 ```bash

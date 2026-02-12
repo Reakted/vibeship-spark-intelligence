@@ -23,6 +23,7 @@ This benchmark is separate from Forge/Depth and focused only on
 - Real-case template: `benchmarks/data/advisory_quality_eval_real_user_template.json`
 - Log-to-cases generator: `benchmarks/build_advisory_cases_from_logs.py`
 - Profile sweeper: `benchmarks/advisory_profile_sweeper.py`
+- Contract runner: `scripts/run_advisory_realism_contract.py`
 - Output JSON: `benchmarks/out/advisory_quality_ab_report.json`
 - Output Markdown: `benchmarks/out/advisory_quality_ab_report.md`
 
@@ -131,6 +132,18 @@ Execution policy:
 1. Run primary (`v2`) and require all gates to pass.
 2. Run shadow (`v1`) as non-blocking sanity telemetry.
 3. If primary passes and shadow regresses, do not auto-rollback unless trace/source gates regress materially.
+
+Single-command contract run:
+
+```bash
+python scripts/run_advisory_realism_contract.py
+```
+
+Optional timeout override per run:
+
+```bash
+python scripts/run_advisory_realism_contract.py --run-timeout-s 1200
+```
 
 ## Theory Seeding for Controlled Memory Tests
 

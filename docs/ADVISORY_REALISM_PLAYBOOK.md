@@ -81,6 +81,12 @@ Primary + shadow cadence:
 - Primary contract run: `benchmarks/data/advisory_realism_eval_v2.json` (blocking)
 - Shadow run: `benchmarks/data/advisory_realism_eval_v1.json` (non-blocking)
 - Contract reference: `benchmarks/data/advisory_realism_operating_contract_v1.json`
+- Contract runner: `scripts/run_advisory_realism_contract.py`
+
+Single command:
+```bash
+python scripts/run_advisory_realism_contract.py
+```
 
 3. Tune profile candidates with sweeper if needed:
 ```bash
