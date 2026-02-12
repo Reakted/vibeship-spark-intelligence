@@ -703,6 +703,7 @@ def on_pre_tool(
                 tool_name,
                 tool_input or {},
                 context=state.user_intent,
+                include_mind=INCLUDE_MIND_IN_MEMORY,
                 trace_id=trace_id,
             )
             route = "live"

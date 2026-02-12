@@ -65,6 +65,9 @@ MIN_VALIDATIONS_FOR_STRONG_ADVICE = 2
 MAX_ADVICE_ITEMS = 8  # Raised from 5 for complex tasks
 ADVICE_CACHE_TTL_SECONDS = 120  # 2 minutes (lowered from 5 for fresher advice)
 MIN_RANK_SCORE = 0.35  # Drop advice below this after ranking — prefer fewer, higher-quality items
+MIND_MAX_STALE_SECONDS = float(os.environ.get("SPARK_ADVISOR_MIND_MAX_STALE_S", "0"))
+MIND_STALE_ALLOW_IF_EMPTY = os.environ.get("SPARK_ADVISOR_MIND_STALE_ALLOW_IF_EMPTY", "1") != "0"
+MIND_MIN_SALIENCE = float(os.environ.get("SPARK_ADVISOR_MIND_MIN_SALIENCE", "0.5"))
 RETRIEVAL_ROUTE_LOG = ADVISOR_DIR / "retrieval_router.jsonl"
 RETRIEVAL_ROUTE_LOG_MAX = 800
 
@@ -170,6 +173,29 @@ DEFAULT_HIGH_RISK_HINTS = (
 )
 
 
+def _parse_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_iso_ts(value: Any) -> Optional[float]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return float(datetime.fromisoformat(text).timestamp())
+    except Exception:
+        return None
+
+
 def _load_advisor_config() -> None:
     """Load advisor tuneables from ~/.spark/tuneables.json → "advisor" section.
 
@@ -178,6 +204,7 @@ def _load_advisor_config() -> None:
     """
     global MIN_RELIABILITY_FOR_ADVICE, MIN_VALIDATIONS_FOR_STRONG_ADVICE
     global MAX_ADVICE_ITEMS, ADVICE_CACHE_TTL_SECONDS, MIN_RANK_SCORE
+    global MIND_MAX_STALE_SECONDS, MIND_STALE_ALLOW_IF_EMPTY, MIND_MIN_SALIENCE
     try:
         tuneables = Path.home() / ".spark" / "tuneables.json"
         if not tuneables.exists():
@@ -200,6 +227,15 @@ def _load_advisor_config() -> None:
             ADVICE_CACHE_TTL_SECONDS = int(cfg["cache_ttl"])
         if "min_rank_score" in cfg:
             MIN_RANK_SCORE = float(cfg["min_rank_score"])
+        if "mind_max_stale_s" in cfg:
+            MIND_MAX_STALE_SECONDS = max(0.0, float(cfg["mind_max_stale_s"] or 0.0))
+        if "mind_stale_allow_if_empty" in cfg:
+            MIND_STALE_ALLOW_IF_EMPTY = _parse_bool(
+                cfg.get("mind_stale_allow_if_empty"),
+                MIND_STALE_ALLOW_IF_EMPTY,
+            )
+        if "mind_min_salience" in cfg:
+            MIND_MIN_SALIENCE = max(0.0, min(1.0, float(cfg["mind_min_salience"])))
     except Exception:
         pass  # Fail silently — keep hard-coded defaults
 
@@ -583,6 +619,7 @@ class SparkAdvisor:
         context: str,
         tool_input: Optional[Dict[str, Any]] = None,
         task_context: str = "",
+        include_mind: bool = False,
     ) -> str:
         """Generate stable cache key with collision-resistant hashing."""
         keys = ("command", "file_path", "path", "url", "pattern", "query")
@@ -597,6 +634,7 @@ class SparkAdvisor:
             "context": (context or "").strip().lower(),
             "task_context": (task_context or "").strip().lower(),
             "input_hint": hint,
+            "include_mind": bool(include_mind),
         }
         encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         digest = hashlib.sha1(encoded.encode("utf-8", errors="replace")).hexdigest()[:16]
@@ -835,6 +873,30 @@ class SparkAdvisor:
             return insights
         return {key: insight for _, key, insight in selected}
 
+    def _mind_retrieval_allowed(self, include_mind: bool, pre_mind_count: int) -> bool:
+        """Gate Mind retrieval for freshness while preserving empty-result fallback."""
+        if not include_mind or not HAS_REQUESTS or self.mind is None:
+            return False
+        if MIND_MAX_STALE_SECONDS <= 0:
+            return True
+
+        stats = {}
+        try:
+            if hasattr(self.mind, "get_stats"):
+                stats = self.mind.get_stats() or {}
+        except Exception:
+            # Don't block retrieval if stats are temporarily unavailable.
+            return True
+
+        last_sync_ts = _parse_iso_ts(stats.get("last_sync"))
+        if last_sync_ts is None:
+            return bool(MIND_STALE_ALLOW_IF_EMPTY and pre_mind_count <= 0)
+
+        age_s = max(0.0, time.time() - last_sync_ts)
+        if age_s <= MIND_MAX_STALE_SECONDS:
+            return True
+        return bool(MIND_STALE_ALLOW_IF_EMPTY and pre_mind_count <= 0)
+
     # ============= Core Advice Generation =============
 
     def advise(
@@ -893,6 +955,7 @@ class SparkAdvisor:
             context_raw,
             tool_input=tool_input,
             task_context=task_context,
+            include_mind=include_mind,
         )
         cached = self._get_cached_advice(cache_key)
         if cached:
@@ -910,7 +973,7 @@ class SparkAdvisor:
         advice_list.extend(self._get_chip_advice(context))
 
         # 3. Query Mind if available
-        if include_mind and HAS_REQUESTS:
+        if self._mind_retrieval_allowed(include_mind=include_mind, pre_mind_count=len(advice_list)):
             advice_list.extend(self._get_mind_advice(context))
 
         # 4. Get tool-specific learnings
@@ -1430,7 +1493,7 @@ class SparkAdvisor:
                 content = mem.get("content", "")
                 salience = mem.get("salience", 0.5)
 
-                if salience < 0.5:
+                if salience < MIND_MIN_SALIENCE:
                     continue
                 if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(content):
                     continue
@@ -2530,10 +2593,17 @@ def advise_on_tool(
     tool_name: str,
     tool_input: Dict = None,
     context: str = "",
+    include_mind: bool = True,
     trace_id: Optional[str] = None,
 ) -> List[Advice]:
     """Get advice before using a tool."""
-    return get_advisor().advise(tool_name, tool_input or {}, context, trace_id=trace_id)
+    return get_advisor().advise(
+        tool_name,
+        tool_input or {},
+        context,
+        include_mind=include_mind,
+        trace_id=trace_id,
+    )
 
 
 def get_quick_advice(tool_name: str) -> Optional[str]:

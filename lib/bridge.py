@@ -506,13 +506,13 @@ def generate_active_context(query: Optional[str] = None) -> str:
     if contextual:
         lines.append("## Relevant Right Now")
         for item in contextual:
-            src = item.get("source")
-            cat = item.get("category")
+            src = (item.get("source") or "memory").strip().lower()
+            cat = item.get("category") or "memory"
             txt = item.get("text")
             if src == "cognitive":
                 lines.append(f"- [{cat}] {txt}")
             else:
-                lines.append(f"- [mind:{cat}] {txt}")
+                lines.append(f"- [{src}:{cat}] {txt}")
         lines.append("")
 
     if skills:

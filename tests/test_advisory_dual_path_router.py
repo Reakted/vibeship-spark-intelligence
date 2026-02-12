@@ -149,6 +149,43 @@ def test_pre_tool_falls_back_to_live_and_persists_packet(monkeypatch, tmp_path):
     assert status["total_packets"] >= 1
 
 
+def test_pre_tool_live_path_propagates_include_mind_policy(monkeypatch, tmp_path):
+    _patch_state_and_store(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(engine, "INCLUDE_MIND_IN_MEMORY", False)
+    monkeypatch.setattr("lib.advisory_gate.evaluate", _allow_all_gate)
+    monkeypatch.setattr(
+        "lib.advisory_memory_fusion.build_memory_bundle",
+        lambda **kwargs: {
+            "memory_absent_declared": False,
+            "sources": {"cognitive": {"count": 1}},
+        },
+    )
+    capture = {"include_mind": None}
+
+    def _live_advice(*_args, **kwargs):
+        capture["include_mind"] = kwargs.get("include_mind")
+        return [
+            Advice(
+                advice_id="live-a2",
+                insight_key="k2",
+                text="Live guidance with policy.",
+                confidence=0.8,
+                source="advisor",
+                context_match=0.8,
+                reason="test",
+            )
+        ]
+
+    monkeypatch.setattr("lib.advisor.advise_on_tool", _live_advice)
+    monkeypatch.setattr("lib.advisory_synthesizer.synthesize", lambda *a, **k: "Live synthesized guidance.")
+    monkeypatch.setattr("lib.advisory_emitter.emit_advisory", lambda gate_result, synthesized_text, advice_items=None: True)
+
+    text = engine.on_pre_tool("s2b", "Read", {"file_path": "y.py"})
+    assert text.startswith("Live synthesized guidance.")
+    assert capture["include_mind"] is False
+
+
 def test_on_user_prompt_creates_baseline_and_prefetch_job(monkeypatch, tmp_path):
     _patch_state_and_store(monkeypatch, tmp_path)
 
