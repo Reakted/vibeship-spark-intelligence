@@ -22,6 +22,9 @@ CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
 MERGE_STATE_FILE = Path.home() / ".spark" / "chip_merge_state.json"
 LOW_QUALITY_COOLDOWN_S = 4 * 3600
 MAX_REJECTED_TRACKING = 2000
+DUPLICATE_CHURN_RATIO = 0.8
+DUPLICATE_CHURN_MIN_PROCESSED = 10
+DUPLICATE_CHURN_COOLDOWN_S = 30 * 60
 
 
 # Map chip domains to cognitive categories
@@ -59,18 +62,37 @@ DOMAIN_TO_CATEGORY = {
 def _load_merge_state() -> Dict[str, Any]:
     """Load the merge state tracking which insights have been merged."""
     if not MERGE_STATE_FILE.exists():
-        return {"merged_hashes": [], "last_merge": None, "rejected_low_quality": {}}
+        return {
+            "merged_hashes": [],
+            "last_merge": None,
+            "rejected_low_quality": {},
+            "duplicate_churn_until": 0.0,
+        }
     try:
         state = json.loads(MERGE_STATE_FILE.read_text(encoding="utf-8"))
         if not isinstance(state, dict):
-            return {"merged_hashes": [], "last_merge": None, "rejected_low_quality": {}}
+            return {
+                "merged_hashes": [],
+                "last_merge": None,
+                "rejected_low_quality": {},
+                "duplicate_churn_until": 0.0,
+            }
         if not isinstance(state.get("merged_hashes"), list):
             state["merged_hashes"] = []
         if not isinstance(state.get("rejected_low_quality"), dict):
             state["rejected_low_quality"] = {}
+        try:
+            state["duplicate_churn_until"] = float(state.get("duplicate_churn_until") or 0.0)
+        except Exception:
+            state["duplicate_churn_until"] = 0.0
         return state
     except Exception:
-        return {"merged_hashes": [], "last_merge": None, "rejected_low_quality": {}}
+        return {
+            "merged_hashes": [],
+            "last_merge": None,
+            "rejected_low_quality": {},
+            "duplicate_churn_until": 0.0,
+        }
 
 
 def _save_merge_state(state: Dict[str, Any]):
@@ -220,8 +242,19 @@ def merge_chip_insights(
         "skipped_low_quality": 0,
         "skipped_low_quality_cooldown": 0,
         "skipped_duplicate": 0,
+        "duplicate_ratio": 0.0,
+        "throttled_duplicate_churn": 0,
+        "throttle_remaining_s": 0,
+        "throttle_active": False,
         "by_chip": {},
     }
+    churn_until = float(state.get("duplicate_churn_until", 0.0) or 0.0)
+    if not dry_run and churn_until > now_ts:
+        stats["throttled_duplicate_churn"] = 1
+        stats["throttle_remaining_s"] = int(max(0.0, churn_until - now_ts))
+        state["last_stats"] = stats
+        _save_merge_state(state)
+        return stats
 
     cog = get_cognitive_learner()
     chip_insights = load_chip_insights(limit=limit)
@@ -307,6 +340,17 @@ def merge_chip_insights(
 
     # Save state
     if not dry_run:
+        duplicate_ratio = stats["skipped_duplicate"] / max(stats["processed"], 1)
+        stats["duplicate_ratio"] = round(float(duplicate_ratio), 3)
+        if (
+            stats["processed"] >= DUPLICATE_CHURN_MIN_PROCESSED
+            and stats["merged"] == 0
+            and duplicate_ratio >= DUPLICATE_CHURN_RATIO
+        ):
+            state["duplicate_churn_until"] = now_ts + DUPLICATE_CHURN_COOLDOWN_S
+            stats["throttle_active"] = True
+        elif churn_until <= now_ts:
+            state["duplicate_churn_until"] = 0.0
         state["merged_hashes"] = list(merged_hashes)[-1000:]  # Keep last 1000
         state["rejected_low_quality"] = _prune_rejected_state(rejected_low_quality, now_ts)
         state["last_merge"] = datetime.now().isoformat()

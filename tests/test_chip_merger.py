@@ -81,3 +81,48 @@ def test_low_quality_cooldown_suppresses_repeat_churn(tmp_path, monkeypatch):
     assert first["skipped_low_quality"] == 1
     assert second["skipped_low_quality"] == 0
     assert second["skipped_low_quality_cooldown"] == 1
+
+
+def test_duplicate_churn_throttle_skips_repeated_cycles(tmp_path, monkeypatch):
+    chip_dir = tmp_path / "chip_insights"
+    state_file = tmp_path / "chip_merge_state.json"
+    monkeypatch.setattr(cm, "CHIP_INSIGHTS_DIR", chip_dir)
+    monkeypatch.setattr(cm, "MERGE_STATE_FILE", state_file)
+    monkeypatch.setattr(cm, "get_cognitive_learner", lambda: _DummyCog())
+    monkeypatch.setattr(cm, "record_exposures", lambda *args, **kwargs: 0)
+
+    text = "Use contract tests before broad refactors"
+    sig = cm._hash_insight("bench_core", text)
+    state_file.write_text(
+        json.dumps(
+            {
+                "merged_hashes": [sig],
+                "last_merge": None,
+                "rejected_low_quality": {},
+                "duplicate_churn_until": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    rows = []
+    now = datetime.now(timezone.utc)
+    for i in range(12):
+        rows.append(
+            {
+                "chip_id": "bench_core",
+                "content": text,
+                "confidence": 0.95,
+                "timestamp": (now - timedelta(seconds=i)).isoformat(),
+                "captured_data": {"quality_score": {"total": 0.95}},
+            }
+        )
+    _write_rows(chip_dir / "bench_core.jsonl", rows)
+
+    first = cm.merge_chip_insights(limit=20, dry_run=False)
+    second = cm.merge_chip_insights(limit=20, dry_run=False)
+
+    assert first["processed"] >= 10
+    assert first["merged"] == 0
+    assert first["throttle_active"] is True
+    assert second["throttled_duplicate_churn"] == 1
+    assert second["processed"] == 0
