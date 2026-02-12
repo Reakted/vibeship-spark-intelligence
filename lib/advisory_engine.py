@@ -195,17 +195,59 @@ def _packet_to_advice(packet: Dict[str, Any]) -> List[Any]:
 
 
 def _advice_to_rows(advice_items: List[Any], max_rows: int = 6) -> List[Dict[str, Any]]:
+    return _advice_to_rows_with_proof(advice_items, trace_id=None, max_rows=max_rows)
+
+
+def _proof_refs_for_advice(item: Any, trace_id: Optional[str]) -> Dict[str, Any]:
+    advice_id = str(getattr(item, "advice_id", "") or "")
+    insight_key = str(getattr(item, "insight_key", "") or "")
+    source = str(getattr(item, "source", "advisor") or "advisor")
+    reason = str(getattr(item, "reason", "") or "").strip()
+    refs: Dict[str, Any] = {
+        "advice_id": advice_id,
+        "insight_key": insight_key,
+        "source": source,
+    }
+    if trace_id:
+        refs["trace_id"] = str(trace_id)
+    if reason:
+        refs["reason"] = reason[:240]
+    return refs
+
+
+def _evidence_hash_for_row(*, advice_text: str, proof_refs: Dict[str, Any]) -> str:
+    raw = {
+        "text": str(advice_text or "").strip().lower(),
+        "advice_id": str(proof_refs.get("advice_id") or ""),
+        "insight_key": str(proof_refs.get("insight_key") or ""),
+        "source": str(proof_refs.get("source") or ""),
+        "trace_id": str(proof_refs.get("trace_id") or ""),
+    }
+    blob = json.dumps(raw, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha1(blob.encode("utf-8", errors="ignore")).hexdigest()[:20]
+
+
+def _advice_to_rows_with_proof(
+    advice_items: List[Any],
+    *,
+    trace_id: Optional[str],
+    max_rows: int = 6,
+) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for item in advice_items[:max_rows]:
+        text = str(getattr(item, "text", "") or "")
+        proof_refs = _proof_refs_for_advice(item, trace_id=trace_id)
         rows.append(
             {
                 "advice_id": str(getattr(item, "advice_id", "") or f"aid_{len(rows)}"),
                 "insight_key": str(getattr(item, "insight_key", "") or ""),
-                "text": str(getattr(item, "text", "") or ""),
+                "text": text,
                 "confidence": float(getattr(item, "confidence", 0.5) or 0.5),
                 "source": str(getattr(item, "source", "advisor") or "advisor"),
                 "context_match": float(getattr(item, "context_match", 0.5) or 0.5),
                 "reason": str(getattr(item, "reason", "") or ""),
+                "proof_refs": proof_refs,
+                "evidence_hash": _evidence_hash_for_row(advice_text=text, proof_refs=proof_refs),
             }
         )
     return rows
@@ -555,7 +597,10 @@ def on_pre_tool(
                     task_plane=task_plane,
                     advisory_text=synth_text or _baseline_text(intent_family),
                     source_mode="live_ai" if synth_text else "live_deterministic",
-                    advice_items=_advice_to_rows(emitted_advice or advice_items),
+                    advice_items=_advice_to_rows_with_proof(
+                        emitted_advice or advice_items,
+                        trace_id=trace_id,
+                    ),
                     lineage={
                         "sources": lineage_sources,
                         "memory_absent_declared": bool(memory_bundle.get("memory_absent_declared")),

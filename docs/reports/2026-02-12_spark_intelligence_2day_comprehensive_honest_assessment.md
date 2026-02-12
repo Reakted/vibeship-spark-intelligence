@@ -178,17 +178,22 @@ Net: the loop is operational and improving, but quality reliability is constrain
 - `lib/advisory_engine.py`
 - `lib/advisory_state.py`
 
-6. Added taxonomy + dedupe/retrieval tests:
+6. Added evidence-first advisory payload fields:
+- `lib/advisory_engine.py` now writes `proof_refs` + `evidence_hash` into packet `advice_items`.
+
+7. Added taxonomy + dedupe/retrieval/evidence tests:
 - `tests/test_error_taxonomy.py`
 - `tests/test_semantic_retriever.py`
 - `tests/test_advisory_engine_dedupe.py`
+- `tests/test_advisory_engine_evidence.py`
 
-7. Validation runs:
+8. Validation runs:
 - `python -m pytest tests/test_semantic_retriever.py tests/test_memory_retrieval_ab.py -q`
 - `python -m pytest tests/test_advisory_engine_dedupe.py tests/test_advisor_effectiveness.py tests/test_advisory_packet_store.py tests/test_error_taxonomy.py tests/test_memory_retrieval_ab.py tests/test_semantic_retriever.py -q`
-- Result: `27 passed` on latest targeted run (known Windows pytest atexit temp-permission warning remains after success).
+- `python -m pytest tests/test_advisory_engine_evidence.py tests/test_advisory_engine_dedupe.py tests/test_advisory_packet_store.py tests/test_advisor_effectiveness.py -q`
+- Result: `21 passed` on latest advisory/evidence run (known Windows pytest atexit temp-permission warning remains after success).
 
-8. Live retrieval rerun artifacts:
+9. Live retrieval rerun artifacts:
 - `benchmarks/out/memory_retrieval_ab_real_user_2026_02_12_default_live_refresh_report.md`
 - `benchmarks/out/memory_retrieval_ab_real_user_2026_02_12_relaxed_live_refresh_report.md`
 - `benchmarks/out/memory_retrieval_ab_real_user_2026_02_12_default_after_rescue_report.md`

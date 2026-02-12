@@ -170,6 +170,10 @@ Acceptance:
 Owner:
 - Advisory engine + packet store + formatter maintainers.
 
+Status update (executed now):
+- advisory text-fingerprint cooldown suppression shipped in engine/state.
+- packet advice rows now include `proof_refs` + `evidence_hash` fields for grounded payloads.
+
 ## Phase 3 (72h): UI transparency (what users asked for)
 Goal: user can instantly see live/fallback/blocked state.
 
