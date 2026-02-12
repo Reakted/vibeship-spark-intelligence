@@ -47,6 +47,7 @@ Theory quality labels:
 Realism runner produces:
 - `high_value_rate`
 - `harmful_emit_rate`
+- `unsolicited_emit_rate`
 - `critical_miss_rate`
 - `source_alignment_rate`
 - `theory_discrimination_rate`
@@ -94,7 +95,8 @@ Multi-domain matrix cadence (holistic benching):
 ```bash
 python scripts/run_advisory_realism_domain_matrix.py \
   --cases benchmarks/data/advisory_realism_eval_multidomain_v1.json \
-  --force-live
+  --force-live \
+  --save-domain-reports
 ```
 
 3. Tune profile candidates with sweeper if needed:

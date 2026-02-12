@@ -1001,6 +1001,8 @@ def on_pre_tool(
                     fragments.append(text)
             if fragments:
                 effective_text = " ".join(fragments)
+        effective_action_meta = _ensure_actionability(effective_text, tool_name, task_plane) if emitted else {"text": effective_text, "added": False, "command": ""}
+        effective_text = str(effective_action_meta.get("text") or effective_text)
         if emitted:
             shown_ids = [d.advice_id for d in gate_result.emitted]
             mark_advice_shown(state, shown_ids)
@@ -1083,6 +1085,8 @@ def on_pre_tool(
                 "advice_source_counts": emitted_advice_source_counts or advice_source_counts,
                 "actionability_added": bool(action_meta.get("added")),
                 "actionability_command": action_meta.get("command"),
+                "effective_actionability_added": bool(effective_action_meta.get("added")),
+                "effective_actionability_command": effective_action_meta.get("command"),
             },
         )
         return effective_text if emitted else None

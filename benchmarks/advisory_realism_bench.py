@@ -193,6 +193,7 @@ def summarize_realism(profile_run: Dict[str, Any], meta_by_case: Dict[str, CaseM
     cross_system_good = 0
     high_value = 0
     harmful_emit = 0
+    unsolicited_emit = 0
     critical_total = 0
     critical_miss = 0
 
@@ -258,7 +259,10 @@ def summarize_realism(profile_run: Dict[str, Any], meta_by_case: Dict[str, CaseM
             high_value += 1
 
         if (not should_emit) and emitted:
-            harmful_emit += 1
+            unsolicited_emit += 1
+            # Count as harmful only when forbidden content leaked.
+            if forbidden_hit_rate > 0.0:
+                harmful_emit += 1
 
         if meta.importance in {"high", "critical"} and should_emit:
             critical_total += 1
@@ -294,6 +298,7 @@ def summarize_realism(profile_run: Dict[str, Any], meta_by_case: Dict[str, CaseM
     realism = {
         "high_value_rate": round(high_value / total, 4),
         "harmful_emit_rate": round(harmful_emit / total, 4),
+        "unsolicited_emit_rate": round(unsolicited_emit / total, 4),
         "critical_miss_rate": round(critical_miss / max(1, critical_total), 4),
         "cross_system_success_rate": round(cross_system_good / max(1, cross_system_total), 4),
         "source_alignment_rate": round(_avg(source_alignment_scores), 4),
@@ -306,6 +311,7 @@ def summarize_realism(profile_run: Dict[str, Any], meta_by_case: Dict[str, CaseM
             "cases": len(rows),
             "high_value": high_value,
             "harmful_emit": harmful_emit,
+            "unsolicited_emit": unsolicited_emit,
             "critical_total": critical_total,
             "critical_miss": critical_miss,
             "cross_system_total": cross_system_total,
@@ -392,6 +398,7 @@ def _report_markdown(report: Dict[str, Any]) -> str:
     lines.append(f"- Objective: `{float(winner.get('objective', 0.0)):.4f}`")
     lines.append(f"- High-value advice rate: `{float(w_realism.get('high_value_rate', 0.0)):.2%}`")
     lines.append(f"- Harmful emit rate: `{float(w_realism.get('harmful_emit_rate', 0.0)):.2%}`")
+    lines.append(f"- Unsolicited emit rate: `{float(w_realism.get('unsolicited_emit_rate', 0.0)):.2%}`")
     lines.append(f"- Critical miss rate: `{float(w_realism.get('critical_miss_rate', 0.0)):.2%}`")
     lines.append(f"- Source alignment rate: `{float(w_realism.get('source_alignment_rate', 0.0)):.2%}`")
     lines.append(f"- Theory discrimination: `{float(w_realism.get('theory_discrimination_rate', 0.0)):.2%}`")

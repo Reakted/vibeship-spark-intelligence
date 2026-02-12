@@ -114,6 +114,7 @@ python benchmarks/advisory_realism_bench.py \
 Realism metrics add:
 - `high_value_rate`: advice that is emitted, actionable, trace-bound, memory-backed, and source-aligned
 - `harmful_emit_rate`: advice emitted when case expects suppression
+- `unsolicited_emit_rate`: emitted on suppression cases even when no forbidden content leaks
 - `critical_miss_rate`: missed emits on high/critical cases
 - `source_alignment_rate`: expected source families (`semantic`, `mind`, `outcomes`, etc.) actually used
 - `theory_discrimination_rate`: good theories surfaced correctly, bad theories suppressed
@@ -152,7 +153,8 @@ Multi-domain matrix run (10+ domain benches in one pass):
 ```bash
 python scripts/run_advisory_realism_domain_matrix.py \
   --cases benchmarks/data/advisory_realism_eval_multidomain_v1.json \
-  --force-live
+  --force-live \
+  --save-domain-reports
 ```
 
 Preview domains without executing benchmarks:
@@ -162,6 +164,11 @@ python scripts/run_advisory_realism_domain_matrix.py \
   --cases benchmarks/data/advisory_realism_eval_multidomain_v1.json \
   --dry-run
 ```
+
+Profile overlays can now tune deeper advisor behavior in benchmark runs:
+- `advisor.retrieval_policy.*` (semantic/lexical routing thresholds)
+- `chip_advice_limit`, `chip_advice_min_score`, `chip_advice_max_files`, `chip_advice_file_tail`
+- `chip_source_boost`
 
 ## Theory Seeding for Controlled Memory Tests
 

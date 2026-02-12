@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import copy
 from pathlib import Path
 
 
@@ -229,3 +230,31 @@ def test_normalize_count_map_collapses_semantic_variants():
     )
     assert out["semantic"] == 4
     assert out["chips"] == 3
+
+
+def test_apply_restore_profile_overrides_retrieval_policy():
+    mod = _load_module()
+    import lib.advisor as advisor_mod
+
+    advisor = advisor_mod.get_advisor()
+    before = copy.deepcopy(getattr(advisor, "retrieval_policy", {}) or {})
+    before_chip_limit = int(getattr(advisor_mod, "CHIP_ADVICE_LIMIT", 4))
+    before_chip_boost = float(getattr(advisor, "_SOURCE_BOOST", {}).get("chip", 1.15))
+    snap = mod._apply_advisor_profile(
+        advisor_mod,
+        {
+            "retrieval_policy": {"semantic_context_min": 0.33, "semantic_lexical_min": 0.07},
+            "chip_advice_limit": 2,
+            "chip_source_boost": 1.4,
+        },
+    )
+    assert advisor.retrieval_policy["semantic_context_min"] == 0.33
+    assert advisor.retrieval_policy["semantic_lexical_min"] == 0.07
+    assert advisor_mod.CHIP_ADVICE_LIMIT == 2
+    assert advisor._SOURCE_BOOST["chip"] == 1.4
+
+    mod._restore_advisor_profile(advisor_mod, snap)
+    assert advisor.retrieval_policy.get("semantic_context_min") == before.get("semantic_context_min")
+    assert advisor.retrieval_policy.get("semantic_lexical_min") == before.get("semantic_lexical_min")
+    assert advisor_mod.CHIP_ADVICE_LIMIT == before_chip_limit
+    assert advisor._SOURCE_BOOST["chip"] == before_chip_boost

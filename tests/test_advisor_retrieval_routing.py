@@ -414,3 +414,32 @@ def test_semantic_route_filters_x_social_insight_for_non_social_query(monkeypatc
 
     advice = advisor._get_semantic_cognitive_advice("Read", "auth token session retrieval failure in production")
     assert advice == []
+
+
+def test_advise_level_domain_filter_blocks_x_social_noise_across_sources(monkeypatch, tmp_path):
+    _patch_advisor_runtime(monkeypatch, tmp_path)
+    advisor = advisor_mod.SparkAdvisor()
+    rows = [
+        advisor_mod.Advice(
+            advice_id="a1",
+            insight_key="chip:x",
+            text="[Chip:x] ALWAYS put multiplier granted on its own line in tweet replies",
+            confidence=0.9,
+            source="chip",
+            context_match=0.9,
+            reason="noise",
+        ),
+        advisor_mod.Advice(
+            advice_id="a2",
+            insight_key="cognitive:y",
+            text="Check auth session bindings before retrieval.",
+            confidence=0.8,
+            source="cognitive",
+            context_match=0.8,
+            reason="relevant",
+        ),
+    ]
+
+    filtered = advisor._filter_cross_domain_advice(rows, "diagnose auth retrieval timeout in production")
+    assert len(filtered) == 1
+    assert filtered[0].insight_key == "cognitive:y"

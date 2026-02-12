@@ -16,6 +16,7 @@ Primary metrics:
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import statistics
 import sys
@@ -271,9 +272,16 @@ def _extract_decision_event(rows: List[Dict[str, Any]], trace_id: str) -> Dict[s
 
 
 def _apply_advisor_profile(advisor_mod: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    advisor = advisor_mod.get_advisor()
     snap = {
         "MAX_ADVICE_ITEMS": int(getattr(advisor_mod, "MAX_ADVICE_ITEMS", 8)),
         "MIN_RANK_SCORE": float(getattr(advisor_mod, "MIN_RANK_SCORE", 0.35)),
+        "CHIP_ADVICE_LIMIT": int(getattr(advisor_mod, "CHIP_ADVICE_LIMIT", 4)),
+        "CHIP_ADVICE_MIN_SCORE": float(getattr(advisor_mod, "CHIP_ADVICE_MIN_SCORE", 0.7)),
+        "CHIP_ADVICE_MAX_FILES": int(getattr(advisor_mod, "CHIP_ADVICE_MAX_FILES", 6)),
+        "CHIP_ADVICE_FILE_TAIL": int(getattr(advisor_mod, "CHIP_ADVICE_FILE_TAIL", 40)),
+        "CHIP_SOURCE_BOOST": float(getattr(advisor, "_SOURCE_BOOST", {}).get("chip", 1.15)),
+        "RETRIEVAL_POLICY": copy.deepcopy(getattr(advisor, "retrieval_policy", {}) or {}),
     }
     if "max_items" in cfg:
         advisor_mod.MAX_ADVICE_ITEMS = max(1, int(cfg.get("max_items") or snap["MAX_ADVICE_ITEMS"]))
@@ -281,12 +289,41 @@ def _apply_advisor_profile(advisor_mod: Any, cfg: Dict[str, Any]) -> Dict[str, A
         advisor_mod.MAX_ADVICE_ITEMS = max(1, int(cfg.get("max_advice_items") or advisor_mod.MAX_ADVICE_ITEMS))
     if "min_rank_score" in cfg:
         advisor_mod.MIN_RANK_SCORE = max(0.0, min(1.0, float(cfg.get("min_rank_score") or snap["MIN_RANK_SCORE"])))
+    if "chip_advice_limit" in cfg:
+        advisor_mod.CHIP_ADVICE_LIMIT = max(1, int(cfg.get("chip_advice_limit") or snap["CHIP_ADVICE_LIMIT"]))
+    if "chip_advice_min_score" in cfg:
+        advisor_mod.CHIP_ADVICE_MIN_SCORE = max(0.0, min(1.0, float(cfg.get("chip_advice_min_score") or snap["CHIP_ADVICE_MIN_SCORE"])))
+    if "chip_advice_max_files" in cfg:
+        advisor_mod.CHIP_ADVICE_MAX_FILES = max(1, int(cfg.get("chip_advice_max_files") or snap["CHIP_ADVICE_MAX_FILES"]))
+    if "chip_advice_file_tail" in cfg:
+        advisor_mod.CHIP_ADVICE_FILE_TAIL = max(1, int(cfg.get("chip_advice_file_tail") or snap["CHIP_ADVICE_FILE_TAIL"]))
+    if "chip_source_boost" in cfg and hasattr(advisor, "_SOURCE_BOOST"):
+        try:
+            advisor._SOURCE_BOOST["chip"] = max(0.1, min(3.0, float(cfg.get("chip_source_boost") or snap["CHIP_SOURCE_BOOST"])))
+        except Exception:
+            pass
+    policy_overrides = cfg.get("retrieval_policy")
+    if isinstance(policy_overrides, dict):
+        merged_policy = copy.deepcopy(snap["RETRIEVAL_POLICY"])
+        merged_policy.update(policy_overrides)
+        advisor.retrieval_policy = merged_policy
     return snap
 
 
 def _restore_advisor_profile(advisor_mod: Any, snap: Dict[str, Any]) -> None:
+    advisor = advisor_mod.get_advisor()
     advisor_mod.MAX_ADVICE_ITEMS = int(snap.get("MAX_ADVICE_ITEMS", advisor_mod.MAX_ADVICE_ITEMS))
     advisor_mod.MIN_RANK_SCORE = float(snap.get("MIN_RANK_SCORE", advisor_mod.MIN_RANK_SCORE))
+    advisor_mod.CHIP_ADVICE_LIMIT = int(snap.get("CHIP_ADVICE_LIMIT", advisor_mod.CHIP_ADVICE_LIMIT))
+    advisor_mod.CHIP_ADVICE_MIN_SCORE = float(snap.get("CHIP_ADVICE_MIN_SCORE", advisor_mod.CHIP_ADVICE_MIN_SCORE))
+    advisor_mod.CHIP_ADVICE_MAX_FILES = int(snap.get("CHIP_ADVICE_MAX_FILES", advisor_mod.CHIP_ADVICE_MAX_FILES))
+    advisor_mod.CHIP_ADVICE_FILE_TAIL = int(snap.get("CHIP_ADVICE_FILE_TAIL", advisor_mod.CHIP_ADVICE_FILE_TAIL))
+    if hasattr(advisor, "_SOURCE_BOOST"):
+        try:
+            advisor._SOURCE_BOOST["chip"] = float(snap.get("CHIP_SOURCE_BOOST", advisor._SOURCE_BOOST.get("chip", 1.15)))
+        except Exception:
+            pass
+    advisor.retrieval_policy = copy.deepcopy(snap.get("RETRIEVAL_POLICY") or advisor.retrieval_policy)
 
 
 def load_cases(path: Path) -> List[AdvisoryCase]:

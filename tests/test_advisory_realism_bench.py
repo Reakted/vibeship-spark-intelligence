@@ -205,3 +205,39 @@ def test_theory_discrimination_accepts_actionable_corrective_emit_without_phrase
     }
     out = mod.summarize_realism(run, meta)
     assert out["theory_discrimination_rate"] == 1.0
+
+
+def test_unsolicited_emit_not_harmful_when_forbidden_content_not_present():
+    mod = _load_module()
+    meta = {
+        "suppression_case": mod.CaseMeta(
+            case_id="suppression_case",
+            depth_tier="D1",
+            domain="ops",
+            systems=["advisory"],
+            importance="medium",
+            theory_quality="bad",
+            expected_sources=[],
+            forbidden_sources=[],
+        )
+    }
+    run = {
+        "summary": {"score": 0.7, "trace_bound_rate": 1.0},
+        "cases": [
+            {
+                "case_id": "suppression_case",
+                "should_emit": False,
+                "emitted": True,
+                "actionable": True,
+                "trace_bound": True,
+                "memory_utilized": True,
+                "expected_hit_rate": 0.0,
+                "forbidden_hit_rate": 0.0,
+                "score": 0.6,
+                "source_counts": {},
+            }
+        ],
+    }
+    out = mod.summarize_realism(run, meta)
+    assert out["unsolicited_emit_rate"] == 1.0
+    assert out["harmful_emit_rate"] == 0.0

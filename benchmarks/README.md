@@ -184,12 +184,17 @@ Run multi-domain realism matrix (coding/strategy/marketing/ui/social/conversatio
 ```bash
 python scripts/run_advisory_realism_domain_matrix.py \
   --cases benchmarks/data/advisory_realism_eval_multidomain_v1.json \
-  --force-live
+  --force-live \
+  --save-domain-reports
 ```
 
 Matrix outputs:
 - `benchmarks/out/advisory_realism_domain_matrix_report.json`
 - `benchmarks/out/advisory_realism_domain_matrix_report.md`
+- `benchmarks/out/advisory_realism_domain_matrix_domains/*.json|.md` (when `--save-domain-reports`)
+
+Candidate profile overlay with retrieval/chip tuning:
+- `benchmarks/data/advisory_realism_profile_candidates_v2.json`
 
 Operational contract (locked):
 - Primary: `benchmarks/data/advisory_realism_eval_v2.json`

@@ -1035,6 +1035,10 @@ class SparkAdvisor:
         # 10. Get niche intelligence advice
         advice_list.extend(self._get_niche_advice(tool_name, context))
 
+        # Global domain guard: do not let X-social specific learnings leak
+        # into non-social tasks from non-semantic sources (chip/mind/cognitive/etc.).
+        advice_list = self._filter_cross_domain_advice(advice_list, context)
+
         # Sort by relevance (confidence * context_match * effectiveness_boost)
         advice_list = self._rank_advice(advice_list)
 
@@ -1387,6 +1391,17 @@ class SparkAdvisor:
         if not body:
             return False
         return any(marker in body for marker in X_SOCIAL_MARKERS)
+
+    def _filter_cross_domain_advice(self, advice_list: List[Advice], context: str) -> List[Advice]:
+        """Drop cross-domain social advice when the current query is not social."""
+        if self._is_x_social_query(context):
+            return list(advice_list)
+        out: List[Advice] = []
+        for item in advice_list:
+            if self._is_x_social_insight(getattr(item, "text", "")):
+                continue
+            out.append(item)
+        return out
 
     def _lexical_overlap_score(self, query: str, text: str) -> float:
         """Simple lexical overlap score [0..1] for hybrid rerank."""

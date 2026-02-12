@@ -38,6 +38,7 @@ class DomainRun:
     score: float
     high_value_rate: float
     harmful_emit_rate: float
+    unsolicited_emit_rate: float
     critical_miss_rate: float
     source_alignment_rate: float
     theory_discrimination_rate: float
@@ -129,6 +130,7 @@ def _summarize(report: Dict[str, Any], *, domain: str, case_count: int) -> Domai
         score=_safe_float(summary.get("score"), 0.0),
         high_value_rate=_safe_float(realism.get("high_value_rate"), 0.0),
         harmful_emit_rate=_safe_float(realism.get("harmful_emit_rate"), 1.0),
+        unsolicited_emit_rate=_safe_float(realism.get("unsolicited_emit_rate"), 0.0),
         critical_miss_rate=_safe_float(realism.get("critical_miss_rate"), 1.0),
         source_alignment_rate=_safe_float(realism.get("source_alignment_rate"), 0.0),
         theory_discrimination_rate=_safe_float(realism.get("theory_discrimination_rate"), 0.0),
@@ -162,14 +164,14 @@ def _report_markdown(report: Dict[str, Any]) -> str:
     lines.append("")
     lines.append("## Domain Winners")
     lines.append("")
-    lines.append("| Domain | Cases | Winner | Objective | High-Value | Harmful | Source Align | Theory Disc | Gates |")
-    lines.append("|---|---:|---|---:|---:|---:|---:|---:|---|")
+    lines.append("| Domain | Cases | Winner | Objective | High-Value | Harmful | Unsolicited | Source Align | Theory Disc | Gates |")
+    lines.append("|---|---:|---|---:|---:|---:|---:|---:|---:|---|")
     for row in report.get("domains") or []:
         gate_state = "PASS" if bool(row.get("all_gates_pass")) else "FAIL"
         lines.append(
             f"| `{row.get('domain','')}` | {int(row.get('case_count',0))} | `{row.get('winner_profile','')}` | "
             f"{float(row.get('objective',0.0)):.4f} | {float(row.get('high_value_rate',0.0)):.2%} | "
-            f"{float(row.get('harmful_emit_rate',0.0)):.2%} | {float(row.get('source_alignment_rate',0.0)):.2%} | "
+            f"{float(row.get('harmful_emit_rate',0.0)):.2%} | {float(row.get('unsolicited_emit_rate',0.0)):.2%} | {float(row.get('source_alignment_rate',0.0)):.2%} | "
             f"{float(row.get('theory_discrimination_rate',0.0)):.2%} | {gate_state} |"
         )
     lines.append("")
@@ -180,6 +182,7 @@ def _report_markdown(report: Dict[str, Any]) -> str:
     lines.append(f"- Base score: `{float(weighted.get('score', 0.0)):.4f}`")
     lines.append(f"- High-value: `{float(weighted.get('high_value_rate', 0.0)):.2%}`")
     lines.append(f"- Harmful emit: `{float(weighted.get('harmful_emit_rate', 0.0)):.2%}`")
+    lines.append(f"- Unsolicited emit: `{float(weighted.get('unsolicited_emit_rate', 0.0)):.2%}`")
     lines.append(f"- Critical miss: `{float(weighted.get('critical_miss_rate', 0.0)):.2%}`")
     lines.append(f"- Source alignment: `{float(weighted.get('source_alignment_rate', 0.0)):.2%}`")
     lines.append(f"- Theory discrimination: `{float(weighted.get('theory_discrimination_rate', 0.0)):.2%}`")
@@ -208,6 +211,12 @@ def main() -> int:
     ap.add_argument("--min-cases-per-domain", type=int, default=2, help="Only run domains with at least this many cases")
     ap.add_argument("--domains", default="", help="Optional comma-separated domain allow-list")
     ap.add_argument("--dry-run", action="store_true", help="Only print planned domain slices")
+    ap.add_argument(
+        "--save-domain-reports",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Write per-domain realism reports under benchmarks/out/<prefix>_domains",
+    )
     ap.add_argument("--out-prefix", default="advisory_realism_domain_matrix", help="Output file prefix in benchmarks/out")
     args = ap.parse_args()
 
@@ -231,6 +240,11 @@ def main() -> int:
     profiles = _merge_profiles(str(args.profile_file or ""))
     profile_names = [x.strip() for x in str(args.profiles or "").split(",") if x.strip()]
     runs: List[DomainRun] = []
+    out_dir = ROOT / "benchmarks" / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    domain_out_dir = out_dir / f"{args.out_prefix}_domains"
+    if bool(args.save_domain_reports):
+        domain_out_dir.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="advisory_realism_domains_", dir=str(ROOT)) as tmp:
         tmp_dir = Path(tmp)
@@ -250,6 +264,12 @@ def main() -> int:
                 force_live=bool(args.force_live),
                 gates=arb.REALISM_GATES,
             )
+            if bool(args.save_domain_reports):
+                dom_slug = _slug(domain)
+                dom_json = domain_out_dir / f"{dom_slug}_report.json"
+                dom_md = domain_out_dir / f"{dom_slug}_report.md"
+                dom_json.write_text(json.dumps(report, indent=2), encoding="utf-8")
+                dom_md.write_text(arb._report_markdown(report), encoding="utf-8")
             runs.append(_summarize(report, domain=domain, case_count=len(grouped[domain])))
 
     runs_sorted = sorted(runs, key=lambda r: (float(r.objective), float(r.high_value_rate), -float(r.harmful_emit_rate)))
@@ -258,6 +278,7 @@ def main() -> int:
         "score": _weighted_avg(runs, "score"),
         "high_value_rate": _weighted_avg(runs, "high_value_rate"),
         "harmful_emit_rate": _weighted_avg(runs, "harmful_emit_rate"),
+        "unsolicited_emit_rate": _weighted_avg(runs, "unsolicited_emit_rate"),
         "critical_miss_rate": _weighted_avg(runs, "critical_miss_rate"),
         "source_alignment_rate": _weighted_avg(runs, "source_alignment_rate"),
         "theory_discrimination_rate": _weighted_avg(runs, "theory_discrimination_rate"),
@@ -277,8 +298,6 @@ def main() -> int:
         "gap_order": [r.__dict__ for r in runs_sorted],
     }
 
-    out_dir = ROOT / "benchmarks" / "out"
-    out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / f"{args.out_prefix}_report.json"
     md_path = out_dir / f"{args.out_prefix}_report.md"
     json_path.write_text(json.dumps(report, indent=2), encoding="utf-8")

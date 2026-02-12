@@ -1,0 +1,65 @@
+{
+  "baseline": {
+    "advisory_engine": {
+      "advisory_text_repeat_cooldown_s": 7200
+    },
+    "advisory_gate": {
+      "max_emit_per_call": 1,
+      "tool_cooldown_s": 120,
+      "advice_repeat_cooldown_s": 3600
+    },
+    "advisor": {
+      "max_items": 4,
+      "max_advice_items": 4,
+      "min_rank_score": 0.5,
+      "retrieval_policy": {
+        "semantic_context_min": 0.18,
+        "semantic_lexical_min": 0.05,
+        "semantic_strong_override": 0.92,
+        "lexical_weight": 0.32
+      }
+    }
+  },
+  "balanced": {
+    "advisory_engine": {
+      "advisory_text_repeat_cooldown_s": 10800
+    },
+    "advisory_gate": {
+      "max_emit_per_call": 1,
+      "tool_cooldown_s": 180,
+      "advice_repeat_cooldown_s": 7200
+    },
+    "advisor": {
+      "max_items": 3,
+      "max_advice_items": 3,
+      "min_rank_score": 0.58,
+      "retrieval_policy": {
+        "semantic_context_min": 0.2,
+        "semantic_lexical_min": 0.06,
+        "semantic_strong_override": 0.92,
+        "lexical_weight": 0.35
+      }
+    }
+  },
+  "strict": {
+    "advisory_engine": {
+      "advisory_text_repeat_cooldown_s": 12600
+    },
+    "advisory_gate": {
+      "max_emit_per_call": 1,
+      "tool_cooldown_s": 240,
+      "advice_repeat_cooldown_s": 10800
+    },
+    "advisor": {
+      "max_items": 3,
+      "max_advice_items": 3,
+      "min_rank_score": 0.62,
+      "retrieval_policy": {
+        "semantic_context_min": 0.22,
+        "semantic_lexical_min": 0.07,
+        "semantic_strong_override": 0.93,
+        "lexical_weight": 0.38
+      }
+    }
+  }
+}
