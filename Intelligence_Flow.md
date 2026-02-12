@@ -119,6 +119,7 @@ Dashboards and ops:
 4) On packet miss, engine falls back to live advisor retrieval, then gate + synthesis + emit.
    - packet no-emit fallback emission is opt-in (`SPARK_ADVISORY_PACKET_FALLBACK_EMIT=1` or `advisory_engine.packet_fallback_emit_enabled=true`).
    - packet no-emit fallback is additionally rate-guarded (`fallback_rate_guard_enabled`, `fallback_rate_max_ratio`, `fallback_rate_window`) to prevent fallback-heavy advisory loops.
+   - live retrieval now receives the same Mind policy (`include_mind`) as memory fusion, so packet/live paths no longer drift on Mind usage.
 5) Engine builds memory evidence bundle via lib.advisory_memory_fusion and records `memory_absent_declared` when needed.
    - memory fusion filters primitive/tool-error telemetry before ranking evidence.
 6) Engine persists baseline/live packets and enqueues background prefetch jobs from UserPromptSubmit.
@@ -177,6 +178,7 @@ Dashboards and ops:
 2) lib.advisor and lib.bridge (SPARK_CONTEXT) read from Mind for advice/context.
 3) Mind sync is manual via spark sync (lib.mind_bridge.sync_all_to_mind); offline queue stores when Mind is down.
 4) mind_bridge uses per-endpoint timeouts plus health cache/backoff to keep hook paths responsive during Mind outages.
+5) advisor can gate stale Mind reads (`advisor.mind_max_stale_s`) while still allowing Mind as fallback when no other evidence is found (`advisor.mind_stale_allow_if_empty=true`).
 
 ### 2.9 Self-evolution and meta-learning
 - lib/meta_ralph.py: quality gate for observe.py cognitive capture + advisor outcome loop.
@@ -351,8 +353,10 @@ Advisor retrieval router:
 
 Advisor / skills:
 - advisor MIN_RELIABILITY_FOR_ADVICE=0.5, MIN_VALIDATIONS_FOR_STRONG_ADVICE=2, MAX_ADVICE_ITEMS=8, ADVICE_CACHE_TTL_SECONDS=120
+- advisor Mind controls: MIND_MAX_STALE_SECONDS=0 (disabled by default), MIND_STALE_ALLOW_IF_EMPTY=true, MIND_MIN_SALIENCE=0.5
 - skills_router scoring weights (query/name/desc/owns/etc) and limit clamp to 1..10
 - advisor recent-advice lookup is tail-based (bounded by RECENT_ADVICE_MAX_LINES, no full-file scans)
+- advisor cache key now includes `include_mind` to avoid mixed-policy cache reuse.
 Advisory foundation:
 - advisory engine enabled by default (SPARK_ADVISORY_ENGINE=1) with direct-path budget SPARK_ADVISORY_MAX_MS=4000.
 - direct path: packet lookup -> live retrieval fallback -> deterministic/AI synthesis -> stdout emission.
@@ -422,6 +426,9 @@ Advisory:
 - SPARK_ADVISORY_MAX_MS (default "4000")
 - SPARK_ADVISORY_PREFETCH_QUEUE (default "1")
 - SPARK_ADVISORY_INCLUDE_MIND (default "0")
+- SPARK_ADVISOR_MIND_MAX_STALE_S (default "0", disabled)
+- SPARK_ADVISOR_MIND_STALE_ALLOW_IF_EMPTY (default "1")
+- SPARK_ADVISOR_MIND_MIN_SALIENCE (default "0.5")
 - SPARK_ADVISORY_REQUIRE_ACTION (default "1")
 - SPARK_ADVISORY_STALE_S (default "900")
 - SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S (default "1800")

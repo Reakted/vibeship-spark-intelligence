@@ -487,11 +487,14 @@ Tool + Context → Query Memory Banks + Cognitive Insights + Mind → Rank by Re
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `MIN_RELIABILITY_FOR_ADVICE` | **0.5** | **Quality filter.** Only include insights with 50%+ reliability in advice. Lowered from 0.6 for more advice coverage. Wired to `tuneables.json` → `advisor.min_reliability`. |
+| `MIN_RELIABILITY_FOR_ADVICE` | **0.5** | **Quality filter.** Only include insights with 50%+ reliability in advice. Lowered from 0.6 for more advice coverage. Wired to `tuneables.json` -> `advisor.min_reliability`. |
 | `MIN_VALIDATIONS_FOR_STRONG_ADVICE` | **2** | **Strong advice threshold.** Insights validated 2+ times are marked as "strong" advice. Wired to `advisor.min_validations_strong`. |
 | `MAX_ADVICE_ITEMS` | **8** | **Advice limit.** Runtime reads `advisor.max_items`. Keep `advisor.max_advice_items` mirrored for auto-tuner compatibility. |
 | `ADVICE_CACHE_TTL_SECONDS` | **120** | **Cache duration (2 min).** Same query within 2 minutes returns cached advice. Wired to `advisor.cache_ttl` (also reads `values.advice_cache_ttl`). |
-| `MIN_RANK_SCORE` | **0.35** | **Rank cutoff.** Drop advice below this score after ranking — prefer fewer, higher-quality items. Wired to `advisor.min_rank_score`. |
+| `MIN_RANK_SCORE` | **0.35** | **Rank cutoff.** Drop advice below this score after ranking; prefer fewer, higher-quality items. Wired to `advisor.min_rank_score`. |
+| `MIND_MAX_STALE_SECONDS` | **0** | **Mind freshness gate.** `0` disables staleness blocking; positive values block stale Mind retrieval when newer local evidence exists. Wired to `advisor.mind_max_stale_s`. |
+| `MIND_STALE_ALLOW_IF_EMPTY` | **true** | **Cross-session fallback.** If Mind is stale but no other advice exists, still allow Mind retrieval. Wired to `advisor.mind_stale_allow_if_empty`. |
+| `MIND_MIN_SALIENCE` | **0.5** | **Mind quality floor.** Ignore low-salience Mind memories below this threshold. Wired to `advisor.mind_min_salience`. |
 
 Compatibility note:
 - Runtime advisor uses `advisor.max_items`.
@@ -1152,7 +1155,10 @@ This is the active hot-path advisory stack used by hooks:
     "max_items": 5,
     "max_advice_items": 5,
     "cache_ttl": 120,
-    "min_rank_score": 0.35
+    "min_rank_score": 0.35,
+    "mind_max_stale_s": 0,
+    "mind_stale_allow_if_empty": true,
+    "mind_min_salience": 0.5
   },
   "advisory_engine": {
     "enabled": true,
@@ -1261,7 +1267,7 @@ Components fall back to hard-coded defaults when a key is absent.
 | `triggers` | Trigger rules | `enabled`, `rules_file` |
 | `promotion` | Promoter + auto-promotion interval | `adapter_budgets`, `confidence_floor`, `min_age_hours`, `auto_interval_s` |
 | `synthesizer` | Advisory synthesizer | `mode`, `preferred_provider`, `ai_timeout_s`, `cache_ttl_s`, `max_cache_entries` |
-| `advisor` | Advisor | `min_reliability`, `min_validations_strong`, `max_items`, `max_advice_items` (compat), `cache_ttl`, `min_rank_score` |
+| `advisor` | Advisor | `min_reliability`, `min_validations_strong`, `max_items`, `max_advice_items` (compat), `cache_ttl`, `min_rank_score`, `mind_max_stale_s`, `mind_stale_allow_if_empty`, `mind_min_salience` |
 | `advisory_engine` | Predictive advisory orchestration | `enabled`, `max_ms`, `include_mind`, `prefetch_queue_enabled`, `prefetch_inline_enabled`, `prefetch_inline_max_jobs`, `packet_fallback_emit_enabled`, `fallback_rate_guard_enabled`, `fallback_rate_max_ratio`, `fallback_rate_window`, `delivery_stale_s`, `advisory_text_repeat_cooldown_s`, `actionability_enforce` |
 | `advisory_gate` | Advisory emission policy | `max_emit_per_call`, `tool_cooldown_s`, `advice_repeat_cooldown_s`, `warning_threshold`, `note_threshold`, `whisper_threshold` |
 | `advisory_packet_store` | Packet lifecycle + relaxed lookup weighting | `packet_ttl_s`, `max_index_packets`, `relaxed_effectiveness_weight`, `relaxed_low_effectiveness_threshold`, `relaxed_low_effectiveness_penalty` |
