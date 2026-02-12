@@ -211,3 +211,56 @@ def test_pre_tool_packet_no_emit_does_not_fallback_when_disabled(monkeypatch, tm
     row = json.loads(lines[-1])
     assert row["event"] == "no_emit"
     assert row.get("fallback_candidate_blocked") is True
+
+
+def test_pre_tool_packet_fallback_blocked_by_rate_guard(monkeypatch, tmp_path):
+    _patch_state_and_store(monkeypatch, tmp_path)
+
+    pkt = packet_store.build_packet(
+        project_key="proj",
+        session_context_key="dummy",
+        tool_name="Edit",
+        intent_family="emergent_other",
+        task_plane="build_delivery",
+        advisory_text="Use packet guidance.",
+        source_mode="baseline",
+        advice_items=[{"advice_id": "pkt-a1", "text": "Use packet guidance."}],
+        lineage={"sources": ["baseline"], "memory_absent_declared": False},
+    )
+    packet_store.save_packet(pkt)
+
+    monkeypatch.setattr(engine, "PACKET_FALLBACK_EMIT_ENABLED", True)
+    monkeypatch.setattr(
+        engine,
+        "_fallback_guard_allows",
+        lambda: {
+            "allowed": False,
+            "reason": "ratio_exceeded",
+            "ratio": 0.8,
+            "limit": 0.55,
+            "delivered_recent": 20,
+            "window": 80,
+        },
+    )
+    monkeypatch.setattr("lib.advisory_gate.evaluate", _suppress_all_gate)
+    monkeypatch.setattr(
+        "lib.advisory_memory_fusion.build_memory_bundle",
+        lambda **kwargs: {
+            "memory_absent_declared": False,
+            "sources": {"cognitive": {"count": 1}},
+        },
+    )
+    monkeypatch.setattr(
+        "lib.advisory_emitter.emit_advisory",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("emit should not be called")),
+    )
+
+    text = engine.on_pre_tool("s5", "Edit", {"file_path": "x.py"})
+    assert text is None
+
+    lines = engine.ENGINE_LOG.read_text(encoding="utf-8").splitlines()
+    assert lines
+    row = json.loads(lines[-1])
+    assert row["event"] == "no_emit"
+    assert row.get("error_code") == "AE_FALLBACK_RATE_LIMIT"
+    assert row.get("fallback_guard_blocked") is True

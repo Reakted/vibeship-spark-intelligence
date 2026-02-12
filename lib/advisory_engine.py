@@ -23,6 +23,16 @@ INCLUDE_MIND_IN_MEMORY = os.getenv("SPARK_ADVISORY_INCLUDE_MIND", "0") == "1"
 ENABLE_PREFETCH_QUEUE = os.getenv("SPARK_ADVISORY_PREFETCH_QUEUE", "1") != "0"
 ENABLE_INLINE_PREFETCH_WORKER = os.getenv("SPARK_ADVISORY_PREFETCH_INLINE", "1") != "0"
 PACKET_FALLBACK_EMIT_ENABLED = os.getenv("SPARK_ADVISORY_PACKET_FALLBACK_EMIT", "0") == "1"
+FALLBACK_RATE_GUARD_ENABLED = os.getenv("SPARK_ADVISORY_FALLBACK_RATE_GUARD", "1") != "0"
+FALLBACK_RATE_GUARD_MAX_RATIO = float(
+    os.getenv("SPARK_ADVISORY_FALLBACK_RATE_MAX_RATIO", "0.55")
+)
+try:
+    FALLBACK_RATE_GUARD_WINDOW = max(
+        10, int(os.getenv("SPARK_ADVISORY_FALLBACK_RATE_WINDOW", "80") or 80)
+    )
+except Exception:
+    FALLBACK_RATE_GUARD_WINDOW = 80
 MEMORY_SCOPE_DEFAULT = str(os.getenv("SPARK_MEMORY_SCOPE_DEFAULT", "session") or "session").strip() or "session"
 ACTIONABILITY_ENFORCE = os.getenv("SPARK_ADVISORY_REQUIRE_ACTION", "1") != "0"
 DELIVERY_STALE_SECONDS = float(os.getenv("SPARK_ADVISORY_STALE_S", "900"))
@@ -56,6 +66,9 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     global ENABLE_PREFETCH_QUEUE
     global ENABLE_INLINE_PREFETCH_WORKER
     global PACKET_FALLBACK_EMIT_ENABLED
+    global FALLBACK_RATE_GUARD_ENABLED
+    global FALLBACK_RATE_GUARD_MAX_RATIO
+    global FALLBACK_RATE_GUARD_WINDOW
     global INLINE_PREFETCH_MAX_JOBS
     global ACTIONABILITY_ENFORCE
     global DELIVERY_STALE_SECONDS
@@ -98,6 +111,32 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
             PACKET_FALLBACK_EMIT_ENABLED,
         )
         applied.append("packet_fallback_emit_enabled")
+
+    if "fallback_rate_guard_enabled" in cfg:
+        FALLBACK_RATE_GUARD_ENABLED = _parse_bool(
+            cfg.get("fallback_rate_guard_enabled"),
+            FALLBACK_RATE_GUARD_ENABLED,
+        )
+        applied.append("fallback_rate_guard_enabled")
+
+    if "fallback_rate_max_ratio" in cfg:
+        try:
+            FALLBACK_RATE_GUARD_MAX_RATIO = max(
+                0.0,
+                min(1.0, float(cfg.get("fallback_rate_max_ratio") or FALLBACK_RATE_GUARD_MAX_RATIO)),
+            )
+            applied.append("fallback_rate_max_ratio")
+        except Exception:
+            warnings.append("invalid_fallback_rate_max_ratio")
+
+    if "fallback_rate_window" in cfg:
+        try:
+            FALLBACK_RATE_GUARD_WINDOW = max(
+                10, min(500, int(cfg.get("fallback_rate_window") or FALLBACK_RATE_GUARD_WINDOW))
+            )
+            applied.append("fallback_rate_window")
+        except Exception:
+            warnings.append("invalid_fallback_rate_window")
 
     if "prefetch_inline_max_jobs" in cfg:
         try:
@@ -144,6 +183,9 @@ def get_engine_config() -> Dict[str, Any]:
         "prefetch_queue_enabled": bool(ENABLE_PREFETCH_QUEUE),
         "prefetch_inline_enabled": bool(ENABLE_INLINE_PREFETCH_WORKER),
         "packet_fallback_emit_enabled": bool(PACKET_FALLBACK_EMIT_ENABLED),
+        "fallback_rate_guard_enabled": bool(FALLBACK_RATE_GUARD_ENABLED),
+        "fallback_rate_max_ratio": float(FALLBACK_RATE_GUARD_MAX_RATIO),
+        "fallback_rate_window": int(FALLBACK_RATE_GUARD_WINDOW),
         "prefetch_inline_max_jobs": int(INLINE_PREFETCH_MAX_JOBS),
         "actionability_enforce": bool(ACTIONABILITY_ENFORCE),
         "delivery_stale_s": float(DELIVERY_STALE_SECONDS),
@@ -485,6 +527,80 @@ def _derive_delivery_badge(
     }
 
 
+def _fallback_guard_allows() -> Dict[str, Any]:
+    if not FALLBACK_RATE_GUARD_ENABLED:
+        return {
+            "allowed": True,
+            "reason": "guard_disabled",
+            "ratio": None,
+            "limit": float(FALLBACK_RATE_GUARD_MAX_RATIO),
+            "delivered_recent": 0,
+            "window": int(FALLBACK_RATE_GUARD_WINDOW),
+        }
+    if FALLBACK_RATE_GUARD_WINDOW <= 0:
+        return {
+            "allowed": True,
+            "reason": "invalid_window",
+            "ratio": None,
+            "limit": float(FALLBACK_RATE_GUARD_MAX_RATIO),
+            "delivered_recent": 0,
+            "window": int(FALLBACK_RATE_GUARD_WINDOW),
+        }
+
+    fallback_count = 0
+    emitted_count = 0
+    try:
+        if ENGINE_LOG.exists():
+            lines = ENGINE_LOG.read_text(encoding="utf-8").splitlines()[-FALLBACK_RATE_GUARD_WINDOW:]
+        else:
+            lines = []
+        for line in lines:
+            raw = (line or "").strip()
+            if not raw:
+                continue
+            try:
+                row = json.loads(raw)
+            except Exception:
+                continue
+            event = str(row.get("event") or "")
+            if event == "fallback_emit":
+                fallback_count += 1
+            elif event == "emitted":
+                emitted_count += 1
+    except Exception:
+        return {
+            "allowed": True,
+            "reason": "read_failed",
+            "ratio": None,
+            "limit": float(FALLBACK_RATE_GUARD_MAX_RATIO),
+            "delivered_recent": 0,
+            "window": int(FALLBACK_RATE_GUARD_WINDOW),
+        }
+
+    delivered = fallback_count + emitted_count
+    min_sample = max(10, int(FALLBACK_RATE_GUARD_WINDOW * 0.25))
+    if delivered < min_sample:
+        return {
+            "allowed": True,
+            "reason": "insufficient_sample",
+            "ratio": None,
+            "limit": float(FALLBACK_RATE_GUARD_MAX_RATIO),
+            "delivered_recent": int(delivered),
+            "window": int(FALLBACK_RATE_GUARD_WINDOW),
+        }
+
+    ratio = float(fallback_count) / float(max(delivered, 1))
+    allowed = ratio <= float(FALLBACK_RATE_GUARD_MAX_RATIO)
+    return {
+        "allowed": allowed,
+        "reason": "ok" if allowed else "ratio_exceeded",
+        "ratio": ratio,
+        "limit": float(FALLBACK_RATE_GUARD_MAX_RATIO),
+        "delivered_recent": int(delivered),
+        "window": int(FALLBACK_RATE_GUARD_WINDOW),
+    }
+
+
 def on_pre_tool(
     session_id: str,
     tool_name: str,
@@ -660,6 +776,33 @@ def on_pre_tool(
             # Emit the fallback deterministic text
             action_meta = _ensure_actionability(fallback_text, tool_name, task_plane)
             fallback_text = str(action_meta.get("text") or fallback_text)
+            fallback_guard = _fallback_guard_allows()
+            if not fallback_guard.get("allowed"):
+                save_state(state)
+                _log_engine_event(
+                    "no_emit",
+                    tool_name,
+                    len(advice_items),
+                    0,
+                    start_ms,
+                    extra={
+                        **_diag(route),
+                        "route": route,
+                        "intent_family": intent_family,
+                        "task_plane": task_plane,
+                        "packet_id": packet_id,
+                        "stage_ms": stage_ms,
+                        "delivery_mode": "none",
+                        "error_kind": "policy",
+                        "error_code": "AE_FALLBACK_RATE_LIMIT",
+                        "fallback_guard_blocked": True,
+                        "fallback_rate_recent": fallback_guard.get("ratio"),
+                        "fallback_rate_limit": fallback_guard.get("limit"),
+                        "fallback_delivered_recent": fallback_guard.get("delivered_recent"),
+                        "fallback_window": fallback_guard.get("window"),
+                    },
+                )
+                return None
             repeat_meta = _duplicate_repeat_state(state, fallback_text)
             if repeat_meta["repeat"]:
                 save_state(state)
