@@ -20,11 +20,52 @@ Optional:
 """
 
 import argparse
+import atexit
+import os
 import time
 import threading
+from pathlib import Path
 
 from lib.bridge_cycle import run_bridge_cycle, write_bridge_heartbeat
 from lib.diagnostics import setup_component_logging, log_exception
+
+
+def _pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+
+
+def _acquire_single_instance_lock(name: str) -> Path | None:
+    lock_dir = Path.home() / ".spark" / "pids"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_file = lock_dir / f"{name}.lock"
+    pid = os.getpid()
+
+    if lock_file.exists():
+        try:
+            existing_pid = int(lock_file.read_text(encoding="utf-8").strip())
+            if existing_pid != pid and _pid_is_alive(existing_pid):
+                print(f"[SPARK] {name} already running with pid {existing_pid}; exiting duplicate instance")
+                return None
+        except Exception:
+            pass
+
+    lock_file.write_text(str(pid), encoding="utf-8")
+
+    def _cleanup_lock() -> None:
+        try:
+            if lock_file.exists() and lock_file.read_text(encoding="utf-8").strip() == str(pid):
+                lock_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    atexit.register(_cleanup_lock)
+    return lock_file
 
 
 def main():
@@ -35,6 +76,9 @@ def main():
     args = ap.parse_args()
 
     setup_component_logging("bridge_worker")
+    lock_file = _acquire_single_instance_lock("bridge_worker")
+    if lock_file is None:
+        return
 
     stop_event = threading.Event()
 
