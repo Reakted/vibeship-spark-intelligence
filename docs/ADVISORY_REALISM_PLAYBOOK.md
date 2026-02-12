@@ -17,8 +17,10 @@ This playbook turns advisory tuning into a measurable operating cycle.
 
 - `benchmarks/advisory_realism_bench.py`
 - `benchmarks/data/advisory_realism_eval_v1.json`
+- `benchmarks/data/advisory_realism_eval_multidomain_v1.json`
 - `benchmarks/data/advisory_theory_catalog_v1.json`
 - `benchmarks/seed_advisory_theories.py`
+- `scripts/run_advisory_realism_domain_matrix.py`
 
 Supporting extension:
 - `benchmarks/advisory_quality_ab.py` now includes per-case `source_counts` in output.
@@ -88,6 +90,13 @@ Single command:
 python scripts/run_advisory_realism_contract.py
 ```
 
+Multi-domain matrix cadence (holistic benching):
+```bash
+python scripts/run_advisory_realism_domain_matrix.py \
+  --cases benchmarks/data/advisory_realism_eval_multidomain_v1.json \
+  --force-live
+```
+
 3. Tune profile candidates with sweeper if needed:
 ```bash
 python benchmarks/advisory_profile_sweeper.py \
@@ -117,6 +126,7 @@ This keeps Spark optimization tied to outcomes, not feature volume.
 ## Daily/Per-Shift Cadence
 
 - Run realism bench at least once per day.
+- Run multidomain matrix at least 2-3 times per week (or after major tuning shifts).
 - If major tuneables changed, run before and after.
 - Log winner profile + gate pass/fail into `docs/reports/`.
 - Reject profile changes that improve base score but regress harmful emit or critical miss.

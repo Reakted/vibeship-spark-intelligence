@@ -179,6 +179,18 @@ Realism outputs:
 - `benchmarks/out/advisory_realism_bench_report.json`
 - `benchmarks/out/advisory_realism_bench_report.md`
 
+Run multi-domain realism matrix (coding/strategy/marketing/ui/social/conversation/prompting/research/memory):
+
+```bash
+python scripts/run_advisory_realism_domain_matrix.py \
+  --cases benchmarks/data/advisory_realism_eval_multidomain_v1.json \
+  --force-live
+```
+
+Matrix outputs:
+- `benchmarks/out/advisory_realism_domain_matrix_report.json`
+- `benchmarks/out/advisory_realism_domain_matrix_report.md`
+
 Operational contract (locked):
 - Primary: `benchmarks/data/advisory_realism_eval_v2.json`
 - Shadow: `benchmarks/data/advisory_realism_eval_v1.json`

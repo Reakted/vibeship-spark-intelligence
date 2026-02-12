@@ -18,12 +18,14 @@ This benchmark is separate from Forge/Depth and focused only on
 - Seed scenarios: `benchmarks/data/advisory_quality_eval_seed.json`
 - Extended scenarios: `benchmarks/data/advisory_quality_eval_extended.json`
 - Realism scenarios: `benchmarks/data/advisory_realism_eval_v1.json`
+- Multidomain realism scenarios: `benchmarks/data/advisory_realism_eval_multidomain_v1.json`
 - Theory catalog: `benchmarks/data/advisory_theory_catalog_v1.json`
 - Theory seeder: `benchmarks/seed_advisory_theories.py`
 - Real-case template: `benchmarks/data/advisory_quality_eval_real_user_template.json`
 - Log-to-cases generator: `benchmarks/build_advisory_cases_from_logs.py`
 - Profile sweeper: `benchmarks/advisory_profile_sweeper.py`
 - Contract runner: `scripts/run_advisory_realism_contract.py`
+- Domain matrix runner: `scripts/run_advisory_realism_domain_matrix.py`
 - Output JSON: `benchmarks/out/advisory_quality_ab_report.json`
 - Output Markdown: `benchmarks/out/advisory_quality_ab_report.md`
 
@@ -143,6 +145,22 @@ Optional timeout override per run:
 
 ```bash
 python scripts/run_advisory_realism_contract.py --run-timeout-s 1200
+```
+
+Multi-domain matrix run (10+ domain benches in one pass):
+
+```bash
+python scripts/run_advisory_realism_domain_matrix.py \
+  --cases benchmarks/data/advisory_realism_eval_multidomain_v1.json \
+  --force-live
+```
+
+Preview domains without executing benchmarks:
+
+```bash
+python scripts/run_advisory_realism_domain_matrix.py \
+  --cases benchmarks/data/advisory_realism_eval_multidomain_v1.json \
+  --dry-run
 ```
 
 ## Theory Seeding for Controlled Memory Tests
