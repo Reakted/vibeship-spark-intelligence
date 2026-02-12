@@ -29,6 +29,10 @@ DEFAULT_CONFIG = {
     "embedding_model": "BAAI/bge-small-en-v1.5",
     "min_similarity": 0.55,
     "min_fusion_score": 0.45,
+    # Avoid total empty collapse when strict gates over-filter all candidates.
+    "empty_result_rescue_enabled": True,
+    "rescue_min_similarity": 0.30,
+    "rescue_min_fusion_score": 0.20,
     "weight_recency": 0.2,
     "weight_outcome": 0.3,
     "mmr_lambda": 0.5,
@@ -538,6 +542,7 @@ class SemanticRetriever:
                 r for r in results
                 if r.source_type == "trigger" or (r.category not in exclude)
             ]
+        pre_gate_results = list(results)
 
         # Gate: semantic similarity (triggers bypass)
         min_sim = float(self.config.get("min_similarity", 0.55))
@@ -561,6 +566,13 @@ class SemanticRetriever:
         # Filter by fusion score
         min_fusion = float(self.config.get("min_fusion_score", 0.5))
         results = [r for r in results if r.fusion_score >= min_fusion]
+        if not results and self.config.get("empty_result_rescue_enabled", True):
+            results = self._rescue_empty_results(
+                candidates=pre_gate_results,
+                limit=limit,
+                min_similarity=min_sim,
+                min_fusion_score=min_fusion,
+            )
 
         # Sort by fusion score
         results.sort(key=lambda r: r.fusion_score, reverse=True)
@@ -587,6 +599,59 @@ class SemanticRetriever:
         )
 
         return final_results
+
+    def _rescue_empty_results(
+        self,
+        *,
+        candidates: List[SemanticResult],
+        limit: int,
+        min_similarity: float,
+        min_fusion_score: float,
+    ) -> List[SemanticResult]:
+        if not candidates:
+            return []
+
+        rescue_min_sim = float(
+            self.config.get("rescue_min_similarity", min(0.30, min_similarity))
+        )
+        rescue_min_fusion = float(
+            self.config.get("rescue_min_fusion_score", min(0.20, min_fusion_score))
+        )
+        rescued: List[SemanticResult] = []
+
+        for item in candidates:
+            if item.source_type != "trigger" and item.semantic_sim < rescue_min_sim:
+                continue
+            item.fusion_score = self._compute_fusion(item)
+            if item.fusion_score < rescue_min_fusion:
+                continue
+            if "rescue_fallback" not in item.why:
+                item.why = f"{item.why} [rescue_fallback]".strip()
+            rescued.append(item)
+
+        if not rescued:
+            best = sorted(
+                candidates,
+                key=lambda r: (self._compute_fusion(r), r.semantic_sim),
+                reverse=True,
+            )[: max(1, limit)]
+            for item in best:
+                item.fusion_score = self._compute_fusion(item)
+                if "rescue_fallback" not in item.why:
+                    item.why = f"{item.why} [rescue_fallback]".strip()
+            rescued = best
+
+        log_debug(
+            "semantic",
+            (
+                "SR_EMPTY_RESCUE_USED "
+                f"candidates={len(candidates)} "
+                f"rescued={len(rescued)} "
+                f"rescue_min_sim={rescue_min_sim:.2f} "
+                f"rescue_min_fusion={rescue_min_fusion:.2f}"
+            ),
+        )
+        return rescued
 
     def _compute_fusion(self, r: SemanticResult) -> float:
         w_out = float(self.config.get("weight_outcome", 0.3))
