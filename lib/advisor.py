@@ -209,7 +209,10 @@ def _load_advisor_config() -> None:
         tuneables = Path.home() / ".spark" / "tuneables.json"
         if not tuneables.exists():
             return
-        data = json.loads(tuneables.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(tuneables.read_text(encoding="utf-8-sig"))
+        except Exception:
+            data = json.loads(tuneables.read_text(encoding="utf-8"))
         cfg = data.get("advisor") or {}
         if not isinstance(cfg, dict):
             cfg = {}
