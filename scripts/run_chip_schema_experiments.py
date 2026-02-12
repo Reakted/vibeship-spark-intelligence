@@ -181,6 +181,44 @@ def _objective_score(metrics: Dict[str, Any], weights: Dict[str, float]) -> floa
     return round(total, 4)
 
 
+def _evaluate_promotion_gate(
+    experiments: List[Dict[str, Any]],
+    *,
+    baseline_id: str,
+    candidate_id: str,
+    min_objective_delta: float = 0.0,
+    min_coverage_delta: float = 0.0,
+) -> Dict[str, Any]:
+    baseline = next((r for r in experiments if str(r.get("id")) == str(baseline_id)), {})
+    candidate = next((r for r in experiments if str(r.get("id")) == str(candidate_id)), {})
+    base_obj = _safe_float(baseline.get("objective"), 0.0)
+    cand_obj = _safe_float(candidate.get("objective"), 0.0)
+    base_cov = _safe_float(baseline.get("capture_coverage"), 0.0)
+    cand_cov = _safe_float(candidate.get("capture_coverage"), 0.0)
+    obj_delta = round(cand_obj - base_obj, 4)
+    cov_delta = round(cand_cov - base_cov, 4)
+    passed = obj_delta > float(min_objective_delta) and cov_delta > float(min_coverage_delta)
+    reason = (
+        "candidate_beats_baseline_on_objective_and_coverage"
+        if passed
+        else "candidate_did_not_beat_baseline_on_both_objective_and_coverage"
+    )
+    return {
+        "baseline_id": str(baseline_id),
+        "candidate_id": str(candidate_id),
+        "baseline_objective": round(base_obj, 4),
+        "candidate_objective": round(cand_obj, 4),
+        "baseline_coverage": round(base_cov, 4),
+        "candidate_coverage": round(cand_cov, 4),
+        "objective_delta": obj_delta,
+        "coverage_delta": cov_delta,
+        "min_objective_delta": float(min_objective_delta),
+        "min_coverage_delta": float(min_coverage_delta),
+        "passed": bool(passed),
+        "reason": reason,
+    }
+
+
 def _analyze_rows(*, rows: List[Dict[str, Any]], min_total_score: float, limits: Dict[str, Any]) -> Dict[str, Any]:
     rows_analyzed = len(rows)
     telemetry = 0
@@ -307,6 +345,8 @@ def _run_experiment(
         )
 
     analyzed["id"] = exp_id
+    analyzed["mode"] = str(exp.get("mode") or exp_id)
+    analyzed["hypothesis"] = str(exp.get("hypothesis") or "")
     analyzed["description"] = str(exp.get("description") or "")
     analyzed["events_requested"] = int(max(1, int(events_per_chip)) * max(1, len(chips)))
     analyzed["insights_emitted"] = int(insights_emitted)
@@ -334,12 +374,20 @@ def _report_markdown(report: Dict[str, Any]) -> str:
     lines.append(f"- Events per chip: `{int(report.get('events_per_chip', 0))}`")
     lines.append(f"- Min total quality score: `{_safe_float(report.get('min_total_score'), 0.55):.2f}`")
     lines.append(f"- Weights: `{report.get('objective_weights')}`")
+    gate = dict(report.get("promotion_gate") or {})
+    if gate:
+        lines.append(
+            f"- Promotion gate (`{gate.get('candidate_id','')}` vs `{gate.get('baseline_id','')}`): "
+            f"`{'PASS' if bool(gate.get('passed')) else 'FAIL'}` "
+            f"(objective_delta={float(gate.get('objective_delta',0.0)):+.4f}, "
+            f"coverage_delta={float(gate.get('coverage_delta',0.0)):+.4f})"
+        )
     lines.append("")
     lines.append("| Rank | Experiment | Objective | Coverage | Schema Payload | Schema Statement | Merge Eligible | Non-Telemetry | Payload Valid Emission |")
     lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
     for idx, row in enumerate(report.get("ranked_experiments") or [], start=1):
         lines.append(
-            f"| {idx} | `{row.get('id','')}` | {float(row.get('objective',0.0)):.4f} | "
+            f"| {idx} | `{row.get('id','')}` ({row.get('mode','')}) | {float(row.get('objective',0.0)):.4f} | "
             f"{float(row.get('capture_coverage',0.0)):.2%} | "
             f"{float(row.get('schema_payload_rate',0.0)):.2%} | {float(row.get('schema_statement_rate',0.0)):.2%} | "
             f"{float(row.get('merge_eligible_rate',0.0)):.2%} | {1.0 - float(row.get('telemetry_rate',1.0)):.2%} | "
@@ -350,6 +398,9 @@ def _report_markdown(report: Dict[str, Any]) -> str:
     lines.append("")
     for row in report.get("ranked_experiments") or []:
         lines.append(f"### `{row.get('id','')}`")
+        lines.append(f"- Mode: `{row.get('mode','')}`")
+        if str(row.get("hypothesis") or "").strip():
+            lines.append(f"- Hypothesis: {row.get('hypothesis','')}")
         lines.append(f"- Description: {row.get('description','')}")
         lines.append(f"- Objective: `{float(row.get('objective',0.0)):.4f}`")
         lines.append(f"- Rows analyzed: `{int(row.get('rows_analyzed',0))}`")
@@ -371,6 +422,10 @@ def main() -> int:
     ap.add_argument("--events-per-chip", type=int, default=20, help="Synthetic events generated per chip per experiment")
     ap.add_argument("--min-total-score", type=float, default=0.55, help="Threshold for merge-eligible counting")
     ap.add_argument("--random-seed", type=int, default=7, help="Random seed for synthetic event variation")
+    ap.add_argument("--promotion-baseline-id", default="A_schema_baseline", help="Baseline arm ID for promotion gate")
+    ap.add_argument("--promotion-candidate-id", default="B_schema_evidence2", help="Candidate arm ID for promotion gate")
+    ap.add_argument("--min-objective-delta", type=float, default=0.0, help="Promotion requires candidate objective delta > this")
+    ap.add_argument("--min-coverage-delta", type=float, default=0.0, help="Promotion requires candidate coverage delta > this")
     ap.add_argument("--out-prefix", default="chip_schema_experiments_v1", help="Output file prefix under benchmarks/out")
     args = ap.parse_args()
 
@@ -407,6 +462,13 @@ def main() -> int:
         row["delta_objective_vs_control"] = round(_safe_float(row.get("objective"), 0.0) - control_obj, 4)
 
     ranked = sorted(rows, key=lambda r: _safe_float(r.get("objective"), 0.0), reverse=True)
+    promotion_gate = _evaluate_promotion_gate(
+        rows,
+        baseline_id=str(args.promotion_baseline_id),
+        candidate_id=str(args.promotion_candidate_id),
+        min_objective_delta=float(args.min_objective_delta),
+        min_coverage_delta=float(args.min_coverage_delta),
+    )
     report = {
         "generated_at": datetime.now(UTC).isoformat(),
         "plan_path": str(plan_path),
@@ -418,6 +480,7 @@ def main() -> int:
         "experiments": rows,
         "ranked_experiments": ranked,
         "winner": ranked[0] if ranked else {},
+        "promotion_gate": promotion_gate,
     }
 
     json_path = out_dir / f"{args.out_prefix}_report.json"
@@ -434,6 +497,14 @@ def main() -> int:
         f"objective={_safe_float(winner.get('objective'), 0.0):.4f} "
         f"schema_statement={_safe_float(winner.get('schema_statement_rate'), 0.0):.2%} "
         f"merge_eligible={_safe_float(winner.get('merge_eligible_rate'), 0.0):.2%}"
+    )
+    print(
+        "PromotionGate="
+        f"{'PASS' if bool(promotion_gate.get('passed')) else 'FAIL'} "
+        f"candidate={promotion_gate.get('candidate_id','')} "
+        f"baseline={promotion_gate.get('baseline_id','')} "
+        f"objective_delta={_safe_float(promotion_gate.get('objective_delta'),0.0):+.4f} "
+        f"coverage_delta={_safe_float(promotion_gate.get('coverage_delta'),0.0):+.4f}"
     )
     return 0
 

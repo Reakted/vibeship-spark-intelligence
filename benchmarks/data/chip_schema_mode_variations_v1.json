@@ -1,0 +1,163 @@
+{
+  "version": "2026-02-13",
+  "description": "Schema-mode variation matrix for chip authoring/runtime profiles.",
+  "control_experiment_id": "M0_baseline_schema_safe",
+  "objective_weights": {
+    "capture_coverage": 0.3,
+    "schema_payload_rate": 0.15,
+    "schema_statement_rate": 0.25,
+    "merge_eligible_rate": 0.1,
+    "learning_quality_pass_rate": 0.1,
+    "non_telemetry_rate": 0.05,
+    "payload_valid_emission_rate": 0.05
+  },
+  "experiments": [
+    {
+      "id": "M0_baseline_schema_safe",
+      "mode": "baseline_safe",
+      "hypothesis": "Best balance of coverage and schema quality for current observers.",
+      "description": "Current stable schema baseline.",
+      "runtime": {
+        "require_learning_schema": "1",
+        "min_learning_evidence": 1,
+        "min_confidence": 0.7,
+        "min_score": 0.35,
+        "observer_only": "1",
+        "merge_min_confidence": 0.7,
+        "merge_min_quality": 0.7
+      },
+      "merge_limits": {
+        "min_cognitive_value": 0.35,
+        "min_actionability": 0.25,
+        "min_transferability": 0.2,
+        "min_statement_len": 28
+      }
+    },
+    {
+      "id": "M1_two_evidence_balanced",
+      "mode": "two_evidence_balanced",
+      "hypothesis": "Two evidence items can improve transferability with moderate coverage cost.",
+      "description": "Require two evidence items with baseline gates.",
+      "runtime": {
+        "require_learning_schema": "1",
+        "min_learning_evidence": 2,
+        "min_confidence": 0.7,
+        "min_score": 0.35,
+        "observer_only": "1",
+        "merge_min_confidence": 0.7,
+        "merge_min_quality": 0.7
+      },
+      "merge_limits": {
+        "min_cognitive_value": 0.35,
+        "min_actionability": 0.25,
+        "min_transferability": 0.2,
+        "min_statement_len": 28
+      }
+    },
+    {
+      "id": "M2_two_evidence_low_conf",
+      "mode": "two_evidence_low_conf",
+      "hypothesis": "Slightly lower confidence gate may recover coverage while keeping schema strictness.",
+      "description": "Two evidence items with slightly lower confidence threshold.",
+      "runtime": {
+        "require_learning_schema": "1",
+        "min_learning_evidence": 2,
+        "min_confidence": 0.65,
+        "min_score": 0.33,
+        "observer_only": "1",
+        "merge_min_confidence": 0.68,
+        "merge_min_quality": 0.68
+      },
+      "merge_limits": {
+        "min_cognitive_value": 0.33,
+        "min_actionability": 0.24,
+        "min_transferability": 0.2,
+        "min_statement_len": 26
+      }
+    },
+    {
+      "id": "M3_two_evidence_high_conf",
+      "mode": "two_evidence_high_conf",
+      "hypothesis": "Higher confidence improves precision but may reduce coverage materially.",
+      "description": "Two evidence items with stricter runtime confidence.",
+      "runtime": {
+        "require_learning_schema": "1",
+        "min_learning_evidence": 2,
+        "min_confidence": 0.78,
+        "min_score": 0.45,
+        "observer_only": "1",
+        "merge_min_confidence": 0.75,
+        "merge_min_quality": 0.72
+      },
+      "merge_limits": {
+        "min_cognitive_value": 0.35,
+        "min_actionability": 0.25,
+        "min_transferability": 0.2,
+        "min_statement_len": 28
+      }
+    },
+    {
+      "id": "M4_three_evidence_experimental",
+      "mode": "three_evidence_experimental",
+      "hypothesis": "Three evidence items is likely over-strict for current chips, but useful as future target.",
+      "description": "Experimental strict evidence target profile.",
+      "runtime": {
+        "require_learning_schema": "1",
+        "min_learning_evidence": 3,
+        "min_confidence": 0.68,
+        "min_score": 0.34,
+        "observer_only": "1",
+        "merge_min_confidence": 0.7,
+        "merge_min_quality": 0.7
+      },
+      "merge_limits": {
+        "min_cognitive_value": 0.35,
+        "min_actionability": 0.25,
+        "min_transferability": 0.2,
+        "min_statement_len": 28
+      }
+    },
+    {
+      "id": "M5_two_evidence_strict_merge",
+      "mode": "two_evidence_strict_merge",
+      "hypothesis": "Strict merge thresholds might improve downstream learning quality if coverage stays healthy.",
+      "description": "Two evidence items + strict merge-quality limits.",
+      "runtime": {
+        "require_learning_schema": "1",
+        "min_learning_evidence": 2,
+        "min_confidence": 0.7,
+        "min_score": 0.35,
+        "observer_only": "1",
+        "merge_min_confidence": 0.75,
+        "merge_min_quality": 0.75
+      },
+      "merge_limits": {
+        "min_cognitive_value": 0.45,
+        "min_actionability": 0.35,
+        "min_transferability": 0.3,
+        "min_statement_len": 36
+      }
+    },
+    {
+      "id": "M6_two_evidence_short_statement",
+      "mode": "two_evidence_short_statement",
+      "hypothesis": "Lower statement length floor may help numeric-heavy observers produce mergeable distillations.",
+      "description": "Two evidence items + shorter statement minimum.",
+      "runtime": {
+        "require_learning_schema": "1",
+        "min_learning_evidence": 2,
+        "min_confidence": 0.7,
+        "min_score": 0.35,
+        "observer_only": "1",
+        "merge_min_confidence": 0.7,
+        "merge_min_quality": 0.7
+      },
+      "merge_limits": {
+        "min_cognitive_value": 0.35,
+        "min_actionability": 0.25,
+        "min_transferability": 0.2,
+        "min_statement_len": 20
+      }
+    }
+  ]
+}

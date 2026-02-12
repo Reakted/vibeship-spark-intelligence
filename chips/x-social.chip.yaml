@@ -58,28 +58,18 @@ chip:
 # ============================================================
 triggers:
   patterns:
-    - "tweet"
-    - "reply"
-    - "post_tweet"
-    - "search_twitter"
-    - "timeline"
-    - "mentions"
-    - "followers"
-    - "engagement"
-    - "trend"
-    - "x conversation"
-    - "twitter"
-    - "@Spark_coded"
+    - "social memory"
+    - "user profile update"
+    - "trend observed"
+    - "cultural mood"
+    - "social insight"
+    - "x relationship"
+    - "relationship trajectory"
+    - "topic cycle"
     - "warmth"
     - "relationship"
 
   events:
-    - post_tool
-    - post_tool_failure
-    - user_prompt
-    - PostToolUse
-    - PostToolUseFailure
-    - UserPromptSubmit
     - x_reply_sent
     - x_trend_observed
     - x_user_interaction
@@ -87,21 +77,21 @@ triggers:
 
   tools:
     - name: mcp__x-twitter__search_twitter
-      context_contains: ["*"]
+      context_contains: ["trend", "relationship", "conversation", "social", "warmth", "insight"]
     - name: mcp__x-twitter__get_tweet_details
-      context_contains: ["*"]
+      context_contains: ["reply", "conversation", "engagement", "trend", "insight", "relationship"]
     - name: mcp__x-twitter__get_user_by_screen_name
-      context_contains: ["*"]
+      context_contains: ["user", "profile", "handle", "relationship", "warmth"]
     - name: mcp__x-twitter__get_user_by_id
-      context_contains: ["*"]
+      context_contains: ["user", "profile", "handle", "relationship", "warmth"]
     - name: mcp__x-twitter__get_trends
-      context_contains: ["*"]
+      context_contains: ["trend", "cultural", "mood", "signal"]
     - name: mcp__x-twitter__get_timeline
-      context_contains: ["*"]
+      context_contains: ["timeline", "trend", "mood", "cultural"]
     - name: mcp__x-twitter__get_latest_timeline
-      context_contains: ["*"]
+      context_contains: ["timeline", "trend", "mood", "cultural"]
     - name: mcp__x-twitter__get_user_mentions
-      context_contains: ["*"]
+      context_contains: ["mentions", "relationship", "warmth", "interaction"]
     - name: Bash
       context_contains:
         - "tweet.py"

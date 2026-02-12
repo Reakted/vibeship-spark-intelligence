@@ -53,24 +53,16 @@ chip:
 # ============================================================
 triggers:
   patterns:
-    - "x reply"
-    - "tweet reply"
-    - "reply to tweet"
-    - "tweet engagement"
     - "reply strategy"
     - "conversation hook"
-    - "quote tweet"
     - "thread reply"
     - "conversation dna"
     - "high engagement reply"
+    - "reply performance"
+    - "reply engagement"
+    - "reply metrics"
 
   events:
-    - post_tool
-    - post_tool_failure
-    - user_prompt
-    - PostToolUse
-    - PostToolUseFailure
-    - UserPromptSubmit
     - x_reply_sent
     - x_reply_received
     - x_conversation_analyzed
@@ -195,10 +187,11 @@ observers:
       underneath. Based on behavioral psychology research.
 
     triggers:
-      - "tweet"
-      - "reply"
-      - "posted"
-      - "engagement"
+      - "emotional trigger"
+      - "curiosity gap"
+      - "validation signal"
+      - "vulnerability cue"
+      - "identity signal"
 
     capture:
       required:
@@ -235,9 +228,11 @@ observers:
       Reciprocity, social proof, open loops, barrier reduction.
 
     triggers:
-      - "conversation"
-      - "reply thread"
-      - "back and forth"
+      - "conversation psychology"
+      - "reply thread dynamics"
+      - "back and forth pattern"
+      - "open loop"
+      - "reciprocity signal"
 
     capture:
       required:

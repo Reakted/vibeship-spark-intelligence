@@ -32,6 +32,7 @@ log = logging.getLogger("spark.chips")
 
 # Storage for chip insights
 CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
+OBSERVER_POLICY_FILE = Path.home() / ".spark" / "chip_observer_policy.json"
 TELEMETRY_OBSERVER_BLOCKLIST = {
     "tool_event",
     "pre_tool_event",
@@ -132,6 +133,11 @@ class ChipRuntime:
             }
         else:
             self.telemetry_observer_blocklist = set(TELEMETRY_OBSERVER_BLOCKLIST)
+        policy = self._load_observer_policy()
+        self.blocked_observer_keys = set(policy.get("disabled_observers") or [])
+        self.blocked_observer_names = set(policy.get("disabled_observer_names") or [])
+        if self.blocked_observer_names:
+            self.telemetry_observer_blocklist.update(self.blocked_observer_names)
         try:
             self.max_active_chips_per_event = max(1, int(os.getenv("SPARK_CHIP_EVENT_ACTIVE_LIMIT", "6") or 6))
         except Exception:
@@ -165,8 +171,40 @@ class ChipRuntime:
         cid = str(chip_id or "").strip().lower().replace("_", "-")
         return bool(cid and cid in self.blocked_chip_ids)
 
-    def _is_telemetry_observer(self, observer_name: str) -> bool:
+    def _load_observer_policy(self) -> Dict[str, Any]:
+        if not OBSERVER_POLICY_FILE.exists():
+            return {"disabled_observers": [], "disabled_observer_names": []}
+        try:
+            raw = json.loads(OBSERVER_POLICY_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {"disabled_observers": [], "disabled_observer_names": []}
+        if not isinstance(raw, dict):
+            return {"disabled_observers": [], "disabled_observer_names": []}
+        disabled_observers = []
+        disabled_observer_names = []
+        for value in raw.get("disabled_observers") or []:
+            text = str(value or "").strip().lower()
+            if text:
+                if "/" in text:
+                    cid, obs = text.split("/", 1)
+                    cid = cid.strip().replace("_", "-")
+                    text = f"{cid}/{obs.strip()}"
+                disabled_observers.append(text)
+        for value in raw.get("disabled_observer_names") or []:
+            text = str(value or "").strip().lower()
+            if text:
+                disabled_observer_names.append(text)
+        return {
+            "disabled_observers": disabled_observers,
+            "disabled_observer_names": disabled_observer_names,
+        }
+
+    def _is_telemetry_observer(self, observer_name: str, chip_id: str = "") -> bool:
         name = str(observer_name or "").strip().lower()
+        cid = str(chip_id or "").strip().lower().replace("_", "-")
+        key = f"{cid}/{name}" if cid and name else ""
+        if key and key in self.blocked_observer_keys:
+            return True
         return bool(name and name in self.telemetry_observer_blocklist)
 
     def _filter_runtime_chips(self, chips: List[Chip]) -> List[Chip]:
@@ -267,7 +305,7 @@ class ChipRuntime:
                 continue
             if match.observer is None and match.chip.id in chips_with_observer:
                 continue
-            if match.observer is not None and self._is_telemetry_observer(match.observer.name):
+            if match.observer is not None and self._is_telemetry_observer(match.observer.name, match.chip.id):
                 continue
             insight = self._execute_observer(match, event)
             if insight:

@@ -34,6 +34,9 @@ Chips are **YAML specifications** that tell Spark:
 
 Think of chips as **domain experts in a box** - each one knows what matters in its field.
 
+Schema-first operating model:
+- `docs/CHIPS_SCHEMA_FIRST_PLAYBOOK.md`
+
 ### Supported Chip Formats
 
 Spark supports three chip formats:

@@ -262,6 +262,8 @@ python scripts/run_chip_schema_experiments.py \
   --plan benchmarks/data/chip_schema_experiment_plan_v1.json \
   --chips social-convo,engagement-pulse,x_social \
   --events-per-chip 20 \
+  --promotion-baseline-id A_schema_baseline \
+  --promotion-candidate-id B_schema_evidence2 \
   --out-prefix chip_schema_experiments_v1
 ```
 
@@ -275,6 +277,33 @@ Promotion rule:
 
 Coverage note:
 - The schema matrix objective includes `capture_coverage` (`insights_emitted / events_requested`) so over-strict, low-volume profiles cannot tie with stable profiles.
+
+Mode variation matrix:
+
+```bash
+python scripts/run_chip_schema_experiments.py \
+  --plan benchmarks/data/chip_schema_mode_variations_v1.json \
+  --chips social-convo,engagement-pulse,x_social \
+  --events-per-chip 24 \
+  --promotion-baseline-id M0_baseline_schema_safe \
+  --promotion-candidate-id M1_two_evidence_balanced \
+  --out-prefix chip_schema_mode_variations_v1
+```
+
+This run tests multiple schema modes and still enforces the same promotion gate rule.
+
+Observer policy from KPI trends (2-3 windows):
+
+```bash
+python scripts/run_chip_observer_policy.py \
+  --report-glob "benchmarks/out/chip_learning_diagnostics_active_observer_v*_report.json" \
+  --windows 3 \
+  --min-windows 2 \
+  --min-rows-total 50 \
+  --apply
+```
+
+Then restart runtime services to load `~/.spark/chip_observer_policy.json`.
 
 ## Theory Seeding for Controlled Memory Tests
 

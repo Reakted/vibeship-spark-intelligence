@@ -20,6 +20,7 @@ def _load_module():
 def test_objective_score_uses_weighted_metrics():
     mod = _load_module()
     metrics = {
+        "capture_coverage": 0.7,
         "schema_payload_rate": 0.5,
         "schema_statement_rate": 0.4,
         "merge_eligible_rate": 0.3,
@@ -28,6 +29,7 @@ def test_objective_score_uses_weighted_metrics():
         "payload_valid_emission_rate": 0.75,
     }
     weights = {
+        "capture_coverage": 0.3,
         "schema_payload_rate": 0.2,
         "schema_statement_rate": 0.3,
         "merge_eligible_rate": 0.2,
@@ -52,3 +54,32 @@ def test_build_event_contains_required_fields():
 
     x = mod._build_event("x_social", 0, rng)
     assert "insight" in x and "confidence" in x
+    assert isinstance(s.get("payload"), dict)
+    assert isinstance(e.get("payload"), dict)
+    assert isinstance(x.get("payload"), dict)
+
+
+def test_promotion_gate_requires_candidate_beats_baseline_on_both():
+    mod = _load_module()
+    rows = [
+        {"id": "A_schema_baseline", "objective": 0.7, "capture_coverage": 0.6},
+        {"id": "B_schema_evidence2", "objective": 0.71, "capture_coverage": 0.59},
+    ]
+    out = mod._evaluate_promotion_gate(
+        rows,
+        baseline_id="A_schema_baseline",
+        candidate_id="B_schema_evidence2",
+        min_objective_delta=0.0,
+        min_coverage_delta=0.0,
+    )
+    assert out["passed"] is False
+
+    rows[1]["capture_coverage"] = 0.61
+    out2 = mod._evaluate_promotion_gate(
+        rows,
+        baseline_id="A_schema_baseline",
+        candidate_id="B_schema_evidence2",
+        min_objective_delta=0.0,
+        min_coverage_delta=0.0,
+    )
+    assert out2["passed"] is True

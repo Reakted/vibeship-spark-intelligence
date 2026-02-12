@@ -27,6 +27,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `scripts/run_advisory_realism_domain_matrix.py`: multi-domain advisory realism matrix runner (10+ domain slices per run)
 - `scripts/run_advisory_chip_experiments.py`: chip strategy experiment runner (A/B/C/D off/on/targeted segment plans)
 - `scripts/run_chip_schema_experiments.py`: schema-capture A/B/C/D runner for chip observer quality and distillation readiness
+- `scripts/run_chip_observer_policy.py`: observer keep/disable policy generator from 2-3 diagnostics windows (with optional apply to runtime policy file)
 - `scripts/run_chip_learning_diagnostics.py`: chip learning/distillation diagnostics (telemetry rate, learnable statement yield, merge-eligible coverage)
 - `docs/OPENCLAW_RESEARCH_AND_UPDATES.md`: experiment log for OpenClaw tuning changes, outcomes, and keep/rollback decisions
 - `docs/reports/2026-02-12_openclaw_memory_advisory_concrete_plan_and_live_baseline.md`: concrete memory/advisory fix plan + live baseline + execution updates
@@ -35,6 +36,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `docs/claude_code.md`: Claude Code integration
 - `docs/cursor.md`: Cursor and VS Code integration
 - `docs/CHIPS.md`: chips usage and authoring
+- `docs/CHIPS_SCHEMA_FIRST_PLAYBOOK.md`: schema-first chips design, authoring rules, variation testing, and promotion gates
 - `docs/CHIP_WORKFLOW.md`: fast chip creation workflow
 - `STUCK_STATE_PLAYBOOK.md`: recovery playbook
 
@@ -65,6 +67,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `docs/reports/2026-02-13_chip_learning_methodology_upgrade_v3.md`: schema-first observer learning pass (runtime payload enforcement, schema-priority distillation, and schema diagnostics KPIs)
 - `docs/reports/2026-02-13_chip_schema_experiments_abcd_v1.md`: schema-capture A/B/C/D benchmark results and selected operating profile
 - `docs/reports/2026-02-13_chip_best_use_findings_and_outlook_v1.md`: best-use findings, observer KPI upgrades, and future promotion path for chips as evidence infrastructure
+- `docs/reports/2026-02-13_chip_observer_policy_and_variation_pass_v1.md`: trigger tightening, observer policy rollout, and schema mode variation matrix results
 - `PRODUCTION_READINESS.md`: production-hardening status and open blockers
 - `docs/VISION.md`: long-range architecture vision
 - `CHANGELOG.md`: chronological change log

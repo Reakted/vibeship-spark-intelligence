@@ -59,8 +59,6 @@ triggers:
     - "tweet flopped"
 
   events:
-    - post_tool
-    - PostToolUse
     - tweet_posted
     - engagement_snapshot
     - engagement_surprise
