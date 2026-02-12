@@ -80,7 +80,8 @@ def test_pre_tool_uses_packet_path_when_available(monkeypatch, tmp_path):
     monkeypatch.setattr("lib.advisory_emitter.emit_advisory", lambda gate_result, synthesized_text, advice_items=None: True)
 
     text = engine.on_pre_tool("s1", "Edit", {"file_path": "x.py"})
-    assert text == "Use packet guidance."
+    assert text.startswith("Use packet guidance.")
+    assert "`python -m pytest -q`" in text
     req_lines = advice_feedback.REQUESTS_FILE.read_text(encoding="utf-8").splitlines()
     assert req_lines
     row = json.loads(req_lines[-1])
@@ -118,7 +119,8 @@ def test_pre_tool_falls_back_to_live_and_persists_packet(monkeypatch, tmp_path):
     monkeypatch.setattr("lib.advisory_emitter.emit_advisory", lambda gate_result, synthesized_text, advice_items=None: True)
 
     text = engine.on_pre_tool("s2", "Read", {"file_path": "y.py"})
-    assert text == "Live synthesized guidance."
+    assert text.startswith("Live synthesized guidance.")
+    assert '`rg -n "TODO|FIXME" .`' in text
 
     status = packet_store.get_store_status()
     assert status["total_packets"] >= 1

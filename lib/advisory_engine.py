@@ -23,6 +23,8 @@ INCLUDE_MIND_IN_MEMORY = os.getenv("SPARK_ADVISORY_INCLUDE_MIND", "0") == "1"
 ENABLE_PREFETCH_QUEUE = os.getenv("SPARK_ADVISORY_PREFETCH_QUEUE", "1") != "0"
 ENABLE_INLINE_PREFETCH_WORKER = os.getenv("SPARK_ADVISORY_PREFETCH_INLINE", "1") != "0"
 MEMORY_SCOPE_DEFAULT = str(os.getenv("SPARK_MEMORY_SCOPE_DEFAULT", "session") or "session").strip() or "session"
+ACTIONABILITY_ENFORCE = os.getenv("SPARK_ADVISORY_REQUIRE_ACTION", "1") != "0"
+DELIVERY_STALE_SECONDS = float(os.getenv("SPARK_ADVISORY_STALE_S", "900"))
 ADVISORY_TEXT_REPEAT_COOLDOWN_S = float(
     os.getenv("SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S", "1800")
 )
@@ -53,6 +55,8 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     global ENABLE_PREFETCH_QUEUE
     global ENABLE_INLINE_PREFETCH_WORKER
     global INLINE_PREFETCH_MAX_JOBS
+    global ACTIONABILITY_ENFORCE
+    global DELIVERY_STALE_SECONDS
     global ADVISORY_TEXT_REPEAT_COOLDOWN_S
 
     applied: List[str] = []
@@ -93,6 +97,23 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
         except Exception:
             warnings.append("invalid_prefetch_inline_max_jobs")
 
+    if "actionability_enforce" in cfg:
+        ACTIONABILITY_ENFORCE = _parse_bool(
+            cfg.get("actionability_enforce"),
+            ACTIONABILITY_ENFORCE,
+        )
+        applied.append("actionability_enforce")
+
+    if "delivery_stale_s" in cfg:
+        try:
+            DELIVERY_STALE_SECONDS = max(
+                30.0,
+                min(86400.0, float(cfg.get("delivery_stale_s") or DELIVERY_STALE_SECONDS)),
+            )
+            applied.append("delivery_stale_s")
+        except Exception:
+            warnings.append("invalid_delivery_stale_s")
+
     if "advisory_text_repeat_cooldown_s" in cfg:
         try:
             ADVISORY_TEXT_REPEAT_COOLDOWN_S = max(
@@ -114,6 +135,8 @@ def get_engine_config() -> Dict[str, Any]:
         "prefetch_queue_enabled": bool(ENABLE_PREFETCH_QUEUE),
         "prefetch_inline_enabled": bool(ENABLE_INLINE_PREFETCH_WORKER),
         "prefetch_inline_max_jobs": int(INLINE_PREFETCH_MAX_JOBS),
+        "actionability_enforce": bool(ACTIONABILITY_ENFORCE),
+        "delivery_stale_s": float(DELIVERY_STALE_SECONDS),
         "advisory_text_repeat_cooldown_s": float(ADVISORY_TEXT_REPEAT_COOLDOWN_S),
     }
 
@@ -350,6 +373,108 @@ def _diagnostics_envelope(
     return envelope
 
 
+def _default_action_command(tool_name: str, task_plane: str) -> str:
+    tool = str(tool_name or "").strip().lower()
+    plane = str(task_plane or "").strip().lower()
+    if tool in {"edit", "write", "notebookedit"}:
+        return "python -m pytest -q"
+    if tool in {"read", "glob", "grep"}:
+        return 'rg -n "TODO|FIXME" .'
+    if tool == "bash":
+        return "python scripts/status_local.py"
+    if plane in {"build_delivery", "execution"}:
+        return "python -m pytest -q"
+    return "python scripts/status_local.py"
+
+
+def _has_actionable_command(text: str) -> bool:
+    body = str(text or "")
+    if not body.strip():
+        return False
+    if re.search(r"`[^`]{3,}`", body):
+        return True
+    lowered = body.lower()
+    if "next check:" in lowered or "next command:" in lowered:
+        return True
+    return False
+
+
+def _ensure_actionability(text: str, tool_name: str, task_plane: str) -> Dict[str, Any]:
+    original = str(text or "").strip()
+    if not original:
+        return {"text": "", "added": False, "command": ""}
+    if not ACTIONABILITY_ENFORCE:
+        return {"text": original, "added": False, "command": ""}
+    if _has_actionable_command(original):
+        return {"text": original, "added": False, "command": ""}
+
+    command = _default_action_command(tool_name, task_plane)
+    suffix = f" Next check: `{command}`."
+    updated = f"{original}{suffix}"
+    return {"text": updated, "added": True, "command": command}
+
+
+def _derive_delivery_badge(
+    events: List[Dict[str, Any]],
+    *,
+    now_ts: Optional[float] = None,
+    stale_after_s: Optional[float] = None,
+) -> Dict[str, Any]:
+    now = float(now_ts if now_ts is not None else time.time())
+    stale_s = float(stale_after_s if stale_after_s is not None else DELIVERY_STALE_SECONDS)
+    relevant_events = {
+        "emitted",
+        "fallback_emit",
+        "fallback_emit_failed",
+        "no_emit",
+        "no_advice",
+        "duplicate_suppressed",
+        "synth_empty",
+        "engine_error",
+        "post_tool_error",
+        "user_prompt_error",
+    }
+    latest: Optional[Dict[str, Any]] = None
+    for row in events:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("event") or "") not in relevant_events:
+            continue
+        ts = float(row.get("ts") or 0.0)
+        if latest is None or ts >= float(latest.get("ts") or 0.0):
+            latest = row
+
+    if latest is None:
+        return {"state": "stale", "reason": "no_delivery_events", "age_s": None, "event": None}
+
+    ts = float(latest.get("ts") or 0.0)
+    age_s = max(0.0, now - ts) if ts > 0 else None
+    if age_s is not None and age_s > stale_s:
+        return {
+            "state": "stale",
+            "reason": "last_event_too_old",
+            "age_s": round(age_s, 1),
+            "event": latest.get("event"),
+            "delivery_mode": latest.get("delivery_mode"),
+        }
+
+    event = str(latest.get("event") or "")
+    mode = str(latest.get("delivery_mode") or "")
+    if event == "emitted" and mode == "live":
+        state = "live"
+    elif event == "fallback_emit" or mode == "fallback":
+        state = "fallback"
+    else:
+        state = "blocked"
+    return {
+        "state": state,
+        "reason": event,
+        "age_s": round(age_s, 1) if age_s is not None else None,
+        "event": event,
+        "delivery_mode": mode,
+    }
+
+
 def on_pre_tool(
     session_id: str,
     tool_name: str,
@@ -522,6 +647,8 @@ def on_pre_tool(
                 return None
 
             # Emit the fallback deterministic text
+            action_meta = _ensure_actionability(fallback_text, tool_name, task_plane)
+            fallback_text = str(action_meta.get("text") or fallback_text)
             repeat_meta = _duplicate_repeat_state(state, fallback_text)
             if repeat_meta["repeat"]:
                 save_state(state)
@@ -544,6 +671,8 @@ def on_pre_tool(
                         "advisory_fingerprint": repeat_meta["fingerprint"],
                         "repeat_age_s": repeat_meta["age_s"],
                         "repeat_cooldown_s": repeat_meta["cooldown_s"],
+                        "actionability_added": bool(action_meta.get("added")),
+                        "actionability_command": action_meta.get("command"),
                     },
                 )
                 return None
@@ -574,6 +703,8 @@ def on_pre_tool(
                     "packet_id": packet_id,
                     "stage_ms": stage_ms,
                     "delivery_mode": "fallback" if fallback_emitted else "none",
+                    "actionability_added": bool(action_meta.get("added")),
+                    "actionability_command": action_meta.get("command"),
                     **(fallback_error or {}),
                 },
             )
@@ -612,6 +743,8 @@ def on_pre_tool(
             )
         _mark("synth", t_synth)
 
+        action_meta = _ensure_actionability(synth_text, tool_name, task_plane)
+        synth_text = str(action_meta.get("text") or synth_text)
         repeat_meta = _duplicate_repeat_state(state, synth_text)
         if repeat_meta["repeat"]:
             if packet_id:
@@ -639,6 +772,8 @@ def on_pre_tool(
                     "advisory_fingerprint": repeat_meta["fingerprint"],
                     "repeat_age_s": repeat_meta["age_s"],
                     "repeat_cooldown_s": repeat_meta["cooldown_s"],
+                    "actionability_added": bool(action_meta.get("added")),
+                    "actionability_command": action_meta.get("command"),
                 },
             )
             return None
@@ -724,6 +859,8 @@ def on_pre_tool(
                 "intent_confidence": float(intent_info.get("confidence", 0.0) or 0.0),
                 "stage_ms": stage_ms,
                 "delivery_mode": "live" if emitted else "none",
+                "actionability_added": bool(action_meta.get("added")),
+                "actionability_command": action_meta.get("command"),
             },
         )
         return synth_text if emitted else None
@@ -865,6 +1002,8 @@ def on_user_prompt(
         save_state(state)
 
         baseline_text = _baseline_text(intent_family)
+        baseline_action = _ensure_actionability(baseline_text, "*", task_plane)
+        baseline_text = str(baseline_action.get("text") or baseline_text)
         baseline_proof = {
             "advice_id": f"baseline_{intent_family}",
             "insight_key": f"intent:{intent_family}",
@@ -1080,22 +1219,27 @@ def get_engine_status() -> Dict[str, Any]:
     try:
         if ENGINE_LOG.exists():
             lines = ENGINE_LOG.read_text(encoding="utf-8").splitlines()
-            recent = []
-            for line in lines[-10:]:
+            parsed_tail: List[Dict[str, Any]] = []
+            for line in lines[-100:]:
                 try:
-                    recent.append(json.loads(line))
+                    row = json.loads(line)
+                    if isinstance(row, dict):
+                        parsed_tail.append(row)
                 except Exception:
                     continue
+            recent = parsed_tail[-10:]
             status["recent_events"] = recent
             status["total_events"] = len(lines)
-            emitted = sum(1 for row in lines[-100:] if '"event": "emitted"' in row)
-            total = min(len(lines), 100)
+            emitted = sum(1 for row in parsed_tail if row.get("event") == "emitted")
+            total = len(parsed_tail)
             status["emission_rate"] = round(emitted / max(total, 1), 3)
+            status["delivery_badge"] = _derive_delivery_badge(parsed_tail)
         else:
             status["recent_events"] = []
             status["total_events"] = 0
             status["emission_rate"] = 0.0
+            status["delivery_badge"] = _derive_delivery_badge([])
     except Exception:
-        pass
+        status["delivery_badge"] = _derive_delivery_badge([])
 
     return status

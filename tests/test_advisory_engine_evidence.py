@@ -63,3 +63,40 @@ def test_diagnostics_envelope_has_session_scope_and_provider():
     assert env["provider_path"] == "packet_store"
     assert env["source_counts"]["cognitive"] == 2
     assert "eidos" in env["missing_sources"]
+
+
+def test_ensure_actionability_appends_command_when_missing(monkeypatch):
+    monkeypatch.setattr(advisory_engine, "ACTIONABILITY_ENFORCE", True)
+    meta = advisory_engine._ensure_actionability(
+        "Validate auth inputs before changes.",
+        "Edit",
+        "build_delivery",
+    )
+    assert meta["added"] is True
+    assert "`python -m pytest -q`" in meta["text"]
+
+
+def test_ensure_actionability_keeps_existing_command(monkeypatch):
+    monkeypatch.setattr(advisory_engine, "ACTIONABILITY_ENFORCE", True)
+    meta = advisory_engine._ensure_actionability(
+        "Run focused checks now: `python -m pytest -q`.",
+        "Edit",
+        "build_delivery",
+    )
+    assert meta["added"] is False
+
+
+def test_delivery_badge_live_and_stale_states():
+    now = 2000.0
+    live = advisory_engine._derive_delivery_badge(
+        [{"ts": 1995.0, "event": "emitted", "delivery_mode": "live"}],
+        now_ts=now,
+        stale_after_s=30.0,
+    )
+    stale = advisory_engine._derive_delivery_badge(
+        [{"ts": 1500.0, "event": "emitted", "delivery_mode": "live"}],
+        now_ts=now,
+        stale_after_s=30.0,
+    )
+    assert live["state"] == "live"
+    assert stale["state"] == "stale"
