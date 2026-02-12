@@ -163,6 +163,10 @@ def test_chip_merge_loads_duplicate_churn_tuneables(tmp_path, monkeypatch):
                     "duplicate_churn_ratio": 0.9,
                     "duplicate_churn_min_processed": 25,
                     "duplicate_churn_cooldown_s": 900,
+                    "min_cognitive_value": 0.52,
+                    "min_actionability": 0.41,
+                    "min_transferability": 0.33,
+                    "min_statement_len": 44,
                 }
             }
         ),
@@ -174,6 +178,10 @@ def test_chip_merge_loads_duplicate_churn_tuneables(tmp_path, monkeypatch):
     assert loaded["duplicate_churn_ratio"] == 0.9
     assert loaded["duplicate_churn_min_processed"] == 25
     assert loaded["duplicate_churn_cooldown_s"] == 900
+    assert loaded["min_cognitive_value"] == 0.52
+    assert loaded["min_actionability"] == 0.41
+    assert loaded["min_transferability"] == 0.33
+    assert loaded["min_statement_len"] == 44
 
 
 def test_merge_skips_telemetry_non_learning_rows(tmp_path, monkeypatch):

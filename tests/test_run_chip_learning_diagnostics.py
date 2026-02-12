@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _load_module():
@@ -43,3 +44,34 @@ def test_markdown_render_includes_core_metrics():
     assert "Chip Learning Diagnostics" in md
     assert "`marketing`" in md
     assert "Merge Eligible" in md
+
+
+def test_apply_limit_overrides_clamps_ranges():
+    mod = _load_module()
+    base = {
+        "duplicate_churn_ratio": 0.8,
+        "duplicate_churn_min_processed": 10,
+        "duplicate_churn_cooldown_s": 1800,
+        "min_cognitive_value": 0.35,
+        "min_actionability": 0.25,
+        "min_transferability": 0.2,
+        "min_statement_len": 28,
+    }
+    args = SimpleNamespace(
+        min_cognitive_value=2.0,
+        min_actionability=-1.0,
+        min_transferability=0.42,
+        min_statement_len=9,
+        duplicate_churn_ratio=0.3,
+        duplicate_churn_min_processed=2001,
+        duplicate_churn_cooldown_s=1,
+    )
+
+    out = mod._apply_limit_overrides(base, args)
+    assert out["min_cognitive_value"] == 1.0
+    assert out["min_actionability"] == 0.0
+    assert out["min_transferability"] == 0.42
+    assert out["min_statement_len"] == 12
+    assert out["duplicate_churn_ratio"] == 0.5
+    assert out["duplicate_churn_min_processed"] == 1000
+    assert out["duplicate_churn_cooldown_s"] == 60

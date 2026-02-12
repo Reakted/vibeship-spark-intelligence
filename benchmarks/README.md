@@ -225,6 +225,19 @@ python scripts/run_chip_learning_diagnostics.py \
   --out-prefix chip_learning_diagnostics_v1
 ```
 
+Threshold sensitivity pass (to test whether tuneables are the bottleneck):
+
+```bash
+python scripts/run_chip_learning_diagnostics.py \
+  --limit-per-chip 400 \
+  --min-total-score 0.45 \
+  --min-cognitive-value 0.25 \
+  --min-actionability 0.15 \
+  --min-transferability 0.15 \
+  --min-statement-len 20 \
+  --out-prefix chip_learning_diagnostics_relaxed_v1
+```
+
 Diagnostics outputs:
 - `benchmarks/out/chip_learning_diagnostics_v1_report.json`
 - `benchmarks/out/chip_learning_diagnostics_v1_report.md`

@@ -200,6 +200,39 @@ Promotion rule:
 - do not treat chip tuning as successful unless `chip_lift_objective > 0`
   and safety metrics (`harmful_emit_rate`, `critical_miss_rate`) do not regress.
 
+## Chip Learning Diagnostics (Indirect Path)
+
+Direct chip advisory hit-rate can stay low even when chips are helping through:
+`chips -> distillation -> cognitive memory -> advisory quality`.
+
+Run baseline diagnostics:
+
+```bash
+python scripts/run_chip_learning_diagnostics.py \
+  --limit-per-chip 400 \
+  --out-prefix chip_learning_diagnostics_v1
+```
+
+Run threshold sensitivity diagnostics to test tuneable bottlenecks:
+
+```bash
+python scripts/run_chip_learning_diagnostics.py \
+  --limit-per-chip 400 \
+  --min-total-score 0.45 \
+  --min-cognitive-value 0.25 \
+  --min-actionability 0.15 \
+  --min-transferability 0.15 \
+  --min-statement-len 20 \
+  --out-prefix chip_learning_diagnostics_relaxed_v1
+```
+
+Compare:
+- `merge_eligible`
+- `statement_yield_rate`
+- `learning_quality_pass_rate`
+
+If these barely move under relaxed gates, the blocker is chip content quality (telemetry/noise), not tuneable strictness.
+
 ## Theory Seeding for Controlled Memory Tests
 
 Seed known-good theories into cognitive memory to validate retrieval behavior:

@@ -1209,7 +1209,11 @@ This is the active hot-path advisory stack used by hooks:
   "chip_merge": {
     "duplicate_churn_ratio": 0.8,
     "duplicate_churn_min_processed": 10,
-    "duplicate_churn_cooldown_s": 1800
+    "duplicate_churn_cooldown_s": 1800,
+    "min_cognitive_value": 0.35,
+    "min_actionability": 0.25,
+    "min_transferability": 0.20,
+    "min_statement_len": 28
   },
   "request_tracker": {
     "max_pending": 50,
@@ -1287,7 +1291,7 @@ Components fall back to hard-coded defaults when a key is absent.
 | `advisory_packet_store` | Packet lifecycle + relaxed lookup weighting | `packet_ttl_s`, `max_index_packets`, `relaxed_effectiveness_weight`, `relaxed_low_effectiveness_threshold`, `relaxed_low_effectiveness_penalty` |
 | `advisory_prefetch` | Prefetch worker planning limits | `worker_enabled`, `max_jobs_per_run`, `max_tools_per_job`, `min_probability` |
 | `sync` | Context sync output targets | `mode`, `adapters_enabled`, `adapters_disabled` |
-| `chip_merge` | Chip merge duplicate churn control | `duplicate_churn_ratio`, `duplicate_churn_min_processed`, `duplicate_churn_cooldown_s` |
+| `chip_merge` | Chip merge duplicate churn + learning distillation quality gates | `duplicate_churn_ratio`, `duplicate_churn_min_processed`, `duplicate_churn_cooldown_s`, `min_cognitive_value`, `min_actionability`, `min_transferability`, `min_statement_len` |
 | `auto_tuner` | Feedback-driven tune recommendations and bounded apply | `enabled`, `mode`, `max_changes_per_cycle`, `run_interval_s`, `max_change_per_run`, `source_boosts` |
 | `request_tracker` | EIDOS request envelope retention + timeout policy | `max_pending`, `max_completed`, `max_age_seconds` |
 | `memory_capture` | Conversational memory auto-save/suggestion policy | `auto_save_threshold`, `suggest_threshold`, `max_capture_chars` |

@@ -29,6 +29,26 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(default)
 
 
+def _apply_limit_overrides(base: Dict[str, Any], args: argparse.Namespace) -> Dict[str, Any]:
+    out = dict(base or {})
+
+    if args.min_cognitive_value is not None:
+        out["min_cognitive_value"] = max(0.0, min(1.0, float(args.min_cognitive_value)))
+    if args.min_actionability is not None:
+        out["min_actionability"] = max(0.0, min(1.0, float(args.min_actionability)))
+    if args.min_transferability is not None:
+        out["min_transferability"] = max(0.0, min(1.0, float(args.min_transferability)))
+    if args.min_statement_len is not None:
+        out["min_statement_len"] = max(12, min(240, int(args.min_statement_len)))
+    if args.duplicate_churn_ratio is not None:
+        out["duplicate_churn_ratio"] = max(0.5, min(1.0, float(args.duplicate_churn_ratio)))
+    if args.duplicate_churn_min_processed is not None:
+        out["duplicate_churn_min_processed"] = max(5, min(1000, int(args.duplicate_churn_min_processed)))
+    if args.duplicate_churn_cooldown_s is not None:
+        out["duplicate_churn_cooldown_s"] = max(60, min(24 * 3600, int(args.duplicate_churn_cooldown_s)))
+    return out
+
+
 def _load_rows(path: Path, limit: int) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     try:
@@ -57,6 +77,7 @@ def _md(report: Dict[str, Any]) -> str:
     lines.append(f"- Telemetry rate: `{float(report.get('telemetry_rate', 0.0)):.2%}`")
     lines.append(f"- Statement yield: `{float(report.get('statement_yield_rate', 0.0)):.2%}`")
     lines.append(f"- Learning-quality pass rate: `{float(report.get('learning_quality_pass_rate', 0.0)):.2%}`")
+    lines.append(f"- Min total quality score: `{float(report.get('min_total_score', 0.55)):.2f}`")
     lines.append("")
     lines.append("| Chip | Rows | Telemetry | Statements | Quality Pass | Merge Eligible |")
     lines.append("|---|---:|---:|---:|---:|---:|")
@@ -83,12 +104,21 @@ def _md(report: Dict[str, Any]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Run chip learning diagnostics")
     ap.add_argument("--limit-per-chip", type=int, default=400, help="Rows to inspect per chip file")
+    ap.add_argument("--min-total-score", type=float, default=0.55, help="Minimum quality_score.total for merge-eligible counting")
+    ap.add_argument("--min-cognitive-value", type=float, default=None, help="Override chip_merge.min_cognitive_value")
+    ap.add_argument("--min-actionability", type=float, default=None, help="Override chip_merge.min_actionability")
+    ap.add_argument("--min-transferability", type=float, default=None, help="Override chip_merge.min_transferability")
+    ap.add_argument("--min-statement-len", type=int, default=None, help="Override chip_merge.min_statement_len")
+    ap.add_argument("--duplicate-churn-ratio", type=float, default=None, help="Override chip_merge.duplicate_churn_ratio for diagnostics context")
+    ap.add_argument("--duplicate-churn-min-processed", type=int, default=None, help="Override chip_merge.duplicate_churn_min_processed for diagnostics context")
+    ap.add_argument("--duplicate-churn-cooldown-s", type=int, default=None, help="Override chip_merge.duplicate_churn_cooldown_s for diagnostics context")
     ap.add_argument("--out-prefix", default="chip_learning_diagnostics_v1", help="Output file prefix under benchmarks/out")
     args = ap.parse_args()
 
     chip_dir = cm.CHIP_INSIGHTS_DIR
     files = sorted(chip_dir.glob("*.jsonl")) if chip_dir.exists() else []
-    limits = cm._load_merge_tuneables()
+    limits = _apply_limit_overrides(cm._load_merge_tuneables(), args)
+    min_total_score = max(0.0, min(1.0, float(args.min_total_score)))
 
     rows_analyzed = 0
     total_telemetry = 0
@@ -135,7 +165,7 @@ def main() -> int:
             if learning_ok:
                 quality_pass += 1
 
-            if total >= 0.55 and statement and learning_ok:
+            if total >= min_total_score and statement and learning_ok:
                 h = cm._hash_insight(chip_id, statement)
                 if h not in seen:
                     seen.add(h)
@@ -170,6 +200,7 @@ def main() -> int:
         "telemetry_rate": round(total_telemetry / max(1, rows_analyzed), 4),
         "statement_yield_rate": round(total_statement / max(1, rows_analyzed), 4),
         "learning_quality_pass_rate": round(total_quality_pass / max(1, rows_analyzed), 4),
+        "min_total_score": min_total_score,
         "chips": chips,
     }
 
@@ -184,7 +215,8 @@ def main() -> int:
     print(
         f"rows={rows_analyzed} merge_eligible={total_merge_eligible} "
         f"telemetry_rate={float(report['telemetry_rate']):.2%} "
-        f"statement_yield={float(report['statement_yield_rate']):.2%}"
+        f"statement_yield={float(report['statement_yield_rate']):.2%} "
+        f"min_total_score={min_total_score:.2f}"
     )
     return 0
 
