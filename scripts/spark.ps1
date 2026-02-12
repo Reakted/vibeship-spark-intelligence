@@ -26,6 +26,10 @@ $DEFAULT_PULSE_PORT = 8765
 if ($env:SPARK_PULSE_PORT -match "^\d+$") {
     $DEFAULT_PULSE_PORT = [int]$env:SPARK_PULSE_PORT
 }
+$STRICT_PULSE_PORT = $true
+if ($env:SPARK_PULSE_STRICT_PORT) {
+    $STRICT_PULSE_PORT = $env:SPARK_PULSE_STRICT_PORT.Trim().ToLower() -in @("1", "true", "yes", "on")
+}
 
 function Get-AvailablePort {
     param(
@@ -83,13 +87,23 @@ function Start-Spark {
     if ($sparkdPort -ne $DEFAULT_SPARKD_PORT) {
         Write-Host "  [!] sparkd port $DEFAULT_SPARKD_PORT busy, using $sparkdPort" -ForegroundColor Yellow
     }
-    $pulsePort = Get-AvailablePort -PreferredPort $DEFAULT_PULSE_PORT
-    if (-not $pulsePort) {
-        Write-Host "  [FAIL] No free Pulse port found near $DEFAULT_PULSE_PORT" -ForegroundColor Red
-        return
-    }
-    if ($pulsePort -ne $DEFAULT_PULSE_PORT) {
-        Write-Host "  [!] Pulse port $DEFAULT_PULSE_PORT busy, using $pulsePort" -ForegroundColor Yellow
+    if ($STRICT_PULSE_PORT) {
+        $pulsePort = $DEFAULT_PULSE_PORT
+        $pulseInUse = Get-NetTCPConnection -LocalPort $pulsePort -ErrorAction SilentlyContinue
+        if ($pulseInUse) {
+            Write-Host "  [FAIL] Pulse port $DEFAULT_PULSE_PORT is busy. Cleanup legacy listeners and retry." -ForegroundColor Red
+            Write-Host "  [HINT] Set SPARK_PULSE_STRICT_PORT=0 to allow automatic fallback." -ForegroundColor Yellow
+            return
+        }
+    } else {
+        $pulsePort = Get-AvailablePort -PreferredPort $DEFAULT_PULSE_PORT
+        if (-not $pulsePort) {
+            Write-Host "  [FAIL] No free Pulse port found near $DEFAULT_PULSE_PORT" -ForegroundColor Red
+            return
+        }
+        if ($pulsePort -ne $DEFAULT_PULSE_PORT) {
+            Write-Host "  [!] Pulse port $DEFAULT_PULSE_PORT busy, using $pulsePort" -ForegroundColor Yellow
+        }
     }
     $env:SPARKD_PORT = "$sparkdPort"
     $env:SPARKD_URL = "http://127.0.0.1:$sparkdPort"
