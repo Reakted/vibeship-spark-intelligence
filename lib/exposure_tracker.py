@@ -17,6 +17,44 @@ LAST_EXPOSURE_FILE = Path.home() / ".spark" / "last_exposure.json"
 # Chunk size for tail reads (64KB)
 _TAIL_CHUNK_BYTES = 65536
 
+# Write-volume policies for high-frequency exposure sources.
+_SOURCE_WRITE_POLICIES = {
+    "sync_context": {"max_items": 6, "dedupe_window_s": 600.0},
+    "sync_context:project": {"max_items": 4, "dedupe_window_s": 1800.0},
+    "chip_merge": {"max_items": 8, "dedupe_window_s": 900.0},
+}
+_POLICY_RECENT_SCAN_LIMIT = 300
+
+
+def _normalize_signature(value: str) -> str:
+    return " ".join(value.strip().lower().split())
+
+
+def _exposure_signature(row: Dict) -> str:
+    """Stable signature for dedupe across repeated emissions."""
+    key = row.get("insight_key")
+    if isinstance(key, str) and key.strip():
+        return f"k:{_normalize_signature(key)}"
+    text = row.get("text")
+    if isinstance(text, str) and text.strip():
+        category = row.get("category") or ""
+        return f"t:{_normalize_signature(str(category))}|{_normalize_signature(text)[:240]}"
+    return ""
+
+
+def _recent_signatures_for_source(source: str, now_ts: float, max_age_s: float) -> set[str]:
+    if not source or max_age_s <= 0:
+        return set()
+    recent = read_exposures_within(max_age_s=max_age_s, now=now_ts, limit=_POLICY_RECENT_SCAN_LIMIT)
+    signatures: set[str] = set()
+    for row in recent:
+        if (row.get("source") or "") != source:
+            continue
+        sig = _exposure_signature(row)
+        if sig:
+            signatures.add(sig)
+    return signatures
+
 
 def _tail_lines(path: Path, count: int) -> List[str]:
     """Read the last N lines of a file without loading the whole file into memory."""
@@ -98,6 +136,26 @@ def record_exposures(
 
     if not rows:
         return 0
+
+    policy = _SOURCE_WRITE_POLICIES.get(source, {})
+    if policy:
+        max_items = int(policy.get("max_items") or 0)
+        dedupe_window_s = float(policy.get("dedupe_window_s") or 0.0)
+        recent_sigs = _recent_signatures_for_source(source, now, dedupe_window_s)
+        seen_batch: set[str] = set()
+        filtered: List[Dict] = []
+        for row in rows:
+            sig = _exposure_signature(row)
+            if sig:
+                if sig in seen_batch or sig in recent_sigs:
+                    continue
+                seen_batch.add(sig)
+            filtered.append(row)
+        if max_items > 0 and len(filtered) > max_items:
+            filtered = filtered[:max_items]
+        rows = filtered
+        if not rows:
+            return 0
 
     EXPOSURES_FILE.parent.mkdir(parents=True, exist_ok=True)
     with EXPOSURES_FILE.open("a", encoding="utf-8") as f:
