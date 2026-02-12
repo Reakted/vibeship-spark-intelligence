@@ -59,6 +59,32 @@ For each change:
   - pulse delivery tests passed (`tests/test_advisory_delivery_status.py`)
 - **Decision:** keep
 
+### [2026-02-12 21:40 UTC] Track B closure - lightweighting and noise suppression
+- **Goal:** close remaining broad Spark cleanup items (B1-B6) with measurable churn reduction.
+- **Changes made:**
+  - `lib/auto_tuner.py`
+    - no-op recommendation writes suppressed (only real value changes are written)
+    - no-op boost writes suppressed in `_apply_changes`
+  - `lib/exposure_tracker.py`
+    - source-scoped dedupe/caps added for `sync_context`, `sync_context:project`, `chip_merge`
+  - `lib/chip_merger.py` + `lib/bridge_cycle.py`
+    - timestamp-independent merge dedupe hash
+    - low-quality cooldown suppression (`skipped_low_quality_cooldown`)
+    - tighter merge thresholds in bridge cycle (`min_confidence=0.55`, `min_quality_score=0.55`)
+  - `lib/runtime_hygiene.py` + bridge integration
+    - stale heartbeat/PID/tmp artifact cleanup per cycle
+  - `lib/depth_trainer.py`
+    - weak-level IDs surfaced in topic analysis
+    - targeted weak-lens drill topics added to discovery
+- **Validation result:** better
+  - focused test slices passed:
+    - `tests/test_exposure_tracker.py`
+    - `tests/test_chip_merger.py`
+    - `tests/test_runtime_hygiene.py`
+    - `tests/test_depth_topic_discovery.py`
+    - auto-tuner no-op tests in `tests/test_eidos.py`
+- **Decision:** keep
+
 ---
 
 ## 2026-02-11 Active Worklog

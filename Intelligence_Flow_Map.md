@@ -7,7 +7,7 @@ This file provides a high-level visual map of Spark Intelligence data flow.
 For exhaustive tuneables and file interactions, see Intelligence_Flow.md.
 
 Brief overview:
-Spark Intelligence captures events (hooks/adapters/sparkd) into a queue, runs a bridge cycle to extract signals, and turns them into learnings (cognitive insights, memory bank entries, EIDOS distillations). Queue consumption uses a logical head pointer with overflow spillover to reduce rewrite contention. Bridge-cycle persistence is batched so cognitive/meta stores flush once per cycle instead of per event. Meta-Ralph quality-gates what is stored, outcomes feed back into reliability, and Advisor/Context Sync surface those learnings before actions. Chips now load across single, multifile, and hybrid YAML formats, normalize event aliases, and apply pre-storage scoring gates so low-value telemetry is filtered before it reaches chip memory. High-value chip insights are merged into cognitive memory and also surfaced directly to Advisor and Context Sync. When semantic retrieval is enabled, Advisor runs an embeddings-first fast path and only escalates to agentic fanout under a minimal gate (weak count, weak score, high-risk), with deadline/rate-cap controls and route telemetry in `~/.spark/advisor/retrieval_router.jsonl`. This map shows the systems and data stores; Intelligence_Flow.md covers exact configs, tuneables, and file-level interactions.
+Spark Intelligence captures events (hooks/adapters/sparkd) into a queue, runs a bridge cycle to extract signals, and turns them into learnings (cognitive insights, memory bank entries, EIDOS distillations). Queue consumption uses a logical head pointer with overflow spillover to reduce rewrite contention. Bridge-cycle persistence is batched so cognitive/meta stores flush once per cycle instead of per event, and runtime hygiene now prunes stale heartbeat/PID/tmp artifacts each cycle. Meta-Ralph quality-gates what is stored, outcomes feed back into reliability, and Advisor/Context Sync surface those learnings before actions. Chips now load across single, multifile, and hybrid YAML formats, normalize event aliases, and apply pre-storage scoring gates so low-value telemetry is filtered before it reaches chip memory. High-value chip insights are merged into cognitive memory and also surfaced directly to Advisor and Context Sync, with stable dedupe and low-quality cooldown suppression in chip merge. Exposure streams from sync-heavy sources are deduped/capped to reduce prediction-loop noise. When semantic retrieval is enabled, Advisor runs an embeddings-first fast path and only escalates to agentic fanout under a minimal gate (weak count, weak score, high-risk), with deadline/rate-cap controls and route telemetry in `~/.spark/advisor/retrieval_router.jsonl`. This map shows the systems and data stores; Intelligence_Flow.md covers exact configs, tuneables, and file-level interactions.
 
 ```mermaid
 flowchart LR
@@ -28,6 +28,7 @@ flowchart LR
   subgraph Bridge
     bridge_worker["bridge_worker.py"]
     bridge_cycle["lib/bridge_cycle.run_bridge_cycle"]
+    runtime_hygiene["lib/runtime_hygiene.cleanup_runtime_artifacts"]
     update_context["lib/bridge.update_spark_context"]
   end
 
@@ -128,6 +129,7 @@ flowchart LR
   queue --> bridge_worker --> bridge_cycle
   queue --> trace_ctx
 
+  bridge_cycle --> runtime_hygiene
   bridge_cycle --> update_context --> spark_context
 
   bridge_cycle --> memory_capture --> cognitive

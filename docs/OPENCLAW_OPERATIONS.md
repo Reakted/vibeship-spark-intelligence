@@ -98,7 +98,7 @@ Outputs written to OpenClaw workspace:
   └─ SPARK_NOTIFICATIONS.md (recent events)
         │
         ▼
-Cron job (every 10 min) tells agent to read + act on advisories
+Cron job (every 30 min) tells agent to read + act on advisories
         │
         ▼
 Agent evaluates, acts, reports feedback to spark_reports/
@@ -233,7 +233,7 @@ Verification loop after any config change:
 
 ## Agent Behavior (Spark the Seer)
 
-### On Cron Refresh (every 10 min)
+### On Cron Refresh (every 30 min)
 1. Read `SPARK_ADVISORY.md`
 2. For each recommendation: act, defer, or skip
 3. Report feedback via `lib/agent_feedback.py`:

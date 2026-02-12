@@ -489,9 +489,14 @@ Tool + Context → Query Memory Banks + Cognitive Insights + Mind → Rank by Re
 |-----------|---------|-------------|
 | `MIN_RELIABILITY_FOR_ADVICE` | **0.5** | **Quality filter.** Only include insights with 50%+ reliability in advice. Lowered from 0.6 for more advice coverage. Wired to `tuneables.json` → `advisor.min_reliability`. |
 | `MIN_VALIDATIONS_FOR_STRONG_ADVICE` | **2** | **Strong advice threshold.** Insights validated 2+ times are marked as "strong" advice. Wired to `advisor.min_validations_strong`. |
-| `MAX_ADVICE_ITEMS` | **8** | **Advice limit.** Maximum advice items returned per query. Raised from 5 for complex tasks. Wired to `advisor.max_items`. |
+| `MAX_ADVICE_ITEMS` | **8** | **Advice limit.** Runtime reads `advisor.max_items`. Keep `advisor.max_advice_items` mirrored for auto-tuner compatibility. |
 | `ADVICE_CACHE_TTL_SECONDS` | **120** | **Cache duration (2 min).** Same query within 2 minutes returns cached advice. Wired to `advisor.cache_ttl` (also reads `values.advice_cache_ttl`). |
 | `MIN_RANK_SCORE` | **0.35** | **Rank cutoff.** Drop advice below this score after ranking — prefer fewer, higher-quality items. Wired to `advisor.min_rank_score`. |
+
+Compatibility note:
+- Runtime advisor uses `advisor.max_items`.
+- Auto-tuner recommendation logic currently targets `advisor.max_advice_items`.
+- Keep both keys equal to avoid drift.
 
 ### Advice Sources
 
@@ -508,7 +513,7 @@ Tool + Context → Query Memory Banks + Cognitive Insights + Mind → Rank by Re
 
 | Scenario | Adjustment |
 |----------|------------|
-| Getting too much advice | Lower `MAX_ADVICE_ITEMS` to 3 |
+| Getting too much advice | Lower `advisor.max_items` (and mirror `advisor.max_advice_items`) to 3 |
 | Missing relevant warnings | Lower `MIN_RELIABILITY_FOR_ADVICE` to 0.5 |
 | Advice is stale | Lower `ADVICE_CACHE_TTL_SECONDS` to 60 (already lowered to 120) |
 | Performance issues | Raise cache TTL to 600 (10 min) |
@@ -1097,6 +1102,9 @@ This is the active hot-path advisory stack used by hooks:
 |----------|---------|--------|
 | `SPARK_ADVISORY_ENGINE` | `1` | Master on/off for advisory engine path. |
 | `SPARK_ADVISORY_MAX_MS` | `4000` | Total budget for one advisory hook execution. |
+| `SPARK_ADVISORY_STALE_S` | `900` | Delivery badge stale window for `live|fallback|blocked|stale` classification. |
+| `SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S` | `1800` | Suppress re-emitting same advisory text during cooldown window. |
+| `SPARK_ADVISORY_REQUIRE_ACTION` | `1` | Enforce actionable next-check text when advisory is too generic. |
 | `SPARK_ADVISORY_PREFETCH_QUEUE` | `1` | Enables enqueueing background prefetch jobs from user prompts. |
 | `SPARK_ADVISORY_INCLUDE_MIND` | `0` | Includes Mind retrieval in memory fusion bundle when set to `1`. |
 | `SPARK_ADVISORY_EMIT` | `1` | Enables writing advisory text to stdout hook output. |
@@ -1129,21 +1137,26 @@ This is the active hot-path advisory stack used by hooks:
   "advisor": {
     "min_reliability": 0.5,
     "min_validations_strong": 2,
-    "max_items": 8,
+    "max_items": 5,
+    "max_advice_items": 5,
     "cache_ttl": 120,
     "min_rank_score": 0.35
   },
   "advisory_engine": {
     "enabled": true,
-    "max_ms": 4000,
+    "max_ms": 3500,
     "include_mind": false,
     "prefetch_queue_enabled": true,
     "prefetch_inline_enabled": true,
-    "prefetch_inline_max_jobs": 1
+    "prefetch_inline_max_jobs": 1,
+    "delivery_stale_s": 900,
+    "advisory_text_repeat_cooldown_s": 1800,
+    "actionability_enforce": true
   },
   "advisory_gate": {
-    "max_emit_per_call": 3,
-    "tool_cooldown_s": 30,
+    "max_emit_per_call": 1,
+    "tool_cooldown_s": 90,
+    "advice_repeat_cooldown_s": 1800,
     "warning_threshold": 0.8,
     "note_threshold": 0.5,
     "whisper_threshold": 0.35
@@ -1155,9 +1168,16 @@ This is the active hot-path advisory stack used by hooks:
   },
   "advisory_prefetch": {
     "worker_enabled": true,
-    "max_jobs_per_run": 3,
+    "max_jobs_per_run": 2,
     "max_tools_per_job": 3,
     "min_probability": 0.25
+  },
+  "auto_tuner": {
+    "enabled": true,
+    "mode": "suggest",
+    "max_changes_per_cycle": 2,
+    "run_interval_s": 86400,
+    "max_change_per_run": 0.15
   },
   "request_tracker": {
     "max_pending": 50,
@@ -1189,6 +1209,16 @@ This is the active hot-path advisory stack used by hooks:
 - With `mode=auto`, advisory remains deterministic-safe when AI is slow or unavailable.
 - First-turn coverage is improved by baseline packets generated on `UserPromptSubmit`.
 
+### Auto-Tuner Modes (Important)
+
+Valid `auto_tuner.mode` values:
+- `suggest`: log-only recommendations (safest default)
+- `conservative`: apply only high-confidence, low-impact recommendations
+- `moderate`: apply recommendations with confidence > 0.5
+- `aggressive`: apply all selected recommendations
+
+Legacy value `data_driven` is not a recognized mode in runtime apply logic and can behave like aggressive fallback. Do not use it.
+
 ---
 
 ## Tuneable Wiring Summary
@@ -1205,11 +1235,12 @@ Components fall back to hard-coded defaults when a key is absent.
 | `triggers` | Trigger rules | `enabled`, `rules_file` |
 | `promotion` | Promoter + auto-promotion interval | `adapter_budgets`, `confidence_floor`, `min_age_hours`, `auto_interval_s` |
 | `synthesizer` | Advisory synthesizer | `mode`, `preferred_provider`, `ai_timeout_s`, `cache_ttl_s`, `max_cache_entries` |
-| `advisor` | Advisor | `min_reliability`, `min_validations_strong`, `max_items`, `cache_ttl`, `min_rank_score` |
-| `advisory_engine` | Predictive advisory orchestration | `enabled`, `max_ms`, `include_mind`, `prefetch_queue_enabled`, `prefetch_inline_enabled`, `prefetch_inline_max_jobs` |
-| `advisory_gate` | Advisory emission policy | `max_emit_per_call`, `tool_cooldown_s`, `warning_threshold`, `note_threshold`, `whisper_threshold` |
+| `advisor` | Advisor | `min_reliability`, `min_validations_strong`, `max_items`, `max_advice_items` (compat), `cache_ttl`, `min_rank_score` |
+| `advisory_engine` | Predictive advisory orchestration | `enabled`, `max_ms`, `include_mind`, `prefetch_queue_enabled`, `prefetch_inline_enabled`, `prefetch_inline_max_jobs`, `delivery_stale_s`, `advisory_text_repeat_cooldown_s`, `actionability_enforce` |
+| `advisory_gate` | Advisory emission policy | `max_emit_per_call`, `tool_cooldown_s`, `advice_repeat_cooldown_s`, `warning_threshold`, `note_threshold`, `whisper_threshold` |
 | `advisory_packet_store` | Packet lifecycle + relaxed lookup weighting | `packet_ttl_s`, `max_index_packets`, `relaxed_effectiveness_weight`, `relaxed_low_effectiveness_threshold`, `relaxed_low_effectiveness_penalty` |
 | `advisory_prefetch` | Prefetch worker planning limits | `worker_enabled`, `max_jobs_per_run`, `max_tools_per_job`, `min_probability` |
+| `auto_tuner` | Feedback-driven tune recommendations and bounded apply | `enabled`, `mode`, `max_changes_per_cycle`, `run_interval_s`, `max_change_per_run`, `source_boosts` |
 | `request_tracker` | EIDOS request envelope retention + timeout policy | `max_pending`, `max_completed`, `max_age_seconds` |
 | `memory_capture` | Conversational memory auto-save/suggestion policy | `auto_save_threshold`, `suggest_threshold`, `max_capture_chars` |
 | `queue` | Queue growth + read safety limits | `max_events`, `tail_chunk_bytes` |
