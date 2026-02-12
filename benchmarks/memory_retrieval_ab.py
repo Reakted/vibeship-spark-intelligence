@@ -29,6 +29,7 @@ import math
 import statistics
 import sys
 import time
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,11 +98,77 @@ def percentile(values: Sequence[float], p: float) -> float:
 
 
 def lexical_overlap_score(query: str, text: str) -> float:
-    q = {t for t in query.lower().split() if len(t) >= 4}
-    d = {t for t in text.lower().split() if len(t) >= 4}
+    q = {t for t in re.findall(r"[a-z0-9_]+", query.lower()) if len(t) >= 3}
+    d = {t for t in re.findall(r"[a-z0-9_]+", text.lower()) if len(t) >= 3}
     if not q or not d:
         return 0.0
     return len(q & d) / max(1, len(q | d))
+
+
+def bm25_normalized_scores(query: str, docs: Sequence[str], k1: float = 1.2, b: float = 0.75) -> List[float]:
+    if not docs:
+        return []
+    query_tokens = [t for t in re.findall(r"[a-z0-9_]+", query.lower()) if len(t) >= 3]
+    if not query_tokens:
+        return [0.0 for _ in docs]
+
+    tokenized_docs = [[t for t in re.findall(r"[a-z0-9_]+", str(doc).lower()) if len(t) >= 3] for doc in docs]
+    n_docs = len(tokenized_docs)
+    avgdl = sum(len(toks) for toks in tokenized_docs) / max(n_docs, 1)
+    if avgdl <= 0:
+        return [0.0 for _ in docs]
+
+    df: Dict[str, int] = {}
+    for toks in tokenized_docs:
+        for tok in set(toks):
+            df[tok] = df.get(tok, 0) + 1
+
+    qtf: Dict[str, int] = {}
+    for tok in query_tokens:
+        qtf[tok] = qtf.get(tok, 0) + 1
+
+    raw: List[float] = []
+    for toks in tokenized_docs:
+        dl = max(len(toks), 1)
+        tf: Dict[str, int] = {}
+        for tok in toks:
+            tf[tok] = tf.get(tok, 0) + 1
+
+        score = 0.0
+        for tok, q_count in qtf.items():
+            term_df = df.get(tok, 0)
+            if term_df <= 0:
+                continue
+            idf = math.log(1.0 + ((n_docs - term_df + 0.5) / (term_df + 0.5)))
+            term_tf = tf.get(tok, 0)
+            if term_tf <= 0:
+                continue
+            denom = term_tf + k1 * (1.0 - b + (b * (dl / avgdl)))
+            if denom <= 0:
+                continue
+            bm25_term = idf * ((term_tf * (k1 + 1.0)) / denom)
+            score += bm25_term * float(q_count)
+        raw.append(score)
+
+    mx = max(raw) if raw else 0.0
+    if mx <= 0:
+        return [0.0 for _ in docs]
+    return [float(v / mx) for v in raw]
+
+
+def hybrid_lexical_scores(
+    query: str,
+    docs: Sequence[str],
+    bm25_mix: float = 0.75,
+    k1: float = 1.2,
+    b: float = 0.75,
+) -> List[float]:
+    if not docs:
+        return []
+    bm25 = bm25_normalized_scores(query=query, docs=docs, k1=k1, b=b)
+    overlap = [lexical_overlap_score(query, doc) for doc in docs]
+    blend = max(0.0, min(1.0, float(bm25_mix)))
+    return [(blend * bm) + ((1.0 - blend) * ov) for bm, ov in zip(bm25, overlap)]
 
 
 def extract_agentic_queries(context: str, limit: int = 3) -> List[str]:
@@ -300,6 +367,7 @@ def retrieve_hybrid(
     agentic: bool,
 ) -> List[RetrievedItem]:
     merged: Dict[str, RetrievedItem] = {}
+    candidates: List[RetrievedItem] = []
     queries = [query]
     if agentic:
         queries.extend(extract_agentic_queries(query))
@@ -311,20 +379,25 @@ def retrieve_hybrid(
             if not text:
                 continue
             base = float(getattr(row, "fusion_score", 0.0) or 0.0)
-            lex = lexical_overlap_score(query, text)
-            score = base + (lexical_weight * lex)
             source = "hybrid_agentic" if agentic else "hybrid"
-            item = RetrievedItem(
+            candidates.append(
+                RetrievedItem(
                 insight_key=str(row.insight_key or ""),
                 text=text,
                 source=source,
                 semantic_score=float(getattr(row, "semantic_sim", 0.0) or 0.0),
                 fusion_score=base,
-                score=score,
+                score=base,
                 why=str(getattr(row, "why", "") or ""),
+                )
             )
-            if item.insight_key:
-                _merge_best(merged, item)
+
+    lexical_scores = hybrid_lexical_scores(query, [item.text for item in candidates], bm25_mix=0.75, k1=1.2, b=0.75)
+    for idx, item in enumerate(candidates):
+        lex = lexical_scores[idx] if idx < len(lexical_scores) else 0.0
+        item.score = float(item.fusion_score) + (lexical_weight * lex)
+        if item.insight_key:
+            _merge_best(merged, item)
 
     ranked = sorted(merged.values(), key=lambda item: item.score, reverse=True)
     return ranked[:top_k]

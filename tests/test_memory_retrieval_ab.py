@@ -79,3 +79,17 @@ def test_compute_case_metrics_without_labels():
     assert metrics.top1_hit is None
     assert metrics.hits == 0
     assert metrics.label_count == 0
+
+
+def test_hybrid_lexical_scores_boost_term_frequency():
+    mod = _load_module()
+    scores = mod.hybrid_lexical_scores(
+        "auth token session rollback",
+        [
+            "auth token session rollback",
+            "auth token session rollback rollback",
+        ],
+        bm25_mix=0.9,
+    )
+    assert len(scores) == 2
+    assert scores[1] > scores[0]

@@ -21,6 +21,8 @@ import json
 import time
 import hashlib
 import os
+import re
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple
@@ -63,6 +65,88 @@ MIN_VALIDATIONS_FOR_STRONG_ADVICE = 2
 MAX_ADVICE_ITEMS = 8  # Raised from 5 for complex tasks
 ADVICE_CACHE_TTL_SECONDS = 120  # 2 minutes (lowered from 5 for fresher advice)
 MIN_RANK_SCORE = 0.35  # Drop advice below this after ranking — prefer fewer, higher-quality items
+RETRIEVAL_ROUTE_LOG = ADVISOR_DIR / "retrieval_router.jsonl"
+RETRIEVAL_ROUTE_LOG_MAX = 800
+
+DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
+    "1": {
+        "profile": "local_free",
+        "mode": "auto",  # auto | embeddings_only | hybrid_agentic
+        "semantic_limit": 8,
+        "max_queries": 2,
+        "agentic_query_limit": 2,
+        "lexical_weight": 0.25,
+        "bm25_k1": 1.2,
+        "bm25_b": 0.75,
+        "bm25_mix": 0.75,  # blend: bm25 vs overlap
+        "complexity_threshold": 3,
+        "min_results_no_escalation": 3,
+        "min_top_score_no_escalation": 0.68,
+        "escalate_on_high_risk": True,
+        "escalate_on_trigger": True,
+    },
+    "2": {
+        "profile": "balanced_spend",
+        "mode": "auto",
+        "semantic_limit": 10,
+        "max_queries": 3,
+        "agentic_query_limit": 3,
+        "lexical_weight": 0.30,
+        "bm25_k1": 1.2,
+        "bm25_b": 0.75,
+        "bm25_mix": 0.75,
+        "complexity_threshold": 2,
+        "min_results_no_escalation": 4,
+        "min_top_score_no_escalation": 0.72,
+        "escalate_on_high_risk": True,
+        "escalate_on_trigger": True,
+    },
+    "3": {
+        "profile": "quality_max",
+        "mode": "hybrid_agentic",
+        "semantic_limit": 12,
+        "max_queries": 4,
+        "agentic_query_limit": 4,
+        "lexical_weight": 0.35,
+        "bm25_k1": 1.2,
+        "bm25_b": 0.75,
+        "bm25_mix": 0.75,
+        "complexity_threshold": 1,
+        "min_results_no_escalation": 5,
+        "min_top_score_no_escalation": 0.78,
+        "escalate_on_high_risk": True,
+        "escalate_on_trigger": True,
+    },
+}
+
+DEFAULT_COMPLEXITY_HINTS = (
+    "root cause",
+    "multi hop",
+    "multi-hop",
+    "compare",
+    "timeline",
+    "repeated",
+    "pattern",
+    "tradeoff",
+    "impact",
+    "synthesis",
+    "across",
+    "between",
+)
+
+DEFAULT_HIGH_RISK_HINTS = (
+    "auth",
+    "token",
+    "security",
+    "prod",
+    "production",
+    "migration",
+    "rollback",
+    "deploy",
+    "bridge",
+    "session",
+    "memory retrieval",
+)
 
 
 def _load_advisor_config() -> None:
@@ -135,6 +219,19 @@ def _tail_jsonl(path: Path, count: int) -> List[str]:
         return []
 
 
+def _append_jsonl_capped(path: Path, entry: Dict[str, Any], max_lines: int) -> None:
+    """Append JSONL entry and keep file bounded."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+        lines = _tail_jsonl(path, max_lines)
+        if lines:
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
 # ============= Data Classes =============
 @dataclass
 class Advice:
@@ -180,6 +277,7 @@ class SparkAdvisor:
         self.mind = get_mind_bridge()
         self.effectiveness = self._load_effectiveness()
         self._cache: Dict[str, Tuple[List[Advice], float]] = {}
+        self.retrieval_policy = self._load_retrieval_policy()
 
     def _load_effectiveness(self) -> Dict[str, Any]:
         """Load effectiveness tracking data."""
@@ -289,7 +387,14 @@ class SparkAdvisor:
         try:
             metrics = self._load_metrics()
             total = int(metrics.get("total_retrievals", 0)) + 1
-            cognitive_sources = {"cognitive", "semantic", "trigger", "chip"}
+            cognitive_sources = {
+                "cognitive",
+                "semantic",
+                "semantic-hybrid",
+                "semantic-agentic",
+                "trigger",
+                "chip",
+            }
             has_cognitive = any(a.source in cognitive_sources for a in advice_list)
             cognitive = int(metrics.get("cognitive_retrievals", 0)) + (1 if has_cognitive else 0)
             metrics["total_retrievals"] = total
@@ -311,7 +416,7 @@ class SparkAdvisor:
             sources = entry.get("sources") or []
             idx = advice_ids.index(advice_id) if advice_id in advice_ids else -1
             source = sources[idx] if 0 <= idx < len(sources) else None
-            if source not in {"cognitive", "semantic", "trigger"}:
+            if source not in {"cognitive", "semantic", "semantic-hybrid", "semantic-agentic", "trigger"}:
                 return
 
             metrics = self._load_metrics()
@@ -492,6 +597,127 @@ class SparkAdvisor:
             oldest = min(self._cache.keys(), key=lambda k: self._cache[k][1])
             del self._cache[oldest]
 
+    # ============= Retrieval Policy =============
+
+    def _load_retrieval_policy(self) -> Dict[str, Any]:
+        """Load retrieval routing policy from tuneables + env."""
+        level = str(os.getenv("SPARK_RETRIEVAL_LEVEL", "1") or "1").strip()
+        if level not in DEFAULT_RETRIEVAL_PROFILES:
+            level = "1"
+        policy = dict(DEFAULT_RETRIEVAL_PROFILES[level])
+        policy["level"] = level
+
+        # Optional overrides from tuneables.json -> retrieval section.
+        try:
+            tuneables = Path.home() / ".spark" / "tuneables.json"
+            if tuneables.exists():
+                data = json.loads(tuneables.read_text(encoding="utf-8"))
+                retrieval = data.get("retrieval") or {}
+                if isinstance(retrieval, dict):
+                    lvl = str(retrieval.get("level") or level).strip()
+                    if lvl in DEFAULT_RETRIEVAL_PROFILES:
+                        level = lvl
+                        policy = dict(DEFAULT_RETRIEVAL_PROFILES[level])
+                        policy["level"] = level
+                    profile_overrides = retrieval.get("profiles") or {}
+                    if isinstance(profile_overrides, dict):
+                        by_level = profile_overrides.get(level) or {}
+                        if isinstance(by_level, dict):
+                            policy.update(by_level)
+                    overrides = retrieval.get("overrides") or {}
+                    if isinstance(overrides, dict):
+                        policy.update(overrides)
+                    # Flat top-level retrieval keys are also treated as overrides.
+                    for key in (
+                        "mode",
+                        "semantic_limit",
+                        "max_queries",
+                        "agentic_query_limit",
+                        "lexical_weight",
+                        "bm25_k1",
+                        "bm25_b",
+                        "bm25_mix",
+                        "complexity_threshold",
+                        "min_results_no_escalation",
+                        "min_top_score_no_escalation",
+                        "escalate_on_high_risk",
+                        "escalate_on_trigger",
+                    ):
+                        if key in retrieval:
+                            policy[key] = retrieval.get(key)
+        except Exception:
+            pass
+
+        env_mode = str(os.getenv("SPARK_RETRIEVAL_MODE", "") or "").strip().lower()
+        if env_mode in {"auto", "embeddings_only", "hybrid_agentic"}:
+            policy["mode"] = env_mode
+
+        # Normalize types.
+        policy["mode"] = str(policy.get("mode") or "auto").strip().lower()
+        if policy["mode"] not in {"auto", "embeddings_only", "hybrid_agentic"}:
+            policy["mode"] = "auto"
+        policy["semantic_limit"] = max(4, int(policy.get("semantic_limit", 8) or 8))
+        policy["max_queries"] = max(1, int(policy.get("max_queries", 2) or 2))
+        policy["agentic_query_limit"] = max(1, int(policy.get("agentic_query_limit", 2) or 2))
+        policy["lexical_weight"] = max(0.0, min(1.0, float(policy.get("lexical_weight", 0.25) or 0.25)))
+        policy["bm25_k1"] = max(0.1, float(policy.get("bm25_k1", 1.2) or 1.2))
+        policy["bm25_b"] = max(0.0, min(1.0, float(policy.get("bm25_b", 0.75) or 0.75)))
+        policy["bm25_mix"] = max(0.0, min(1.0, float(policy.get("bm25_mix", 0.75) or 0.75)))
+        policy["complexity_threshold"] = max(1, int(policy.get("complexity_threshold", 2) or 2))
+        policy["min_results_no_escalation"] = max(1, int(policy.get("min_results_no_escalation", 3) or 3))
+        policy["min_top_score_no_escalation"] = max(
+            0.0, min(1.0, float(policy.get("min_top_score_no_escalation", 0.7) or 0.7))
+        )
+        policy["escalate_on_high_risk"] = bool(policy.get("escalate_on_high_risk", True))
+        policy["escalate_on_trigger"] = bool(policy.get("escalate_on_trigger", True))
+        policy["complexity_hints"] = list(DEFAULT_COMPLEXITY_HINTS)
+        policy["high_risk_hints"] = list(DEFAULT_HIGH_RISK_HINTS)
+        return policy
+
+    def _analyze_query_complexity(self, tool_name: str, context: str) -> Dict[str, Any]:
+        """Estimate when agentic retrieval is worth the added latency/cost."""
+        text = str(context or "").strip().lower()
+        tokens = [t for t in re.findall(r"[a-z0-9_]+", text) if t]
+        score = 0
+        reasons: List[str] = []
+
+        if len(tokens) >= 18:
+            score += 1
+            reasons.append("long_query")
+        if "?" in context:
+            score += 1
+            reasons.append("question_form")
+
+        complexity_hits = [k for k in self.retrieval_policy.get("complexity_hints", []) if k in text]
+        if complexity_hits:
+            score += min(2, len(complexity_hits))
+            reasons.append("complexity_terms")
+
+        high_risk_hits = [k for k in self.retrieval_policy.get("high_risk_hints", []) if k in text]
+        if high_risk_hits:
+            score += 1
+            reasons.append("risk_terms")
+
+        tool = str(tool_name or "").strip().lower()
+        if tool in {"bash", "edit", "write", "task"}:
+            score += 1
+            reasons.append("high_impact_tool")
+
+        threshold = int(self.retrieval_policy.get("complexity_threshold", 2) or 2)
+        return {
+            "score": score,
+            "threshold": threshold,
+            "requires_agentic": score >= threshold,
+            "complexity_hits": complexity_hits[:4],
+            "high_risk_hits": high_risk_hits[:4],
+            "reasons": reasons,
+        }
+
+    def _log_retrieval_route(self, entry: Dict[str, Any]) -> None:
+        payload = dict(entry or {})
+        payload["ts"] = time.time()
+        _append_jsonl_capped(RETRIEVAL_ROUTE_LOG, payload, RETRIEVAL_ROUTE_LOG_MAX)
+
     # ============= Core Advice Generation =============
 
     def advise(
@@ -628,7 +854,7 @@ class SparkAdvisor:
 
     def _get_cognitive_advice(self, tool_name: str, context: str, semantic_context: Optional[str] = None) -> List[Advice]:
         """Get advice from cognitive insights (semantic-first with keyword fallback)."""
-        semantic = self._get_semantic_cognitive_advice(semantic_context or context)
+        semantic = self._get_semantic_cognitive_advice(tool_name=tool_name, context=semantic_context or context)
         keyword = self._get_cognitive_advice_keyword(tool_name, context)
 
         if not semantic:
@@ -643,14 +869,8 @@ class SparkAdvisor:
             merged.append(a)
         return merged
 
-    def _get_semantic_cognitive_advice(self, context: str) -> List[Advice]:
-        """Hybrid + lightweight agentic retrieval for cognitive insights.
-
-        Method:
-        1) semantic retrieval on primary context,
-        2) semantic retrieval on 1-3 extracted query facets,
-        3) lexical rerank by query overlap to avoid embeddings-only misses.
-        """
+    def _get_semantic_cognitive_advice(self, tool_name: str, context: str) -> List[Advice]:
+        """Retrieve cognitive advice with policy-driven semantic/agentic routing."""
         try:
             from .semantic_retriever import get_semantic_retriever
         except Exception:
@@ -659,51 +879,180 @@ class SparkAdvisor:
         retriever = get_semantic_retriever()
         if not retriever:
             return []
-
-        queries = [context]
-        queries.extend(self._extract_agentic_queries(context))
-
-        merged: Dict[str, Any] = {}
-        for q in queries[:4]:
-            try:
-                for r in retriever.retrieve(q, self.cognitive.insights, limit=8):
-                    key = r.insight_key or self._generate_advice_id(r.insight_text)
-                    prev = merged.get(key)
-                    if prev is None or getattr(r, "fusion_score", 0.0) > getattr(prev, "fusion_score", 0.0):
-                        merged[key] = r
-            except Exception:
-                continue
-
-        if not merged:
+        insights = dict(getattr(self.cognitive, "insights", {}) or {})
+        if not insights:
             return []
 
+        policy = dict(self.retrieval_policy or {})
+        mode = str(policy.get("mode") or "auto").strip().lower()
+        semantic_limit = int(policy.get("semantic_limit", 8) or 8)
+        max_queries = int(policy.get("max_queries", 2) or 2)
+        agentic_query_limit = int(policy.get("agentic_query_limit", 2) or 2)
+        lexical_weight = float(policy.get("lexical_weight", 0.25) or 0.25)
+        bm25_k1 = float(policy.get("bm25_k1", 1.2) or 1.2)
+        bm25_b = float(policy.get("bm25_b", 0.75) or 0.75)
+        bm25_mix = float(policy.get("bm25_mix", 0.75) or 0.75)
+
+        analysis = self._analyze_query_complexity(tool_name, context)
+
+        primary_results: List[Any] = []
+        try:
+            primary_results = list(retriever.retrieve(context, insights, limit=semantic_limit))
+        except Exception:
+            primary_results = []
+
+        primary_count = len(primary_results)
+        primary_top_score = max((float(getattr(r, "fusion_score", 0.0) or 0.0) for r in primary_results), default=0.0)
+        primary_trigger_hit = any(str(getattr(r, "source_type", "") or "") == "trigger" for r in primary_results)
+
+        should_escalate = False
+        escalate_reasons: List[str] = []
+        if mode == "hybrid_agentic":
+            should_escalate = True
+            escalate_reasons.append("forced_hybrid_agentic_mode")
+        elif mode == "embeddings_only":
+            should_escalate = False
+            escalate_reasons.append("forced_embeddings_only_mode")
+        else:
+            if analysis.get("requires_agentic"):
+                should_escalate = True
+                escalate_reasons.append("query_complexity")
+            if bool(policy.get("escalate_on_high_risk", True)) and analysis.get("high_risk_hits"):
+                should_escalate = True
+                escalate_reasons.append("high_risk_terms")
+            if bool(policy.get("escalate_on_trigger", True)) and primary_trigger_hit:
+                should_escalate = True
+                escalate_reasons.append("trigger_signal")
+            if primary_count < int(policy.get("min_results_no_escalation", 3) or 3):
+                should_escalate = True
+                escalate_reasons.append("weak_primary_count")
+            if primary_top_score < float(policy.get("min_top_score_no_escalation", 0.7) or 0.7):
+                should_escalate = True
+                escalate_reasons.append("weak_primary_score")
+            if not primary_results:
+                should_escalate = True
+                escalate_reasons.append("empty_primary")
+
+        facet_queries: List[str] = []
+        if should_escalate and mode != "embeddings_only":
+            facet_queries = self._extract_agentic_queries(context, limit=agentic_query_limit)
+            facet_queries = facet_queries[: max(0, max_queries - 1)]
+
+        merged: Dict[str, Any] = {}
+        for r in primary_results:
+            key = r.insight_key or self._generate_advice_id(r.insight_text)
+            prev = merged.get(key)
+            if prev is None or float(getattr(r, "fusion_score", 0.0) or 0.0) > float(getattr(prev, "fusion_score", 0.0) or 0.0):
+                merged[key] = r
+
+        for q in facet_queries:
+            try:
+                query_results = retriever.retrieve(q, insights, limit=semantic_limit)
+            except Exception:
+                continue
+            for r in query_results:
+                key = r.insight_key or self._generate_advice_id(r.insight_text)
+                prev = merged.get(key)
+                if prev is None or float(getattr(r, "fusion_score", 0.0) or 0.0) > float(getattr(prev, "fusion_score", 0.0) or 0.0):
+                    merged[key] = r
+
+        if not merged:
+            self._log_retrieval_route(
+                {
+                    "tool": tool_name,
+                    "profile_level": policy.get("level"),
+                    "profile_name": policy.get("profile"),
+                    "mode": mode,
+                    "route": "empty",
+                    "escalated": should_escalate,
+                    "primary_count": primary_count,
+                    "primary_top_score": round(primary_top_score, 4),
+                    "facets_used": len(facet_queries),
+                    "complexity_score": analysis.get("score"),
+                    "complexity_threshold": analysis.get("threshold"),
+                    "reasons": escalate_reasons[:6],
+                }
+            )
+            return []
+
+        semantic_source = "semantic-agentic" if should_escalate else "semantic"
+        merged_values = list(merged.values())
+        lexical_scores = self._hybrid_lexical_scores(
+            query=context,
+            docs=[str(getattr(r, "insight_text", "") or "") for r in merged_values],
+            bm25_mix=bm25_mix,
+            k1=bm25_k1,
+            b=bm25_b,
+        )
+        scored: List[Tuple[Any, float]] = []
+        for idx, row in enumerate(merged_values):
+            base = float(getattr(row, "fusion_score", 0.0) or 0.0)
+            lex = lexical_scores[idx] if idx < len(lexical_scores) else 0.0
+            scored.append((row, base + (lexical_weight * lex)))
         ranked = sorted(
-            merged.values(),
-            key=lambda r: (float(getattr(r, "fusion_score", 0.0)) + 0.35 * self._lexical_overlap_score(context, getattr(r, "insight_text", ""))),
+            scored,
+            key=lambda pair: pair[1],
             reverse=True,
         )
+        ranked_rows = [row for row, _ in ranked]
 
+        route_reason = " + ".join(escalate_reasons[:3]) if should_escalate else "primary_semantic_only"
         advice: List[Advice] = []
-        for r in ranked[:10]:
+        for r in ranked_rows[:semantic_limit]:
             if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(r.insight_text):
                 continue
-            confidence = max(0.6, r.fusion_score)
-            if r.source_type == "trigger":
+            confidence = max(0.6, float(getattr(r, "fusion_score", 0.0) or 0.0))
+            if str(getattr(r, "source_type", "") or "") == "trigger":
                 confidence = max(0.8, confidence)
-            context_match = max(r.semantic_sim, r.trigger_conf, 0.7)
-            source = "trigger" if r.source_type == "trigger" else "semantic-hybrid"
-            reason = r.why or "Hybrid semantic+lexical match"
+            context_match = max(
+                float(getattr(r, "semantic_sim", 0.0) or 0.0),
+                float(getattr(r, "trigger_conf", 0.0) or 0.0),
+                0.7,
+            )
+            source = "trigger" if str(getattr(r, "source_type", "") or "") == "trigger" else semantic_source
+            base_reason = str(getattr(r, "why", "") or "").strip()
+            if source == "trigger":
+                reason = base_reason or "Trigger match"
+            elif should_escalate:
+                reason = base_reason or f"Hybrid-agentic route: {route_reason}"
+            else:
+                reason = base_reason or "Semantic route (embeddings primary)"
 
-            advice.append(Advice(
-                advice_id=self._generate_advice_id(r.insight_text),
-                insight_key=r.insight_key,
-                text=r.insight_text,
-                confidence=confidence,
-                source=source,
-                context_match=context_match,
-                reason=reason,
-            ))
+            advice.append(
+                Advice(
+                    advice_id=self._generate_advice_id(r.insight_text),
+                    insight_key=r.insight_key,
+                    text=r.insight_text,
+                    confidence=confidence,
+                    source=source,
+                    context_match=context_match,
+                    reason=reason,
+                )
+            )
 
+        self._log_retrieval_route(
+            {
+                "tool": tool_name,
+                "profile_level": policy.get("level"),
+                "profile_name": policy.get("profile"),
+                "mode": mode,
+                "route": semantic_source,
+                "escalated": should_escalate,
+                "primary_count": primary_count,
+                "primary_top_score": round(primary_top_score, 4),
+                "returned_count": len(advice),
+                "facets_used": len(facet_queries),
+                "lexical_weight": lexical_weight,
+                "bm25_k1": bm25_k1,
+                "bm25_b": bm25_b,
+                "bm25_mix": bm25_mix,
+                "complexity_score": analysis.get("score"),
+                "complexity_threshold": analysis.get("threshold"),
+                "complexity_hits": analysis.get("complexity_hits") or [],
+                "high_risk_hits": analysis.get("high_risk_hits") or [],
+                "reasons": escalate_reasons[:6],
+            }
+        )
         return advice
 
     def _extract_agentic_queries(self, context: str, limit: int = 3) -> List[str]:
@@ -733,13 +1082,79 @@ class SparkAdvisor:
 
     def _lexical_overlap_score(self, query: str, text: str) -> float:
         """Simple lexical overlap score [0..1] for hybrid rerank."""
-        q = {t for t in query.lower().split() if len(t) >= 4}
-        d = {t for t in text.lower().split() if len(t) >= 4}
+        q = {t for t in re.findall(r"[a-z0-9_]+", query.lower()) if len(t) >= 3}
+        d = {t for t in re.findall(r"[a-z0-9_]+", text.lower()) if len(t) >= 3}
         if not q or not d:
             return 0.0
         inter = len(q & d)
         union = max(len(q | d), 1)
         return inter / union
+
+    def _bm25_normalized_scores(self, query: str, docs: List[str], k1: float = 1.2, b: float = 0.75) -> List[float]:
+        """Compute normalized BM25 scores [0..1] for a query over docs."""
+        if not docs:
+            return []
+        query_tokens = [t for t in re.findall(r"[a-z0-9_]+", query.lower()) if len(t) >= 3]
+        if not query_tokens:
+            return [0.0 for _ in docs]
+
+        doc_tokens = [[t for t in re.findall(r"[a-z0-9_]+", str(doc).lower()) if len(t) >= 3] for doc in docs]
+        n_docs = len(doc_tokens)
+        avgdl = sum(len(toks) for toks in doc_tokens) / max(n_docs, 1)
+        if avgdl <= 0:
+            return [0.0 for _ in docs]
+
+        df: Dict[str, int] = {}
+        for toks in doc_tokens:
+            for tok in set(toks):
+                df[tok] = df.get(tok, 0) + 1
+
+        qtf: Dict[str, int] = {}
+        for tok in query_tokens:
+            qtf[tok] = qtf.get(tok, 0) + 1
+
+        raw_scores: List[float] = []
+        for toks in doc_tokens:
+            dl = max(len(toks), 1)
+            tf: Dict[str, int] = {}
+            for tok in toks:
+                tf[tok] = tf.get(tok, 0) + 1
+            score = 0.0
+            for tok, q_count in qtf.items():
+                term_df = df.get(tok, 0)
+                if term_df <= 0:
+                    continue
+                idf = math.log(1.0 + ((n_docs - term_df + 0.5) / (term_df + 0.5)))
+                term_tf = tf.get(tok, 0)
+                if term_tf <= 0:
+                    continue
+                denom = term_tf + k1 * (1.0 - b + (b * (dl / avgdl)))
+                if denom <= 0:
+                    continue
+                bm25_term = idf * ((term_tf * (k1 + 1.0)) / denom)
+                score += bm25_term * float(q_count)
+            raw_scores.append(score)
+
+        max_score = max(raw_scores) if raw_scores else 0.0
+        if max_score <= 0:
+            return [0.0 for _ in docs]
+        return [float(s / max_score) for s in raw_scores]
+
+    def _hybrid_lexical_scores(
+        self,
+        query: str,
+        docs: List[str],
+        bm25_mix: float = 0.75,
+        k1: float = 1.2,
+        b: float = 0.75,
+    ) -> List[float]:
+        """Blend normalized BM25 and overlap into one lexical signal."""
+        if not docs:
+            return []
+        bm25 = self._bm25_normalized_scores(query=query, docs=docs, k1=k1, b=b)
+        overlap = [self._lexical_overlap_score(query, doc) for doc in docs]
+        blend = max(0.0, min(1.0, float(bm25_mix)))
+        return [(blend * bm) + ((1.0 - blend) * ov) for bm, ov in zip(bm25, overlap)]
 
     def _get_cognitive_advice_keyword(self, tool_name: str, context: str) -> List[Advice]:
         """Get advice from cognitive insights using keyword matching."""
@@ -1365,6 +1780,8 @@ class SparkAdvisor:
         "bank": 0.9,            # Memory banks (less curated)
         "chip": 1.15,           # Domain-specific chip intelligence
         "semantic": 1.05,       # Semantic retrieval of cognitive insights
+        "semantic-hybrid": 1.08,  # Backward-compatible label for hybrid retrieval
+        "semantic-agentic": 1.12,  # Agentic retrieval over semantic shortlist
         "trigger": 1.2,         # Explicit trigger rules
     }
 
