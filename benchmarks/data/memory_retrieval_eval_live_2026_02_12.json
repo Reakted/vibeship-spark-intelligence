@@ -1,0 +1,319 @@
+{
+  "description": "Live labeled memory retrieval A/B set generated from local cognitive insights.",
+  "generated_at": "2026-02-12",
+  "case_count": 24,
+  "cases": [
+    {
+      "id": "live_01",
+      "query": "How should we handle openclaw value is tooling ecosystem, not raw speed. shines for agents that autonomously interact with external services, handle payments, manage persistent state across sessions.?",
+      "relevant_insight_keys": [
+        "context:openclaw_value_is_tooling_ecosystem,_not"
+      ],
+      "relevant_contains": [
+        "openclaw",
+        "value",
+        "tooling"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_02",
+      "query": "How should we handle bittensor tao subnets showing consistent gains even in crypto downtrend. subnet 44 generates $3m arr from enterprise vision ai. subnet 64 (chutes) processing 160b tokens daily.?",
+      "relevant_insight_keys": [
+        "context:bittensor_tao_subnets_showing_consistent"
+      ],
+      "relevant_contains": [
+        "bittensor",
+        "subnets",
+        "showing"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_03",
+      "query": "How should we handle deepseek cheaper ($0.27/m vs claude opus $5/m) but less used for agents due to slower inference, lower agentic performance, fewer ecosystem integrations?",
+      "relevant_insight_keys": [
+        "context:deepseek_cheaper_($0.27/m_vs_claude_opus"
+      ],
+      "relevant_contains": [
+        "deepseek",
+        "cheaper",
+        "claude"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_04",
+      "query": "How should we handle when using glob, prefer 'rying to make it like \"oh, you know, we are using these two tokens for a test but it doenst go for nothing\"' over 't'?",
+      "relevant_insight_keys": [
+        "user_understanding:when_using_glob,_prefer_'rying_to_make_i"
+      ],
+      "relevant_contains": [
+        "using",
+        "prefer",
+        "rying"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_05",
+      "query": "How should we handle failure reason: it is learning, improving, and gathering new, important things into its memory, cognition, loops, and more?",
+      "relevant_insight_keys": [
+        "reasoning:failure_reason:_it_is_learning,_improvin"
+      ],
+      "relevant_contains": [
+        "failure",
+        "reason",
+        "learning"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_06",
+      "query": "How should we handle tuna launching agent launchpad on solana to compete with clawnch on base. multi-chain agent token wars beginning.?",
+      "relevant_insight_keys": [
+        "context:tuna_launching_agent_launchpad_on_solana"
+      ],
+      "relevant_contains": [
+        "launching",
+        "agent",
+        "launchpad"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_07",
+      "query": "How should we handle emergent ai behavior fascinates and frightens people - transparent evolution with auditable memory wins trust?",
+      "relevant_insight_keys": [
+        "wisdom:emergent_ai_behavior_fascinates_and_frig"
+      ],
+      "relevant_contains": [
+        "emergent",
+        "behavior",
+        "fascinates"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_08",
+      "query": "How should we handle prefer '- **green** (<30): normal access' over 'immediate revocation, tokens enter risk states:'?",
+      "relevant_insight_keys": [
+        "user_understanding:prefer_'-_**green**_(<30):_normal_access"
+      ],
+      "relevant_contains": [
+        "prefer",
+        "green",
+        "normal"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_09",
+      "query": "How should we handle from lib.diagnostics import log_debug as _bridge_log_debug # used below?",
+      "relevant_insight_keys": [
+        "context:from_lib.diagnostics_import_log_debug_as"
+      ],
+      "relevant_contains": [
+        "diagnostics",
+        "import",
+        "debug"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_10",
+      "query": "How should we handle principle: show \"429 too many requests\" without context?",
+      "relevant_insight_keys": [
+        "wisdom:principle:_show_\"429_too_many_requests\"_"
+      ],
+      "relevant_contains": [
+        "principle",
+        "requests",
+        "without"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_11",
+      "query": "How should we handle daku on solana: ai anime storytelling as a service - ai agent canine spy fighting fraud, funding ongoing narrative. new meme category: story-funded tokens.?",
+      "relevant_insight_keys": [
+        "context:daku_on_solana:_ai_anime_storytelling_as"
+      ],
+      "relevant_contains": [
+        "solana",
+        "anime",
+        "storytelling"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_12",
+      "query": "How should we handle mind sync typeerror: mind_bridge.py line 139 crashes - evidence field contains lists but code expects strings for join().?",
+      "relevant_insight_keys": [
+        "context:mind_sync_typeerror:_mind_bridge.py_line"
+      ],
+      "relevant_contains": [
+        "typeerror",
+        "bridge",
+        "crashes"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_13",
+      "query": "How should we handle user wanted: actually can't create another token, lets make this as a thing whereby people need to login with the?",
+      "relevant_insight_keys": [
+        "user_understanding:user_wanted:_actually_can't_create_anoth"
+      ],
+      "relevant_contains": [
+        "wanted",
+        "actually",
+        "create"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_14",
+      "query": "How should we handle clawnch is first ai agent-only launchpad on base - agents autonomously deploy tokens. listed on lbank. first mover in agent-native token launches.?",
+      "relevant_insight_keys": [
+        "context:clawnch_is_first_ai_agent-only_launchpad"
+      ],
+      "relevant_contains": [
+        "clawnch",
+        "first",
+        "agent"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_15",
+      "query": "How should we handle moltbook gaps to exploit: no auth, chaotic purpose, invisible memory, no supervision, no guardrails, disconnected token economy?",
+      "relevant_insight_keys": [
+        "context:moltbook_gaps_to_exploit:_no_auth,_chaot"
+      ],
+      "relevant_contains": [
+        "moltbook",
+        "exploit",
+        "chaotic"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_16",
+      "query": "How should we handle user wants adaptive explanations - brief for simple things, detailed when context matters?",
+      "relevant_insight_keys": [
+        "user_understanding:user_wants_adaptive_explanations_-_brief"
+      ],
+      "relevant_contains": [
+        "wants",
+        "adaptive",
+        "explanations"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_17",
+      "query": "How should we handle no need to run that through auth we are already using opus 4.6 here dont try to do that as a background information that may be against the tos?",
+      "relevant_insight_keys": [
+        "context:no_need_to_run_that_through_auth_we_are_"
+      ],
+      "relevant_contains": [
+        "through",
+        "already",
+        "using"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_18",
+      "query": "How should we handle main frustration with ai: not remembering context - values continuity and memory?",
+      "relevant_insight_keys": [
+        "user_understanding:main_frustration_with_ai:_not_rememberin"
+      ],
+      "relevant_contains": [
+        "frustration",
+        "remembering",
+        "context"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_19",
+      "query": "How should we handle \"short replies worked for hype/wallet contexts. but reply length should be situational \u00e2\u20ac\u201d go deep when the conversation earns it.\",?",
+      "relevant_insight_keys": [
+        "context:______\"short_replies_worked_for_hype/wal"
+      ],
+      "relevant_contains": [
+        "short",
+        "replies",
+        "worked"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_20",
+      "query": "How should we handle reasoning: delayed risk score updates affecting real-time authentication decisions?",
+      "relevant_insight_keys": [
+        "reasoning:reasoning:_delayed_risk_score_updates_af"
+      ],
+      "relevant_contains": [
+        "reasoning",
+        "delayed",
+        "score"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_21",
+      "query": "How should we handle reasoning: frequent authentication checks across multiple microservices?",
+      "relevant_insight_keys": [
+        "reasoning:reasoning:_frequent_authentication_check"
+      ],
+      "relevant_contains": [
+        "reasoning",
+        "frequent",
+        "authentication"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_22",
+      "query": "How should we handle windows setup issue: bash vs cmd syntax - terminal uses bash but windows commands like timeout /t and %userprofile% fail?",
+      "relevant_insight_keys": [
+        "context:windows_setup_issue:_bash_vs_cmd_syntax_"
+      ],
+      "relevant_contains": [
+        "windows",
+        "setup",
+        "issue"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_23",
+      "query": "How should we handle when using tasklist, prefer 'rying to make it like \"oh, you know, we are using these two tokens for a test but it doenst go for nothing\"' over 't'?",
+      "relevant_insight_keys": [
+        "user_understanding:when_using_tasklist,_prefer_'rying_to_ma"
+      ],
+      "relevant_contains": [
+        "using",
+        "tasklist",
+        "prefer"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    },
+    {
+      "id": "live_24",
+      "query": "How should we handle success factor: it is learning, improving, and gathering new, important things into its memory, cognition, loops, and more?",
+      "relevant_insight_keys": [
+        "reasoning:success_factor:_it_is_learning,_improvin"
+      ],
+      "relevant_contains": [
+        "success",
+        "factor",
+        "learning"
+      ],
+      "notes": "Auto-generated from live cognitive insights on 2026-02-12."
+    }
+  ]
+}

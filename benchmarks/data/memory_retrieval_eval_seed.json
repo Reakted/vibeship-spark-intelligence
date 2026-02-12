@@ -1,0 +1,64 @@
+{
+  "description": "Seed set for memory retrieval A/B. Replace or extend with real user queries and labels.",
+  "notes": [
+    "For strict quality scoring, add relevant_insight_keys and/or relevant_contains.",
+    "Use 20-150 real queries for stable comparison."
+  ],
+  "cases": [
+    {
+      "id": "auth_token_rotation",
+      "query": "How should we rotate auth tokens without breaking active sessions?",
+      "relevant_insight_keys": [],
+      "relevant_contains": [
+        "auth",
+        "token",
+        "session"
+      ],
+      "notes": "Replace substring labels with exact insight keys when available."
+    },
+    {
+      "id": "bridge_timeout_debugging",
+      "query": "Memory retrieval over bridge path times out and reports auth blocked",
+      "relevant_insight_keys": [],
+      "relevant_contains": [
+        "timeout",
+        "bridge",
+        "diagnostic"
+      ],
+      "notes": "Expected to surface transport vs auth error taxonomy guidance."
+    },
+    {
+      "id": "session_scope_leak",
+      "query": "How do we enforce session and scope boundaries for memory retrieval?",
+      "relevant_insight_keys": [],
+      "relevant_contains": [
+        "session",
+        "scope",
+        "identity"
+      ],
+      "notes": "Expected to prioritize anti-leakage and namespace checks."
+    },
+    {
+      "id": "benchmark_design",
+      "query": "Design a benchmark to compare embeddings-only vs hybrid retrieval",
+      "relevant_insight_keys": [],
+      "relevant_contains": [
+        "precision",
+        "recall",
+        "mrr"
+      ],
+      "notes": "Expected to surface A/B methodology and metrics."
+    },
+    {
+      "id": "policy_vs_auth_error",
+      "query": "How should we classify policy blocks separately from auth failures?",
+      "relevant_insight_keys": [],
+      "relevant_contains": [
+        "policy",
+        "auth",
+        "error"
+      ],
+      "notes": "Expected to return explicit error-kind mapping guidance."
+    }
+  ]
+}
