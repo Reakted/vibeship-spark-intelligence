@@ -53,7 +53,7 @@ chip:
 # ============================================================
 triggers:
   patterns:
-    - "reply strategy"
+    - "reply strategy analysis"
     - "conversation hook"
     - "thread reply"
     - "conversation dna"
@@ -73,9 +73,9 @@ triggers:
     - name: mcp__x-twitter__post_tweet
       context_contains: ["reply", "respond", "answer", "thread"]
     - name: mcp__x-twitter__get_tweet_details
-      context_contains: ["reply", "conversation", "thread"]
+      context_contains: ["reply metrics", "reply performance", "thread reply", "conversation dynamics"]
     - name: mcp__x-twitter__search_twitter
-      context_contains: ["reply", "engagement", "conversation"]
+      context_contains: ["high engagement reply", "reply performance", "conversation dna"]
 
 # ============================================================
 # OBSERVERS: What data to capture when triggered?

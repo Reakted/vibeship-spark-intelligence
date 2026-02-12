@@ -27,6 +27,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `scripts/run_advisory_realism_domain_matrix.py`: multi-domain advisory realism matrix runner (10+ domain slices per run)
 - `scripts/run_advisory_chip_experiments.py`: chip strategy experiment runner (A/B/C/D off/on/targeted segment plans)
 - `scripts/run_chip_schema_experiments.py`: schema-capture A/B/C/D runner for chip observer quality and distillation readiness
+- `scripts/run_chip_schema_multiseed.py`: randomized multi-seed schema benchmark runner (winner stability + promotion pass-rate)
 - `scripts/run_chip_observer_policy.py`: observer keep/disable policy generator from 2-3 diagnostics windows (with optional apply to runtime policy file)
 - `scripts/run_chip_learning_diagnostics.py`: chip learning/distillation diagnostics (telemetry rate, learnable statement yield, merge-eligible coverage)
 - `docs/OPENCLAW_RESEARCH_AND_UPDATES.md`: experiment log for OpenClaw tuning changes, outcomes, and keep/rollback decisions
@@ -68,6 +69,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `docs/reports/2026-02-13_chip_schema_experiments_abcd_v1.md`: schema-capture A/B/C/D benchmark results and selected operating profile
 - `docs/reports/2026-02-13_chip_best_use_findings_and_outlook_v1.md`: best-use findings, observer KPI upgrades, and future promotion path for chips as evidence infrastructure
 - `docs/reports/2026-02-13_chip_observer_policy_and_variation_pass_v1.md`: trigger tightening, observer policy rollout, and schema mode variation matrix results
+- `docs/reports/2026-02-13_chip_schema_randomized_benchmark_pass_v2.md`: trigger-tightening follow-up, multi-seed gate outcomes, and merge-activation profile results
 - `PRODUCTION_READINESS.md`: production-hardening status and open blockers
 - `docs/VISION.md`: long-range architecture vision
 - `CHANGELOG.md`: chronological change log

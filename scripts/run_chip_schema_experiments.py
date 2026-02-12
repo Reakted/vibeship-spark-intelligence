@@ -181,6 +181,37 @@ def _objective_score(metrics: Dict[str, Any], weights: Dict[str, float]) -> floa
     return round(total, 4)
 
 
+def _infer_quality_fallback(*, row: Dict[str, Any], statement: str, captured: Dict[str, Any]) -> Dict[str, float]:
+    text = str(statement or "").strip().lower()
+    payload = (captured.get("learning_payload") or {}) if isinstance(captured, dict) else {}
+    evidence_items = 0
+    if isinstance(payload, dict):
+        evidence = payload.get("evidence")
+        if isinstance(evidence, list):
+            evidence_items = len([x for x in evidence if str(x or "").strip()])
+
+    confidence = _safe_float(row.get("confidence"), 0.0)
+    words = max(1, len(text.split()))
+    cognitive = min(1.0, 0.2 + min(0.35, words / 40.0) + min(0.2, evidence_items * 0.08))
+    actionability = min(1.0, 0.2 + (0.25 if any(k in text for k in ("prefer ", "avoid ", "when ", "if ")) else 0.05))
+    transferability = min(1.0, 0.2 + (0.2 if any(k in text for k in ("across ", "for ", "pattern", "works better")) else 0.05))
+    total = max(confidence, (cognitive + actionability + transferability) / 3.0)
+    return {
+        "total": round(total, 4),
+        "cognitive_value": round(cognitive, 4),
+        "actionability": round(actionability, 4),
+        "transferability": round(transferability, 4),
+    }
+
+
+def _quality_effectively_empty(quality: Dict[str, Any]) -> bool:
+    if not isinstance(quality, dict) or not quality:
+        return True
+    keys = ("total", "cognitive_value", "actionability", "transferability")
+    values = [_safe_float(quality.get(k), 0.0) for k in keys]
+    return max(values) <= 0.0
+
+
 def _evaluate_promotion_gate(
     experiments: List[Dict[str, Any]],
     *,
@@ -188,6 +219,9 @@ def _evaluate_promotion_gate(
     candidate_id: str,
     min_objective_delta: float = 0.0,
     min_coverage_delta: float = 0.0,
+    min_candidate_non_telemetry: float = 0.0,
+    min_candidate_schema_statement: float = 0.0,
+    min_candidate_merge_eligible: float = 0.0,
 ) -> Dict[str, Any]:
     baseline = next((r for r in experiments if str(r.get("id")) == str(baseline_id)), {})
     candidate = next((r for r in experiments if str(r.get("id")) == str(candidate_id)), {})
@@ -195,14 +229,28 @@ def _evaluate_promotion_gate(
     cand_obj = _safe_float(candidate.get("objective"), 0.0)
     base_cov = _safe_float(baseline.get("capture_coverage"), 0.0)
     cand_cov = _safe_float(candidate.get("capture_coverage"), 0.0)
+    cand_non_tel = 1.0 - _safe_float(candidate.get("telemetry_rate"), 1.0)
+    cand_schema = _safe_float(candidate.get("schema_statement_rate"), 0.0)
+    cand_merge = _safe_float(candidate.get("merge_eligible_rate"), 0.0)
     obj_delta = round(cand_obj - base_obj, 4)
     cov_delta = round(cand_cov - base_cov, 4)
-    passed = obj_delta > float(min_objective_delta) and cov_delta > float(min_coverage_delta)
-    reason = (
-        "candidate_beats_baseline_on_objective_and_coverage"
-        if passed
-        else "candidate_did_not_beat_baseline_on_both_objective_and_coverage"
+    floor_ok = (
+        cand_non_tel >= float(min_candidate_non_telemetry)
+        and cand_schema >= float(min_candidate_schema_statement)
+        and cand_merge >= float(min_candidate_merge_eligible)
     )
+    passed = obj_delta > float(min_objective_delta) and cov_delta > float(min_coverage_delta) and floor_ok
+    reasons: List[str] = []
+    if not (obj_delta > float(min_objective_delta) and cov_delta > float(min_coverage_delta)):
+        reasons.append("candidate_did_not_beat_baseline_on_both_objective_and_coverage")
+    if cand_non_tel < float(min_candidate_non_telemetry):
+        reasons.append("candidate_non_telemetry_below_floor")
+    if cand_schema < float(min_candidate_schema_statement):
+        reasons.append("candidate_schema_statement_below_floor")
+    if cand_merge < float(min_candidate_merge_eligible):
+        reasons.append("candidate_merge_eligible_below_floor")
+    if not reasons:
+        reasons.append("candidate_beats_baseline_and_meets_quality_floors")
     return {
         "baseline_id": str(baseline_id),
         "candidate_id": str(candidate_id),
@@ -214,8 +262,14 @@ def _evaluate_promotion_gate(
         "coverage_delta": cov_delta,
         "min_objective_delta": float(min_objective_delta),
         "min_coverage_delta": float(min_coverage_delta),
+        "candidate_non_telemetry": round(cand_non_tel, 4),
+        "candidate_schema_statement": round(cand_schema, 4),
+        "candidate_merge_eligible": round(cand_merge, 4),
+        "min_candidate_non_telemetry": float(min_candidate_non_telemetry),
+        "min_candidate_schema_statement": float(min_candidate_schema_statement),
+        "min_candidate_merge_eligible": float(min_candidate_merge_eligible),
         "passed": bool(passed),
-        "reason": reason,
+        "reasons": reasons,
     }
 
 
@@ -227,6 +281,7 @@ def _analyze_rows(*, rows: List[Dict[str, Any]], min_total_score: float, limits:
     schema_statement = 0
     quality_pass = 0
     merge_eligible = 0
+    fallback_quality_used = 0
     seen = set()
 
     for row in rows:
@@ -234,7 +289,17 @@ def _analyze_rows(*, rows: List[Dict[str, Any]], min_total_score: float, limits:
         content = str(row.get("content") or "")
         observer_name = str(row.get("observer_name") or "")
         captured = row.get("captured_data") or {}
+        statement = cm._distill_learning_statement(
+            chip_id=chip_id,
+            content=content,
+            captured_data=captured,
+            min_len=int(limits.get("min_statement_len", 28)),
+            observer_name=observer_name,
+        )
         quality = (captured.get("quality_score") or {}) if isinstance(captured, dict) else {}
+        if _quality_effectively_empty(quality) and statement:
+            quality = _infer_quality_fallback(row=row, statement=statement, captured=captured)
+            fallback_quality_used += 1
         total = _safe_float(quality.get("total"), _safe_float(row.get("confidence"), 0.0))
 
         if cm._looks_like_telemetry(chip_id, content):
@@ -247,13 +312,6 @@ def _analyze_rows(*, rows: List[Dict[str, Any]], min_total_score: float, limits:
             )
             if payload_statement:
                 schema_statement += 1
-        statement = cm._distill_learning_statement(
-            chip_id=chip_id,
-            content=content,
-            captured_data=captured,
-            min_len=int(limits.get("min_statement_len", 28)),
-            observer_name=observer_name,
-        )
         if statement:
             statements += 1
         learning_ok = cm._is_learning_quality_ok(quality, limits)
@@ -275,6 +333,7 @@ def _analyze_rows(*, rows: List[Dict[str, Any]], min_total_score: float, limits:
         "learning_quality_pass_rate": round(quality_pass / denom, 4),
         "merge_eligible_count": int(merge_eligible),
         "merge_eligible_rate": round(merge_eligible / denom, 4),
+        "quality_fallback_rate": round(fallback_quality_used / denom, 4),
     }
 
 
@@ -420,12 +479,15 @@ def main() -> int:
     ap.add_argument("--plan", default=str(DEFAULT_PLAN), help="Path to schema experiment plan JSON")
     ap.add_argument("--chips", default="social-convo,engagement-pulse,x_social", help="Comma-separated chip ids")
     ap.add_argument("--events-per-chip", type=int, default=20, help="Synthetic events generated per chip per experiment")
-    ap.add_argument("--min-total-score", type=float, default=0.55, help="Threshold for merge-eligible counting")
+    ap.add_argument("--min-total-score", type=float, default=None, help="Threshold for merge-eligible counting (default: plan value, else 0.55)")
     ap.add_argument("--random-seed", type=int, default=7, help="Random seed for synthetic event variation")
     ap.add_argument("--promotion-baseline-id", default="A_schema_baseline", help="Baseline arm ID for promotion gate")
     ap.add_argument("--promotion-candidate-id", default="B_schema_evidence2", help="Candidate arm ID for promotion gate")
     ap.add_argument("--min-objective-delta", type=float, default=0.0, help="Promotion requires candidate objective delta > this")
     ap.add_argument("--min-coverage-delta", type=float, default=0.0, help="Promotion requires candidate coverage delta > this")
+    ap.add_argument("--min-candidate-non-telemetry", type=float, default=0.0, help="Promotion requires candidate non-telemetry rate >= this")
+    ap.add_argument("--min-candidate-schema-statement", type=float, default=0.0, help="Promotion requires candidate schema statement rate >= this")
+    ap.add_argument("--min-candidate-merge-eligible", type=float, default=0.0, help="Promotion requires candidate merge-eligible rate >= this")
     ap.add_argument("--out-prefix", default="chip_schema_experiments_v1", help="Output file prefix under benchmarks/out")
     args = ap.parse_args()
 
@@ -436,6 +498,12 @@ def main() -> int:
     chips = [c.strip() for c in str(args.chips or "").split(",") if c.strip()]
     if not chips:
         raise ValueError("no chips specified")
+
+    chosen_min_total_score = (
+        float(args.min_total_score)
+        if args.min_total_score is not None
+        else float(plan.get("min_total_score", 0.55))
+    )
 
     out_dir = ROOT / "benchmarks" / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -449,7 +517,7 @@ def main() -> int:
                 weights=weights,
                 chips=chips,
                 events_per_chip=max(1, int(args.events_per_chip)),
-                min_total_score=max(0.0, min(1.0, float(args.min_total_score))),
+                min_total_score=max(0.0, min(1.0, float(chosen_min_total_score))),
                 base_seed=int(args.random_seed),
                 tmp_dir=tmp_dir,
             )
@@ -468,13 +536,16 @@ def main() -> int:
         candidate_id=str(args.promotion_candidate_id),
         min_objective_delta=float(args.min_objective_delta),
         min_coverage_delta=float(args.min_coverage_delta),
+        min_candidate_non_telemetry=float(args.min_candidate_non_telemetry),
+        min_candidate_schema_statement=float(args.min_candidate_schema_statement),
+        min_candidate_merge_eligible=float(args.min_candidate_merge_eligible),
     )
     report = {
         "generated_at": datetime.now(UTC).isoformat(),
         "plan_path": str(plan_path),
         "chips": chips,
         "events_per_chip": int(args.events_per_chip),
-        "min_total_score": float(args.min_total_score),
+        "min_total_score": float(chosen_min_total_score),
         "objective_weights": weights,
         "control_experiment_id": control_id,
         "experiments": rows,

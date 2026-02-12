@@ -125,6 +125,7 @@ Promotion rule:
 
 Use A/B/C/D schema experiments from:
 - `scripts/run_chip_schema_experiments.py`
+- `scripts/run_chip_schema_multiseed.py` (for robust random-seed validation)
 - `benchmarks/data/chip_schema_experiment_plan_v1.json`
 
 Keep objective coverage-weighted to prevent over-strict low-volume winners.
@@ -143,11 +144,15 @@ python scripts/run_chip_schema_experiments.py \
   --events-per-chip 24 \
   --promotion-baseline-id A_schema_baseline \
   --promotion-candidate-id B_schema_evidence2 \
+  --min-candidate-non-telemetry 0.95 \
+  --min-candidate-schema-statement 0.90 \
+  --min-candidate-merge-eligible 0.05 \
   --out-prefix chip_schema_experiments_latest
 ```
 
 Mode variation matrix:
 - `benchmarks/data/chip_schema_mode_variations_v1.json`
+- `benchmarks/data/chip_schema_merge_activation_plan_v1.json` (merge-activation pass)
 
 Example:
 
@@ -159,6 +164,38 @@ python scripts/run_chip_schema_experiments.py \
   --promotion-baseline-id M0_baseline_schema_safe \
   --promotion-candidate-id M1_two_evidence_balanced \
   --out-prefix chip_schema_mode_variations_latest
+```
+
+Merge-activation pass (recommended after trigger tightening):
+
+```bash
+python scripts/run_chip_schema_experiments.py \
+  --plan benchmarks/data/chip_schema_merge_activation_plan_v1.json \
+  --chips social-convo,engagement-pulse,x_social \
+  --events-per-chip 24 \
+  --promotion-baseline-id R0_baseline_safe \
+  --promotion-candidate-id R3_two_evidence_relaxed_merge \
+  --min-candidate-non-telemetry 0.95 \
+  --min-candidate-schema-statement 0.90 \
+  --min-candidate-merge-eligible 0.05 \
+  --out-prefix chip_schema_merge_activation_latest
+```
+
+Multi-seed robustness pass (recommended before promotion):
+
+```bash
+python scripts/run_chip_schema_multiseed.py \
+  --plan benchmarks/data/chip_schema_mode_variations_v1.json \
+  --chips social-convo,engagement-pulse,x_social \
+  --events-per-chip 24 \
+  --seed-start 20260213 \
+  --seed-count 7 \
+  --promotion-baseline-id M0_baseline_schema_safe \
+  --promotion-candidate-id M1_two_evidence_balanced \
+  --min-candidate-non-telemetry 0.95 \
+  --min-candidate-schema-statement 0.90 \
+  --min-candidate-merge-eligible 0.05 \
+  --out-prefix chip_schema_mode_variations_multiseed_latest
 ```
 
 ## Operational Diagnostics

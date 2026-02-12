@@ -62,12 +62,12 @@ triggers:
     - "user profile update"
     - "trend observed"
     - "cultural mood"
-    - "social insight"
+    - "social insight learned"
     - "x relationship"
     - "relationship trajectory"
     - "topic cycle"
-    - "warmth"
-    - "relationship"
+    - "warmth level"
+    - "relationship signal"
 
   events:
     - x_reply_sent
@@ -77,21 +77,21 @@ triggers:
 
   tools:
     - name: mcp__x-twitter__search_twitter
-      context_contains: ["trend", "relationship", "conversation", "social", "warmth", "insight"]
+      context_contains: ["trend observed", "relationship trajectory", "social memory", "social insight learned"]
     - name: mcp__x-twitter__get_tweet_details
-      context_contains: ["reply", "conversation", "engagement", "trend", "insight", "relationship"]
+      context_contains: ["trend observed", "social insight learned", "relationship signal", "conversation with"]
     - name: mcp__x-twitter__get_user_by_screen_name
-      context_contains: ["user", "profile", "handle", "relationship", "warmth"]
+      context_contains: ["user profile update", "user interests", "warmth level", "interaction count"]
     - name: mcp__x-twitter__get_user_by_id
-      context_contains: ["user", "profile", "handle", "relationship", "warmth"]
+      context_contains: ["user profile update", "user interests", "warmth level", "interaction count"]
     - name: mcp__x-twitter__get_trends
-      context_contains: ["trend", "cultural", "mood", "signal"]
+      context_contains: ["trend observed", "cultural mood", "topic cycle", "trend category"]
     - name: mcp__x-twitter__get_timeline
-      context_contains: ["timeline", "trend", "mood", "cultural"]
+      context_contains: ["cultural mood", "trend observed", "topic cycle", "timeline signal"]
     - name: mcp__x-twitter__get_latest_timeline
-      context_contains: ["timeline", "trend", "mood", "cultural"]
+      context_contains: ["cultural mood", "trend observed", "topic cycle", "timeline signal"]
     - name: mcp__x-twitter__get_user_mentions
-      context_contains: ["mentions", "relationship", "warmth", "interaction"]
+      context_contains: ["relationship signal", "warmth level", "user interaction", "mentions"]
     - name: Bash
       context_contains:
         - "tweet.py"

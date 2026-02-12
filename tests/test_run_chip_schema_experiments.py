@@ -83,3 +83,30 @@ def test_promotion_gate_requires_candidate_beats_baseline_on_both():
         min_coverage_delta=0.0,
     )
     assert out2["passed"] is True
+
+
+def test_promotion_gate_applies_candidate_quality_floors():
+    mod = _load_module()
+    rows = [
+        {"id": "A", "objective": 0.7, "capture_coverage": 0.6, "telemetry_rate": 0.0, "schema_statement_rate": 1.0, "merge_eligible_rate": 0.2},
+        {"id": "B", "objective": 0.75, "capture_coverage": 0.62, "telemetry_rate": 0.0, "schema_statement_rate": 1.0, "merge_eligible_rate": 0.0},
+    ]
+    out = mod._evaluate_promotion_gate(
+        rows,
+        baseline_id="A",
+        candidate_id="B",
+        min_objective_delta=0.0,
+        min_coverage_delta=0.0,
+        min_candidate_non_telemetry=0.9,
+        min_candidate_schema_statement=0.9,
+        min_candidate_merge_eligible=0.05,
+    )
+    assert out["passed"] is False
+    assert "candidate_merge_eligible_below_floor" in out["reasons"]
+
+
+def test_quality_effectively_empty_detects_zero_scores():
+    mod = _load_module()
+    assert mod._quality_effectively_empty({}) is True
+    assert mod._quality_effectively_empty({"total": 0.0, "cognitive_value": 0.0}) is True
+    assert mod._quality_effectively_empty({"total": 0.01}) is False

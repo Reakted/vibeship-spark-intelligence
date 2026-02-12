@@ -278,6 +278,25 @@ Promotion rule:
 Coverage note:
 - The schema matrix objective includes `capture_coverage` (`insights_emitted / events_requested`) so over-strict, low-volume profiles cannot tie with stable profiles.
 
+Randomized robustness pass (anti-overfit):
+
+```bash
+python scripts/run_chip_schema_multiseed.py \
+  --plan benchmarks/data/chip_schema_mode_variations_v1.json \
+  --chips social-convo,engagement-pulse,x_social \
+  --events-per-chip 24 \
+  --seed-start 20260213 \
+  --seed-count 7 \
+  --promotion-baseline-id M0_baseline_schema_safe \
+  --promotion-candidate-id M1_two_evidence_balanced \
+  --min-candidate-non-telemetry 0.95 \
+  --min-candidate-schema-statement 0.90 \
+  --min-candidate-merge-eligible 0.05 \
+  --out-prefix chip_schema_mode_variations_multiseed_v1
+```
+
+Promotion should use multi-seed pass rate, not single-seed outcome.
+
 Mode variation matrix:
 
 ```bash
@@ -291,6 +310,21 @@ python scripts/run_chip_schema_experiments.py \
 ```
 
 This run tests multiple schema modes and still enforces the same promotion gate rule.
+
+Merge-activation matrix (for distillation readiness):
+
+```bash
+python scripts/run_chip_schema_experiments.py \
+  --plan benchmarks/data/chip_schema_merge_activation_plan_v1.json \
+  --chips social-convo,engagement-pulse,x_social \
+  --events-per-chip 24 \
+  --promotion-baseline-id R0_baseline_safe \
+  --promotion-candidate-id R3_two_evidence_relaxed_merge \
+  --min-candidate-non-telemetry 0.95 \
+  --min-candidate-schema-statement 0.90 \
+  --min-candidate-merge-eligible 0.05 \
+  --out-prefix chip_schema_merge_activation_v1
+```
 
 Observer policy from KPI trends (2-3 windows):
 

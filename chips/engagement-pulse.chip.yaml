@@ -49,14 +49,12 @@ chip:
 # ============================================================
 triggers:
   patterns:
-    - "tweet performance"
-    - "engagement tracking"
-    - "tweet posted"
-    - "engagement update"
+    - "tweet performance metrics"
+    - "engagement prediction delta"
     - "engagement snapshot"
     - "engagement surprise"
-    - "viral tweet"
-    - "tweet flopped"
+    - "overperform vs predicted"
+    - "underperform vs predicted"
 
   events:
     - tweet_posted
@@ -65,9 +63,9 @@ triggers:
 
   tools:
     - name: mcp__x-twitter__post_tweet
-      context_contains: ["*"]
+      context_contains: ["tweet posted for tracking", "predicted_likes", "predicted_replies", "engagement tracking"]
     - name: mcp__x-twitter__get_tweet_details
-      context_contains: ["engagement", "performance", "likes", "retweets"]
+      context_contains: ["engagement snapshot", "engagement update", "tweet metrics", "likes", "retweets"]
 
 # ============================================================
 # OBSERVERS
