@@ -56,43 +56,75 @@ def _build_event(chip_id: str, i: int, rng: random.Random) -> Dict[str, Any]:
     suffix = f"{chip_id.replace('_', '-')}-{i}"
     if chip_id == "social-convo":
         outcome = "positive" if i % 4 != 0 else "neutral"
-        return {
+        likes = int(10 + i + rng.randint(0, 15))
+        replies_received = int(1 + (i % 5))
+        base = {
             "event_type": "post_tool",
             "tool_name": "mcp__x-twitter__get_tweet_details",
             "content": "reply performance reply engagement reply metrics conversation dynamics",
             "tweet_id": f"tw-{suffix}",
             "outcome_type": outcome,
-            "likes": int(10 + i + rng.randint(0, 15)),
-            "replies_received": int(1 + (i % 5)),
+            "likes": likes,
+            "replies_received": replies_received,
             "author_responded": bool(i % 2 == 0),
             "status": "success",
         }
+        base["payload"] = {
+            "text": base["content"],
+            "tweet_id": base["tweet_id"],
+            "outcome_type": base["outcome_type"],
+            "likes": likes,
+            "replies_received": replies_received,
+        }
+        return base
     if chip_id == "engagement-pulse":
         age = "1" if i % 3 == 0 else ("6" if i % 3 == 1 else "24")
-        return {
+        likes = int(20 + i + rng.randint(0, 30))
+        replies = int(2 + (i % 6))
+        retweets = int(1 + (i % 4))
+        base = {
             "event_type": "engagement_snapshot",
             "tool_name": "mcp__x-twitter__get_tweet_details",
             "content": "engagement snapshot engagement update tweet metrics performance",
             "tweet_id": f"tw-{suffix}",
             "snapshot_age": age,
-            "likes": int(20 + i + rng.randint(0, 30)),
-            "replies": int(2 + (i % 6)),
-            "retweets": int(1 + (i % 4)),
+            "likes": likes,
+            "replies": replies,
+            "retweets": retweets,
             "velocity": f"{8 + (i % 7)}",
             "status": "success",
         }
+        base["payload"] = {
+            "text": base["content"],
+            "tweet_id": base["tweet_id"],
+            "snapshot_age": age,
+            "likes": likes,
+            "replies": replies,
+            "retweets": retweets,
+            "velocity": base["velocity"],
+        }
+        return base
     # x_social default path
     quality = "low" if i % 5 == 0 else "high"
-    return {
+    confidence = 0.85 if quality == "high" else 0.65
+    base = {
         "event_type": "x_session_complete",
         "tool_name": "mcp__x-twitter__search_twitter",
         "content": "social insight learned that works better than generic posting",
         "insight": f"Conversation hooks with reciprocity outperform generic broadcasts ({quality}).",
-        "confidence": 0.85 if quality == "high" else 0.65,
+        "confidence": confidence,
         "evidence": f"observed_in_{3 + (i % 5)}_threads",
         "category": "engagement",
         "status": "success",
     }
+    base["payload"] = {
+        "text": base["content"],
+        "insight": base["insight"],
+        "confidence": confidence,
+        "evidence": base["evidence"],
+        "category": base["category"],
+    }
+    return base
 
 
 @contextmanager
@@ -135,6 +167,7 @@ def _scoped_overrides(
 
 def _objective_score(metrics: Dict[str, Any], weights: Dict[str, float]) -> float:
     row = {
+        "capture_coverage": _safe_float(metrics.get("capture_coverage"), 0.0),
         "schema_payload_rate": _safe_float(metrics.get("schema_payload_rate"), 0.0),
         "schema_statement_rate": _safe_float(metrics.get("schema_statement_rate"), 0.0),
         "merge_eligible_rate": _safe_float(metrics.get("merge_eligible_rate"), 0.0),
@@ -277,6 +310,7 @@ def _run_experiment(
     analyzed["description"] = str(exp.get("description") or "")
     analyzed["events_requested"] = int(max(1, int(events_per_chip)) * max(1, len(chips)))
     analyzed["insights_emitted"] = int(insights_emitted)
+    analyzed["capture_coverage"] = round(insights_emitted / max(1, analyzed["events_requested"]), 4)
     analyzed["payload_valid_count"] = int(payload_valid)
     analyzed["payload_valid_emission_rate"] = round(payload_valid / max(1, insights_emitted), 4)
     analyzed["emitted_by_chip"] = emitted_by_chip
@@ -301,11 +335,12 @@ def _report_markdown(report: Dict[str, Any]) -> str:
     lines.append(f"- Min total quality score: `{_safe_float(report.get('min_total_score'), 0.55):.2f}`")
     lines.append(f"- Weights: `{report.get('objective_weights')}`")
     lines.append("")
-    lines.append("| Rank | Experiment | Objective | Schema Payload | Schema Statement | Merge Eligible | Non-Telemetry | Payload Valid Emission |")
-    lines.append("|---|---|---:|---:|---:|---:|---:|---:|")
+    lines.append("| Rank | Experiment | Objective | Coverage | Schema Payload | Schema Statement | Merge Eligible | Non-Telemetry | Payload Valid Emission |")
+    lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
     for idx, row in enumerate(report.get("ranked_experiments") or [], start=1):
         lines.append(
             f"| {idx} | `{row.get('id','')}` | {float(row.get('objective',0.0)):.4f} | "
+            f"{float(row.get('capture_coverage',0.0)):.2%} | "
             f"{float(row.get('schema_payload_rate',0.0)):.2%} | {float(row.get('schema_statement_rate',0.0)):.2%} | "
             f"{float(row.get('merge_eligible_rate',0.0)):.2%} | {1.0 - float(row.get('telemetry_rate',1.0)):.2%} | "
             f"{float(row.get('payload_valid_emission_rate',0.0)):.2%} |"
@@ -318,6 +353,7 @@ def _report_markdown(report: Dict[str, Any]) -> str:
         lines.append(f"- Description: {row.get('description','')}")
         lines.append(f"- Objective: `{float(row.get('objective',0.0)):.4f}`")
         lines.append(f"- Rows analyzed: `{int(row.get('rows_analyzed',0))}`")
+        lines.append(f"- Capture coverage: `{float(row.get('capture_coverage',0.0)):.2%}`")
         lines.append(f"- Schema payload rate: `{float(row.get('schema_payload_rate',0.0)):.2%}`")
         lines.append(f"- Schema statement rate: `{float(row.get('schema_statement_rate',0.0)):.2%}`")
         lines.append(f"- Merge-eligible rate: `{float(row.get('merge_eligible_rate',0.0)):.2%}`")

@@ -210,6 +210,10 @@ Run baseline diagnostics:
 ```bash
 python scripts/run_chip_learning_diagnostics.py \
   --limit-per-chip 400 \
+  --active-only \
+  --project-path "C:\Users\USER\Desktop\vibeship-spark-intelligence" \
+  --max-age-days 14 \
+  --observer-limit 20 \
   --out-prefix chip_learning_diagnostics_v1
 ```
 
@@ -235,6 +239,7 @@ Compare:
 - `telemetry_observer_rate`
 - `missing_confidence_rate`
 - `missing_quality_rate`
+- observer-level schema KPIs (`Observer KPIs` table)
 
 If these barely move under relaxed gates, the blocker is chip content quality (telemetry/noise), not tuneable strictness.
 
@@ -262,10 +267,14 @@ python scripts/run_chip_schema_experiments.py \
 
 Promotion rule:
 - Prefer the arm with highest objective only when it also improves:
+  - `capture_coverage`
   - `schema_statement_rate`
   - `merge_eligible_rate`
   - `payload_valid_emission_rate`
 - Reject any arm that regresses safety proxy (`telemetry_rate` increase).
+
+Coverage note:
+- The schema matrix objective includes `capture_coverage` (`insights_emitted / events_requested`) so over-strict, low-volume profiles cannot tie with stable profiles.
 
 ## Theory Seeding for Controlled Memory Tests
 

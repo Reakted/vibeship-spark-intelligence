@@ -77,3 +77,33 @@ Do not promote strict evidence profile until observers are upgraded to consisten
 1. Upgrade observer extraction on active chips to emit at least two semantic evidence fields per event.
 2. Re-run this exact matrix after extraction upgrades.
 3. Promote `B`/`C`/`D` only if schema rates remain high and merge-eligible rate improves.
+
+---
+
+## Update: Observer Upgrade + Coverage-Weighted Rerun (v4)
+
+Follow-up implementation shipped in this pass:
+- runtime numeric evidence handling for short non-telemetry fields
+- observer extraction upgrades on:
+  - `social-convo/reply_effectiveness`
+  - `engagement-pulse/engagement_snapshot`
+  - `engagement-pulse/engagement_surprise`
+  - `x_social/social_learning`
+- schema experiment objective now includes `capture_coverage`
+
+Rerun artifact:
+- `benchmarks/out/chip_schema_experiments_v4_report.json`
+
+Rerun results:
+
+| Experiment | Objective | Capture Coverage | Schema Statement Rate |
+|---|---:|---:|---:|
+| `A_schema_baseline` | `0.8125` | `70.83%` | `100.00%` |
+| `B_schema_evidence2` | `0.7917` | `63.89%` | `100.00%` |
+| `C_schema_strict_runtime` | `0.0500` | `0.00%` | `0.00%` |
+| `D_schema_strict_runtime_merge` | `0.0500` | `0.00%` | `0.00%` |
+
+Updated interpretation:
+- `B` is now viable and no longer collapses.
+- `A` still wins on coverage and total objective.
+- `C/D` remain over-strict for current observer quality.

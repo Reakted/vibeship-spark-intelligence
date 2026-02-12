@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 
@@ -32,10 +33,10 @@ def test_retain_rows_prefers_schema_rows():
 
 def test_filter_rows_applies_age_window():
     mod = _load_module()
+    now = datetime.now(UTC)
     rows = [
-        {"timestamp": "2026-01-01T00:00:00+00:00"},
-        {"timestamp": "2026-02-12T00:00:00+00:00"},
+        {"timestamp": (now - timedelta(days=40)).isoformat()},
+        {"timestamp": (now - timedelta(days=1)).isoformat()},
     ]
     kept = mod._filter_rows(rows, max_age_days=20)
-    # At least one recent row should survive regardless of current test date drift.
-    assert len(kept) >= 1
+    assert len(kept) == 1

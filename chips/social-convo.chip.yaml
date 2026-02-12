@@ -149,6 +149,22 @@ observers:
         impressions: "Number of impressions"
         warmth_change: "Did this change user warmth level"
 
+    extraction:
+      - field: outcome_type
+        keywords:
+          positive: ["positive", "worked", "landed", "resonated", "good outcome"]
+          negative: ["negative", "flopped", "backfired", "bad outcome"]
+          neutral: ["neutral", "mixed", "unclear"]
+      - field: likes
+        patterns:
+          - "\\blikes?\\s*[:=]?\\s*(\\d+)\\b"
+      - field: replies_received
+        patterns:
+          - "\\breplies?(?:\\s+received)?\\s*[:=]?\\s*(\\d+)\\b"
+      - field: quote_tweets
+        patterns:
+          - "\\bquote(?:\\s+tweets?)?\\s*[:=]?\\s*(\\d+)\\b"
+
   # High Engagement Reply Observed
   - name: high_engagement_reply_observed
     description: Captures high-performing replies by anyone for pattern learning

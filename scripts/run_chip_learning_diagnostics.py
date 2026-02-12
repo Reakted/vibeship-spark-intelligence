@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -20,6 +20,7 @@ from lib import chip_merger as cm
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = ROOT / "benchmarks" / "out"
+DEFAULT_PROJECT_PATH = "C:\\Users\\USER\\Desktop\\vibeship-spark-intelligence"
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -49,8 +50,45 @@ def _apply_limit_overrides(base: Dict[str, Any], args: argparse.Namespace) -> Di
     return out
 
 
-def _load_rows(path: Path, limit: int) -> List[Dict[str, Any]]:
+def _parse_timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        ts = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts
+
+
+def _load_registry_active(project_path: str) -> List[str]:
+    registry = Path.home() / ".spark" / "chip_registry.json"
+    if not registry.exists():
+        return []
+    try:
+        raw = json.loads(registry.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(raw, dict):
+        return []
+    active = raw.get("active") or {}
+    if not isinstance(active, dict):
+        return []
+    rows = active.get(project_path) or []
+    if not isinstance(rows, list):
+        return []
+    return sorted({str(r).strip() for r in rows if str(r).strip()})
+
+
+def _load_rows(path: Path, limit: int, max_age_days: int = 0) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
+    cutoff = None
+    if max_age_days and max_age_days > 0:
+        cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
     try:
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     except Exception:
@@ -63,6 +101,10 @@ def _load_rows(path: Path, limit: int) -> List[Dict[str, Any]]:
         except Exception:
             continue
         if isinstance(row, dict):
+            if cutoff is not None:
+                ts = _parse_timestamp(row.get("timestamp"))
+                if ts is None or ts < cutoff:
+                    continue
             rows.append(row)
     return rows
 
@@ -83,6 +125,8 @@ def _md(report: Dict[str, Any]) -> str:
     lines.append(f"- Schema payload rate: `{float(report.get('schema_payload_rate', 0.0)):.2%}`")
     lines.append(f"- Schema statement yield: `{float(report.get('schema_statement_rate', 0.0)):.2%}`")
     lines.append(f"- Min total quality score: `{float(report.get('min_total_score', 0.55)):.2f}`")
+    lines.append(f"- Active-only filter: `{bool(report.get('active_only', False))}`")
+    lines.append(f"- Max age days: `{int(report.get('max_age_days', 0))}`")
     lines.append("")
     lines.append("| Chip | Rows | Telemetry | Telemetry Obs | Missing Conf | Missing Quality | Schema Payload | Schema Statement | Statements | Quality Pass | Merge Eligible |")
     lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
@@ -106,6 +150,21 @@ def _md(report: Dict[str, Any]) -> str:
         for item in examples[:3]:
             lines.append(f"- {str(item)[:220]}")
         lines.append("")
+
+    observers = report.get("observers") or []
+    if observers:
+        lines.append("## Observer KPIs")
+        lines.append("")
+        lines.append("| Observer | Rows | Schema Payload | Schema Statement | Statements | Merge Eligible | Non-Telemetry |")
+        lines.append("|---|---:|---:|---:|---:|---:|---:|")
+        for row in observers[: int(report.get("observer_limit", 12))]:
+            lines.append(
+                f"| `{row.get('observer','')}` | {int(row.get('rows',0))} | "
+                f"{float(row.get('schema_payload_rate',0.0)):.2%} | {float(row.get('schema_statement_rate',0.0)):.2%} | "
+                f"{float(row.get('statement_yield_rate',0.0)):.2%} | {int(row.get('merge_eligible',0))} | "
+                f"{(1.0 - float(row.get('telemetry_rate',1.0))):.2%} |"
+            )
+        lines.append("")
     return "\n".join(lines).strip() + "\n"
 
 
@@ -120,11 +179,19 @@ def main() -> int:
     ap.add_argument("--duplicate-churn-ratio", type=float, default=None, help="Override chip_merge.duplicate_churn_ratio for diagnostics context")
     ap.add_argument("--duplicate-churn-min-processed", type=int, default=None, help="Override chip_merge.duplicate_churn_min_processed for diagnostics context")
     ap.add_argument("--duplicate-churn-cooldown-s", type=int, default=None, help="Override chip_merge.duplicate_churn_cooldown_s for diagnostics context")
+    ap.add_argument("--active-only", action="store_true", help="Analyze only chip files active for a project in ~/.spark/chip_registry.json")
+    ap.add_argument("--project-path", default=DEFAULT_PROJECT_PATH, help="Project registry key for --active-only filtering")
+    ap.add_argument("--max-age-days", type=int, default=0, help="Analyze only rows newer than N days (0 disables)")
+    ap.add_argument("--observer-limit", type=int, default=12, help="Max observer rows to include in markdown report")
     ap.add_argument("--out-prefix", default="chip_learning_diagnostics_v1", help="Output file prefix under benchmarks/out")
     args = ap.parse_args()
 
     chip_dir = cm.CHIP_INSIGHTS_DIR
     files = sorted(chip_dir.glob("*.jsonl")) if chip_dir.exists() else []
+    active_ids = _load_registry_active(str(args.project_path)) if bool(args.active_only) else []
+    if active_ids:
+        wanted = {f"{cid}.jsonl" for cid in active_ids}
+        files = [f for f in files if f.name in wanted]
     limits = _apply_limit_overrides(cm._load_merge_tuneables(), args)
     min_total_score = max(0.0, min(1.0, float(args.min_total_score)))
 
@@ -139,9 +206,10 @@ def main() -> int:
     total_schema_payload = 0
     total_schema_statement = 0
     chips: List[Dict[str, Any]] = []
+    observers_map: Dict[str, Dict[str, Any]] = {}
 
     for fp in files:
-        rows = _load_rows(fp, args.limit_per_chip)
+        rows = _load_rows(fp, args.limit_per_chip, max_age_days=int(args.max_age_days))
         if not rows:
             continue
         c_rows = len(rows)
@@ -165,6 +233,21 @@ def main() -> int:
             quality = (captured.get("quality_score") or {}) if isinstance(captured, dict) else {}
             total = _safe_float(quality.get("total"), _safe_float(row.get("confidence"), 0.0))
             observer_name = str(row.get("observer_name") or "")
+            observer_key = f"{chip_id}/{observer_name or 'unknown'}"
+            if observer_key not in observers_map:
+                observers_map[observer_key] = {
+                    "observer": observer_key,
+                    "rows": 0,
+                    "telemetry_count": 0,
+                    "statement_count": 0,
+                    "schema_payload_count": 0,
+                    "schema_statement_count": 0,
+                    "quality_pass_count": 0,
+                    "merge_eligible": 0,
+                    "_seen": set(),
+                }
+            obs = observers_map[observer_key]
+            obs["rows"] += 1
 
             if row.get("confidence") is None:
                 missing_confidence += 1
@@ -175,15 +258,18 @@ def main() -> int:
 
             if cm._looks_like_telemetry(chip_id, content):
                 telemetry += 1
+                obs["telemetry_count"] += 1
 
             if isinstance(captured.get("learning_payload"), dict):
                 schema_payload += 1
+                obs["schema_payload_count"] += 1
                 payload_statement = cm._payload_based_learning_statement(
                     captured_data=captured,
                     min_len=int(limits.get("min_statement_len", 28)),
                 )
                 if payload_statement:
                     schema_statement += 1
+                    obs["schema_statement_count"] += 1
 
             statement = cm._distill_learning_statement(
                 chip_id=chip_id,
@@ -194,18 +280,23 @@ def main() -> int:
             )
             if statement:
                 statements += 1
+                obs["statement_count"] += 1
                 if len(sample_statements) < 3:
                     sample_statements.append(statement)
 
             learning_ok = cm._is_learning_quality_ok(quality, limits)
             if learning_ok:
                 quality_pass += 1
+                obs["quality_pass_count"] += 1
 
             if total >= min_total_score and statement and learning_ok:
                 h = cm._hash_insight(chip_id, statement)
                 if h not in seen:
                     seen.add(h)
                     merge_eligible += 1
+                if h not in obs["_seen"]:
+                    obs["_seen"].add(h)
+                    obs["merge_eligible"] += 1
 
         total_telemetry += telemetry
         total_statement += statements
@@ -242,10 +333,38 @@ def main() -> int:
         )
 
     chips.sort(key=lambda r: (int(r.get("merge_eligible", 0)), float(r.get("statement_yield_rate", 0.0))), reverse=True)
+    observers: List[Dict[str, Any]] = []
+    for _, row in observers_map.items():
+        c_rows = max(1, int(row.get("rows", 0)))
+        observers.append(
+            {
+                "observer": row.get("observer"),
+                "rows": int(row.get("rows", 0)),
+                "telemetry_rate": round(int(row.get("telemetry_count", 0)) / c_rows, 4),
+                "statement_yield_rate": round(int(row.get("statement_count", 0)) / c_rows, 4),
+                "schema_payload_rate": round(int(row.get("schema_payload_count", 0)) / c_rows, 4),
+                "schema_statement_rate": round(int(row.get("schema_statement_count", 0)) / c_rows, 4),
+                "learning_quality_pass_rate": round(int(row.get("quality_pass_count", 0)) / c_rows, 4),
+                "merge_eligible": int(row.get("merge_eligible", 0)),
+            }
+        )
+    observers.sort(
+        key=lambda r: (
+            float(r.get("schema_statement_rate", 0.0)),
+            int(r.get("merge_eligible", 0)),
+            int(r.get("rows", 0)),
+        ),
+        reverse=True,
+    )
 
     report = {
         "generated_at": datetime.now(UTC).isoformat(),
         "limits": limits,
+        "active_only": bool(args.active_only),
+        "project_path": str(args.project_path),
+        "max_age_days": int(args.max_age_days),
+        "observer_limit": int(args.observer_limit),
+        "active_chip_ids": active_ids,
         "rows_analyzed": rows_analyzed,
         "merge_eligible": total_merge_eligible,
         "telemetry_rate": round(total_telemetry / max(1, rows_analyzed), 4),
@@ -258,6 +377,7 @@ def main() -> int:
         "schema_statement_rate": round(total_schema_statement / max(1, rows_analyzed), 4),
         "min_total_score": min_total_score,
         "chips": chips,
+        "observers": observers,
     }
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)

@@ -121,6 +121,24 @@ observers:
         impressions: "Current impression count"
         velocity: "Engagement velocity (engagements/hour)"
 
+    extraction:
+      - field: snapshot_age
+        patterns:
+          - "\\bsnapshot(?:_age)?\\s*[:=]?\\s*(1|6|24)\\b"
+          - "\\b(1|6|24)h\\b"
+      - field: likes
+        patterns:
+          - "\\blikes?\\s*[:=]?\\s*(\\d+)\\b"
+      - field: replies
+        patterns:
+          - "\\breplies?\\s*[:=]?\\s*(\\d+)\\b"
+      - field: retweets
+        patterns:
+          - "\\bretweets?\\s*[:=]?\\s*(\\d+)\\b"
+      - field: velocity
+        patterns:
+          - "\\bvelocity\\s*[:=]?\\s*([0-9]+(?:\\.[0-9]+)?)\\b"
+
   - name: engagement_surprise
     description: Captures when actual engagement significantly differs from predicted
 
@@ -139,6 +157,16 @@ observers:
         predicted: "What we predicted"
         actual: "What actually happened"
         possible_reason: "Hypothesis for the surprise"
+
+    extraction:
+      - field: surprise_type
+        keywords:
+          overperform: ["overperform", "viral", "outperformed", "beat prediction"]
+          underperform: ["underperform", "flop", "missed prediction", "below prediction"]
+      - field: surprise_ratio
+        patterns:
+          - "\\bratio\\s*[:=]?\\s*([0-9]+(?:\\.[0-9]+)?)\\b"
+          - "\\b([0-9]+(?:\\.[0-9]+)?)x\\b"
 
 # ============================================================
 # LEARNERS

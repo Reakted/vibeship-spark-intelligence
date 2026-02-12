@@ -25,6 +25,9 @@ def test_markdown_render_includes_core_metrics():
         "limits": {"min_cognitive_value": 0.35},
         "rows_analyzed": 100,
         "merge_eligible": 3,
+        "active_only": True,
+        "max_age_days": 14,
+        "observer_limit": 12,
         "telemetry_rate": 0.9,
         "statement_yield_rate": 0.1,
         "learning_quality_pass_rate": 0.05,
@@ -39,11 +42,23 @@ def test_markdown_render_includes_core_metrics():
                 "sample_statements": ["Use evidence from campaign topic testing."],
             }
         ],
+        "observers": [
+            {
+                "observer": "marketing/reply_effectiveness",
+                "rows": 8,
+                "schema_payload_rate": 0.5,
+                "schema_statement_rate": 0.5,
+                "statement_yield_rate": 0.5,
+                "merge_eligible": 2,
+                "telemetry_rate": 0.25,
+            }
+        ],
     }
     md = mod._md(report)
     assert "Chip Learning Diagnostics" in md
     assert "`marketing`" in md
     assert "Merge Eligible" in md
+    assert "Observer KPIs" in md
 
 
 def test_apply_limit_overrides_clamps_ranges():

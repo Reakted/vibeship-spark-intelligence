@@ -263,6 +263,14 @@ observers:
           timing: ["timing", "time", "when", "morning", "evening"]
           content: ["content", "topic", "post about", "tweet about"]
           relationship: ["relationship", "warmth", "trust", "rapport"]
+      - field: confidence
+        patterns:
+          - "\\bconfidence\\s*[:=]?\\s*(0(?:\\.\\d+)?|1(?:\\.0+)?)\\b"
+          - "\\b(0\\.\\d{1,2})\\s*confidence\\b"
+      - field: sample_size
+        patterns:
+          - "\\bsample(?:_size)?\\s*[:=]?\\s*(\\d+)\\b"
+          - "\\b(\\d+)\\s+observations\\b"
 
   # ---- INFLUENCER & COMPETITOR INTELLIGENCE ----
 

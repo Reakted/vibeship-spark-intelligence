@@ -59,6 +59,20 @@ SCHEMA_TELEMETRY_FIELD_KEYS = {
     "chip",
     "trigger",
 }
+SCHEMA_SHORT_NUMERIC_ALLOWLIST = {
+    "snapshot_age",
+    "thread_depth",
+    "turn_count",
+    "replies",
+    "replies_received",
+    "likes",
+    "retweets",
+    "impressions",
+    "engagement",
+    "sample_size",
+    "surprise_ratio",
+    "confidence",
+}
 
 
 @dataclass
@@ -441,9 +455,13 @@ class ChipRuntime:
             return True
         if k in SCHEMA_TELEMETRY_FIELD_KEYS:
             return True
+        if isinstance(value, (int, float)):
+            return False
         text = str(value or "").strip().lower()
         if not text:
             return True
+        if text.replace(".", "", 1).isdigit() and k in SCHEMA_SHORT_NUMERIC_ALLOWLIST:
+            return False
         if len(text) <= 1:
             return True
         return False

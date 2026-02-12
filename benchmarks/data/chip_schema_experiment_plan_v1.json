@@ -3,12 +3,13 @@
   "description": "Schema capture A/B/C/D matrix for chip learning quality.",
   "control_experiment_id": "A_schema_baseline",
   "objective_weights": {
-    "schema_payload_rate": 0.2,
-    "schema_statement_rate": 0.3,
-    "merge_eligible_rate": 0.2,
+    "capture_coverage": 0.3,
+    "schema_payload_rate": 0.15,
+    "schema_statement_rate": 0.25,
+    "merge_eligible_rate": 0.1,
     "learning_quality_pass_rate": 0.1,
-    "non_telemetry_rate": 0.1,
-    "payload_valid_emission_rate": 0.1
+    "non_telemetry_rate": 0.05,
+    "payload_valid_emission_rate": 0.05
   },
   "experiments": [
     {
