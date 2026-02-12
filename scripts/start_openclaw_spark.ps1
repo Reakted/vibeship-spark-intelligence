@@ -1,40 +1,84 @@
-# start_openclaw_spark.ps1 - Start all Spark x OpenClaw services
+# start_openclaw_spark.ps1 - Start OpenClaw bridge-layer services without owning core Spark by default.
+param(
+    [switch]$WithCore
+)
+
 $ErrorActionPreference = "SilentlyContinue"
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if (-not $RepoRoot) { $RepoRoot = Split-Path -Parent $PSScriptRoot }
 if (-not (Test-Path "$RepoRoot\sparkd.py")) { $RepoRoot = (Get-Location).Path }
+$pidFile = Join-Path $RepoRoot "scripts\.spark_openclaw_pids.json"
+
+function Get-ProcessByPattern {
+    param([string]$Pattern)
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.CommandLine -match $Pattern
+    } | Select-Object -First 1
+}
 
 Write-Host "=== Spark x OpenClaw - Starting ===" -ForegroundColor Cyan
 Write-Host "Repo: $RepoRoot"
+Write-Host "Mode: $(if ($WithCore) { 'with-core (starts missing core services)' } else { 'integration-only (tailer only)' })"
 
-# 1. sparkd
-Write-Host "`n[1/3] Starting sparkd..." -ForegroundColor Yellow
-$sparkd = Start-Process -FilePath python -ArgumentList "$RepoRoot\sparkd.py" `
-    -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru
-Write-Host "  PID: $($sparkd.Id)"
+$ownedSparkd = $false
+$ownedBridge = $false
+$sparkd = $null
+$bridge = $null
 
-Start-Sleep -Seconds 2
+if ($WithCore) {
+    # 1) sparkd (only if not already running)
+    $sparkdProc = Get-ProcessByPattern "sparkd.py|-m sparkd"
+    if ($sparkdProc) {
+        Write-Host "`n[1/3] sparkd already running (PID $($sparkdProc.ProcessId))" -ForegroundColor DarkGray
+    } else {
+        Write-Host "`n[1/3] Starting sparkd..." -ForegroundColor Yellow
+        $sparkd = Start-Process -FilePath python -ArgumentList "$RepoRoot\sparkd.py" `
+            -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru
+        $ownedSparkd = $true
+        Write-Host "  PID: $($sparkd.Id)"
+        Start-Sleep -Seconds 2
+    }
 
-# 2. bridge_worker
-Write-Host "[2/3] Starting bridge_worker..." -ForegroundColor Yellow
-$bridge = Start-Process -FilePath python -ArgumentList "$RepoRoot\bridge_worker.py" `
-    -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru
-Write-Host "  PID: $($bridge.Id)"
+    # 2) bridge_worker (only if not already running)
+    $bridgeProc = Get-ProcessByPattern "bridge_worker.py|-m bridge_worker"
+    if ($bridgeProc) {
+        Write-Host "[2/3] bridge_worker already running (PID $($bridgeProc.ProcessId))" -ForegroundColor DarkGray
+    } else {
+        Write-Host "[2/3] Starting bridge_worker..." -ForegroundColor Yellow
+        $bridge = Start-Process -FilePath python -ArgumentList "$RepoRoot\bridge_worker.py" `
+            -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru
+        $ownedBridge = $true
+        Write-Host "  PID: $($bridge.Id)"
+    }
+} else {
+    Write-Host "`n[1/3] Core services left untouched (integration-only mode)." -ForegroundColor DarkGray
+    Write-Host "[2/3] Core services left untouched (integration-only mode)." -ForegroundColor DarkGray
+}
 
-# 3. openclaw_tailer
-Write-Host "[3/3] Starting openclaw_tailer (with subagents)..." -ForegroundColor Yellow
-$tailer = Start-Process -FilePath python -ArgumentList `
-    "$RepoRoot\adapters\openclaw_tailer.py","--include-subagents" `
-    -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru
-Write-Host "  PID: $($tailer.Id)"
+# 3) openclaw_tailer (always owned by this script)
+$existingTailer = Get-ProcessByPattern "openclaw_tailer.py"
+if ($existingTailer) {
+    Write-Host "[3/3] openclaw_tailer already running (PID $($existingTailer.ProcessId)); reusing." -ForegroundColor DarkGray
+    $tailerPid = [int]$existingTailer.ProcessId
+} else {
+    Write-Host "[3/3] Starting openclaw_tailer (with subagents)..." -ForegroundColor Yellow
+    $tailer = Start-Process -FilePath python -ArgumentList `
+        "$RepoRoot\adapters\openclaw_tailer.py","--include-subagents" `
+        -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru
+    $tailerPid = [int]$tailer.Id
+    Write-Host "  PID: $tailerPid"
+}
 
-# Save PIDs for stop script
-$pidFile = Join-Path $RepoRoot "scripts\.spark_pids.json"
+# Save OpenClaw-managed PIDs in an isolated file (never shared with spark.ps1).
 @{
-    sparkd  = $sparkd.Id
-    bridge  = $bridge.Id
-    tailer  = $tailer.Id
-    started = (Get-Date -Format o)
+    owner        = "openclaw_bridge_layer"
+    sparkd       = if ($sparkd) { $sparkd.Id } else { $null }
+    bridge       = if ($bridge) { $bridge.Id } else { $null }
+    tailer       = $tailerPid
+    owns_sparkd  = $ownedSparkd
+    owns_bridge  = $ownedBridge
+    with_core    = [bool]$WithCore
+    started      = (Get-Date -Format o)
 } | ConvertTo-Json | Set-Content $pidFile -Encoding UTF8
 
 Write-Host "`n=== All services started ===" -ForegroundColor Green
