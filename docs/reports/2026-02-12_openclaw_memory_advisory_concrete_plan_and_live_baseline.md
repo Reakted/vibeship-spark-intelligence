@@ -208,6 +208,10 @@ Status update (executed now):
 - dashboard/operator surfaces now expose advisory delivery status:
   - mission and ops API payloads include compact advisory status + `delivery_badge`.
   - mission and ops UI cards now render badge state, reason, age, and queue/prefetch context.
+- Pulse/OpenClaw surfaces now expose the same delivery status contract:
+  - Pulse `/api/status` includes `advisory.delivery_badge`.
+  - Pulse `/api/advisory` includes normalized `delivery_badge` + `delivery` summary.
+  - Pulse advisory tab renders delivery badge state/event/age/mode/reason.
 
 ---
 

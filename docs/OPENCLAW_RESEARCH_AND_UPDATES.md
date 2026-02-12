@@ -39,6 +39,28 @@ For each change:
 
 ---
 
+## 2026-02-12 Active Worklog
+
+### [2026-02-12 13:05 UTC] P0 - Advisory delivery status visibility (`live|fallback|blocked|stale`)
+- **Goal:** make advisory runtime state explicit across operator surfaces to reduce "auth blocked/unavailable" ambiguity.
+- **Changes made:**
+  - `lib/advisory_engine.py`
+    - added derived `delivery_badge` from recent advisory events (`live|fallback|blocked|stale`)
+    - added actionability enforcement fallback (`Next check: <command>`) when advisory has no concrete check command
+    - added diagnostics envelope fields in advisory events (`session_id`, `trace_id`, `scope`, `provider_path`, source counters)
+  - `dashboard.py`
+    - mission/ops payload now includes advisory status block + `delivery_badge`
+    - mission/ops UI cards now render delivery state, reason, age, and queue/prefetch context
+  - external `vibeship-spark-pulse`:
+    - `/api/status` and `/api/advisory` now expose normalized delivery badge
+    - advisory tab now renders delivery badge panel (state/event/age/mode/reason)
+- **Validation result:** better
+  - advisory-focused and regression tests passed in spark-intelligence
+  - pulse delivery tests passed (`tests/test_advisory_delivery_status.py`)
+- **Decision:** keep
+
+---
+
 ## 2026-02-11 Active Worklog
 
 ### [2026-02-11 13:34 GMT+4] Sprint 1 — Redundant advisory pruning

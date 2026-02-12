@@ -117,7 +117,13 @@ Dashboards and ops:
 6) Engine persists baseline/live packets and enqueues background prefetch jobs from UserPromptSubmit.
 7) PostToolUse/PostToolUseFailure call advisory_engine.on_post_tool for implicit feedback and packet invalidation on Edit/Write.
 8) Advisor still logs retrievals/outcomes and Meta-Ralph updates quality via outcome-linked feedback.
-9) Semantic retrieval path (when semantic.enabled=true):
+9) Advisory event logs now carry diagnostics envelope fields for explainability and debugging:
+   - `session_id`, `trace_id`, `session_context_key`, `scope`, `provider_path`, `source_counts`, `missing_sources`.
+10) Advisory actionability is enforced on emitted guidance:
+   - when no concrete command/check is present, engine appends `Next check: <command>`.
+11) Engine status derives a delivery badge from recent events:
+   - `live | fallback | blocked | stale`.
+12) Semantic retrieval path (when semantic.enabled=true):
    - intent = semantic_retriever._extract_intent(context)
    - triggers (optional) + semantic search (embeddings) + fusion scoring + dedupe + MMR + category caps
    - retrieval log: ~/.spark/logs/semantic_retrieval.jsonl (intent, candidates, triggers, top-N scores)
@@ -206,6 +212,7 @@ Advisory foundation:
 - ~/.spark/advice_packets/index.json
 - ~/.spark/advice_packets/*.json
 - ~/.spark/advice_packets/prefetch_queue.jsonl
+- `advisory_engine.jsonl` events include diagnostics envelope, actionability metadata, and route/delivery fields used by operator badges.
 
 Outcomes + prediction:
 - ~/.spark/predictions.jsonl
@@ -319,6 +326,9 @@ Advisory foundation:
   - max indexed packets MAX_INDEX_PACKETS=2000
 - prefetch queue is enabled by default (SPARK_ADVISORY_PREFETCH_QUEUE=1) and fed from UserPromptSubmit.
 - memory fusion can optionally include Mind retrieval (SPARK_ADVISORY_INCLUDE_MIND=1 to enable).
+- actionability enforcement is on by default (SPARK_ADVISORY_REQUIRE_ACTION=1).
+- repeat suppression uses text fingerprint cooldown (SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S, default 1800s).
+- delivery stale window defaults to 900s (SPARK_ADVISORY_STALE_S) for `live/fallback/blocked/stale` status.
 Advisory synthesis:
 - SPARK_SYNTH_MODE=auto|ai_only|programmatic (default auto)
 - SPARK_SYNTH_TIMEOUT=3.0s
@@ -375,6 +385,9 @@ Advisory:
 - SPARK_ADVISORY_MAX_MS (default "4000")
 - SPARK_ADVISORY_PREFETCH_QUEUE (default "1")
 - SPARK_ADVISORY_INCLUDE_MIND (default "0")
+- SPARK_ADVISORY_REQUIRE_ACTION (default "1")
+- SPARK_ADVISORY_STALE_S (default "900")
+- SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S (default "1800")
 - SPARK_ADVISORY_EMIT (default "1")
 - SPARK_ADVISORY_MAX_CHARS (default "500")
 - SPARK_ADVISORY_FORMAT (default "inline")
@@ -424,6 +437,7 @@ Moltbook adapter:
 ## 6) Known gaps / mismatches
 
 - Spark Pulse is the external vibeship-spark-pulse/app.py (set SPARK_PULSE_DIR to override location).
+- advisory delivery status is now surfaced in both Spark Lab dashboard and Pulse advisory/status APIs, but action routing still depends on the OpenClaw agent/plugin side consuming those signals.
 - Mind host is fixed to localhost; port override supported via `SPARK_MIND_PORT` (see `lib/ports.py`).
 - build/ contains duplicated code artifacts; excluded from analysis.
 

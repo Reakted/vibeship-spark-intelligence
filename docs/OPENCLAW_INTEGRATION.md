@@ -98,6 +98,28 @@ curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:8765/
 Get-Content "$env:USERPROFILE\.spark\bridge_worker_heartbeat.json" | ConvertFrom-Json
 ```
 
+### Advisory Delivery Status (Pulse + Spark Lab)
+
+```powershell
+# Spark Lab status (dashboard.py source of truth)
+$lab = Invoke-RestMethod http://127.0.0.1:8585/api/status
+$lab.advisory.delivery_badge
+
+# Pulse status projection
+$pulse = Invoke-RestMethod http://127.0.0.1:8765/api/status
+$pulse.advisory.delivery_badge
+
+# Pulse advisory board
+$adv = Invoke-RestMethod http://127.0.0.1:8765/api/advisory
+$adv.delivery_badge
+```
+
+Expected `delivery_badge.state` values:
+- `live`: recent live advisory emit path
+- `fallback`: packet/fallback advisory path active
+- `blocked`: advisory path unavailable/disabled
+- `stale`: last advisory event older than stale threshold
+
 ## OpenClaw Configuration
 
 ### Cron Job

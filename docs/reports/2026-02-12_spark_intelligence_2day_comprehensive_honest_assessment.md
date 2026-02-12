@@ -222,6 +222,10 @@ Net: the loop is operational and improving, but quality reliability is constrain
 15. Added dashboard advisory status tests:
 - `tests/test_dashboard_advisory_status.py`
 
+16. Extended delivery badge visibility into Pulse/OpenClaw surfaces:
+- external `vibeship-spark-pulse` now normalizes and exposes advisory delivery in `/api/status` and `/api/advisory`.
+- Pulse advisory UI now renders delivery state (`live|fallback|blocked|stale`) with reason/age/event/mode.
+
 ## 10) Decision summary
 
 1. Keep and invest:
