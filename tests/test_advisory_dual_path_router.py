@@ -131,6 +131,16 @@ def test_on_user_prompt_creates_baseline_and_prefetch_job(monkeypatch, tmp_path)
 
     status = packet_store.get_store_status()
     assert status["total_packets"] >= 1
+    packet = None
+    for fp in packet_store.PACKET_DIR.glob("pkt_*.json"):
+        row = json.loads(fp.read_text(encoding="utf-8"))
+        if row.get("source_mode") == "baseline_deterministic":
+            packet = row
+            break
+    assert packet is not None
+    advice_row = (packet.get("advice_items") or [{}])[0]
+    assert advice_row.get("proof_refs")
+    assert advice_row.get("evidence_hash")
     assert packet_store.PREFETCH_QUEUE_FILE.exists()
     lines = packet_store.PREFETCH_QUEUE_FILE.read_text(encoding="utf-8").splitlines()
     assert len(lines) >= 1

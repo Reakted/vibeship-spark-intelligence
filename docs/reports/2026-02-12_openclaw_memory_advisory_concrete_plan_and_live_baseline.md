@@ -197,6 +197,11 @@ Acceptance:
 Owner:
 - Pulse/OpenClaw UI + API integration maintainers.
 
+Status update (executed now):
+- advisory engine events now include diagnostics envelope fields:
+  - `session_id`, `trace_id`, `session_context_key`, `scope`, `provider_path`, `source_counts`, `missing_sources`
+- `on_user_prompt` now logs `user_prompt_prefetch` with envelope metadata.
+
 ---
 
 ## 5) Mapping complaints to exact fixes

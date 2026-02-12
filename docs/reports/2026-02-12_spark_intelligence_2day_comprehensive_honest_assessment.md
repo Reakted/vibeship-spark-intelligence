@@ -185,21 +185,26 @@ Net: the loop is operational and improving, but quality reliability is constrain
 7. Added sync health contract split for core vs optional adapters:
 - `lib/sync_tracker.py` now emits `core_ok/core_error/optional_error/core_healthy`.
 
-8. Added taxonomy + dedupe/retrieval/evidence/ops tests:
+8. Added diagnostics envelope fields for end-to-end advisory tracing:
+- `lib/advisory_engine.py` now emits `session_id`, `trace_id`, `session_context_key`, `scope`, `provider_path`, `source_counts`, `missing_sources` in engine events.
+
+9. Added taxonomy + dedupe/retrieval/evidence/ops tests:
 - `tests/test_error_taxonomy.py`
 - `tests/test_semantic_retriever.py`
 - `tests/test_advisory_engine_dedupe.py`
 - `tests/test_advisory_engine_evidence.py`
 - `tests/test_sync_tracker_tiers.py`
+- `tests/test_advisory_dual_path_router.py`
 
-9. Validation runs:
+10. Validation runs:
 - `python -m pytest tests/test_semantic_retriever.py tests/test_memory_retrieval_ab.py -q`
 - `python -m pytest tests/test_advisory_engine_dedupe.py tests/test_advisor_effectiveness.py tests/test_advisory_packet_store.py tests/test_error_taxonomy.py tests/test_memory_retrieval_ab.py tests/test_semantic_retriever.py -q`
 - `python -m pytest tests/test_advisory_engine_evidence.py tests/test_advisory_engine_dedupe.py tests/test_advisory_packet_store.py tests/test_advisor_effectiveness.py -q`
 - `python -m pytest tests/test_sync_tracker_tiers.py tests/test_advisory_engine_evidence.py tests/test_advisory_engine_dedupe.py tests/test_semantic_retriever.py -q`
+- `python -m pytest tests/test_error_taxonomy.py tests/test_memory_retrieval_ab.py tests/test_semantic_retriever.py tests/test_advisory_engine_dedupe.py tests/test_advisory_engine_evidence.py tests/test_advisory_dual_path_router.py tests/test_advisory_packet_store.py tests/test_advisor_effectiveness.py tests/test_sync_tracker_tiers.py -q`
 - Result: all listed targeted runs passed (known Windows pytest atexit temp-permission warning remains after success).
 
-10. Live retrieval rerun artifacts:
+11. Live retrieval rerun artifacts:
 - `benchmarks/out/memory_retrieval_ab_real_user_2026_02_12_default_live_refresh_report.md`
 - `benchmarks/out/memory_retrieval_ab_real_user_2026_02_12_relaxed_live_refresh_report.md`
 - `benchmarks/out/memory_retrieval_ab_real_user_2026_02_12_default_after_rescue_report.md`

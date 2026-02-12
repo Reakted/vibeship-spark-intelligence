@@ -40,3 +40,26 @@ def test_advice_rows_wrapper_works_without_trace_id():
     assert len(rows) == 1
     assert "trace_id" not in rows[0]["proof_refs"]
     assert rows[0]["proof_refs"]["advice_id"] == "aid-2"
+
+
+def test_diagnostics_envelope_has_session_scope_and_provider():
+    bundle = {
+        "memory_absent_declared": False,
+        "sources": {"cognitive": {"count": 2}, "eidos": {"count": 0}},
+        "missing_sources": ["eidos"],
+    }
+    env = advisory_engine._diagnostics_envelope(
+        session_id="session-1",
+        trace_id="trace-1",
+        route="packet_exact",
+        session_context_key="ctx-1",
+        scope="session",
+        memory_bundle=bundle,
+    )
+
+    assert env["session_id"] == "session-1"
+    assert env["trace_id"] == "trace-1"
+    assert env["scope"] == "session"
+    assert env["provider_path"] == "packet_store"
+    assert env["source_counts"]["cognitive"] == 2
+    assert "eidos" in env["missing_sources"]

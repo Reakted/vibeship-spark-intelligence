@@ -22,6 +22,7 @@ MAX_ENGINE_MS = float(os.getenv("SPARK_ADVISORY_MAX_MS", "4000"))
 INCLUDE_MIND_IN_MEMORY = os.getenv("SPARK_ADVISORY_INCLUDE_MIND", "0") == "1"
 ENABLE_PREFETCH_QUEUE = os.getenv("SPARK_ADVISORY_PREFETCH_QUEUE", "1") != "0"
 ENABLE_INLINE_PREFETCH_WORKER = os.getenv("SPARK_ADVISORY_PREFETCH_INLINE", "1") != "0"
+MEMORY_SCOPE_DEFAULT = str(os.getenv("SPARK_MEMORY_SCOPE_DEFAULT", "session") or "session").strip() or "session"
 ADVISORY_TEXT_REPEAT_COOLDOWN_S = float(
     os.getenv("SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S", "1800")
 )
@@ -299,6 +300,56 @@ def _duplicate_repeat_state(state, advisory_text: str) -> Dict[str, Any]:
     }
 
 
+def _provider_path_from_route(route: str) -> str:
+    value = str(route or "").strip().lower()
+    if value.startswith("packet"):
+        return "packet_store"
+    if value.startswith("live"):
+        return "live_direct"
+    if "fallback" in value:
+        return "deterministic_fallback"
+    if value == "post_tool":
+        return "post_tool_feedback"
+    if value == "user_prompt":
+        return "prompt_prefetch"
+    return "unknown"
+
+
+def _diagnostics_envelope(
+    *,
+    session_id: str,
+    trace_id: Optional[str],
+    route: str,
+    session_context_key: str = "",
+    scope: Optional[str] = None,
+    memory_bundle: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    bundle = memory_bundle if isinstance(memory_bundle, dict) else {}
+    sources = bundle.get("sources") if isinstance(bundle.get("sources"), dict) else {}
+    source_counts: Dict[str, int] = {}
+    for name, meta in sources.items():
+        if isinstance(meta, dict):
+            source_counts[str(name)] = int(meta.get("count", 0) or 0)
+
+    missing_sources = bundle.get("missing_sources")
+    if not isinstance(missing_sources, list):
+        missing_sources = [name for name, count in source_counts.items() if count <= 0]
+
+    resolved_scope = str(scope or bundle.get("scope") or MEMORY_SCOPE_DEFAULT).strip() or "session"
+    envelope: Dict[str, Any] = {
+        "session_id": str(session_id or ""),
+        "trace_id": str(trace_id or ""),
+        "session_context_key": str(session_context_key or ""),
+        "scope": resolved_scope,
+        "provider_path": _provider_path_from_route(route),
+        "source_counts": source_counts,
+        "missing_sources": missing_sources,
+    }
+    if "memory_absent_declared" in bundle:
+        envelope["memory_absent_declared"] = bool(bundle.get("memory_absent_declared"))
+    return envelope
+
+
 def on_pre_tool(
     session_id: str,
     tool_name: str,
@@ -312,12 +363,26 @@ def on_pre_tool(
     route = "live"
     packet_id = None
     stage_ms: Dict[str, float] = {}
+    session_context_key = ""
+    memory_bundle: Dict[str, Any] = {}
+    intent_family = "emergent_other"
+    task_plane = "build_delivery"
 
     def _mark(stage: str, t0: float) -> None:
         try:
             stage_ms[stage] = round((time.time() * 1000.0) - t0, 1)
         except Exception:
             pass
+
+    def _diag(current_route: str) -> Dict[str, Any]:
+        return _diagnostics_envelope(
+            session_id=session_id,
+            trace_id=trace_id,
+            route=current_route,
+            session_context_key=session_context_key,
+            scope="session",
+            memory_bundle=memory_bundle,
+        )
 
     try:
         from .advisory_state import (
@@ -400,10 +465,10 @@ def on_pre_tool(
                 0,
                 start_ms,
                 extra={
+                    **_diag(route),
                     "route": route,
                     "intent_family": intent_family,
                     "task_plane": task_plane,
-                    "memory_absent_declared": bool(memory_bundle.get("memory_absent_declared")),
                     "stage_ms": stage_ms,
                     "delivery_mode": "none",
                     "error_kind": "no_hit",
@@ -443,11 +508,11 @@ def on_pre_tool(
                     0,
                     start_ms,
                     extra={
+                        **_diag(route),
                         "route": route,
                         "intent_family": intent_family,
                         "task_plane": task_plane,
                         "packet_id": packet_id,
-                        "memory_absent_declared": bool(memory_bundle.get("memory_absent_declared")),
                         "stage_ms": stage_ms,
                         "delivery_mode": "none",
                         "error_kind": "policy",
@@ -467,6 +532,7 @@ def on_pre_tool(
                     0,
                     start_ms,
                     extra={
+                        **_diag(route),
                         "route": route,
                         "intent_family": intent_family,
                         "task_plane": task_plane,
@@ -502,6 +568,7 @@ def on_pre_tool(
                 1 if fallback_emitted else 0,
                 start_ms,
                 extra={
+                    **_diag(route),
                     "route": route,
                     "intent_family": intent_family,
                     "packet_id": packet_id,
@@ -560,11 +627,11 @@ def on_pre_tool(
                 len(gate_result.emitted),
                 start_ms,
                 extra={
+                    **_diag(route),
                     "route": route,
                     "intent_family": intent_family,
                     "task_plane": task_plane,
                     "packet_id": packet_id,
-                    "memory_absent_declared": bool(memory_bundle.get("memory_absent_declared")),
                     "stage_ms": stage_ms,
                     "delivery_mode": "none",
                     "error_kind": "policy",
@@ -649,11 +716,11 @@ def on_pre_tool(
             len(gate_result.emitted),
             start_ms,
             extra={
+                **_diag(route),
                 "route": route,
                 "intent_family": intent_family,
                 "task_plane": task_plane,
                 "packet_id": packet_id,
-                "memory_absent_declared": bool(memory_bundle.get("memory_absent_declared")),
                 "intent_confidence": float(intent_info.get("confidence", 0.0) or 0.0),
                 "stage_ms": stage_ms,
                 "delivery_mode": "live" if emitted else "none",
@@ -669,7 +736,10 @@ def on_pre_tool(
             0,
             0,
             start_ms,
-            extra=build_error_fields(str(e), "AE_ON_PRE_TOOL_FAILED"),
+            extra={
+                **_diag(route),
+                **build_error_fields(str(e), "AE_ON_PRE_TOOL_FAILED"),
+            },
         )
         return None
 
@@ -685,6 +755,7 @@ def on_post_tool(
     if not ENGINE_ENABLED:
         return
     start_ms = time.time() * 1000.0
+    resolved_trace_id = trace_id
 
     try:
         from .advisory_state import (
@@ -760,7 +831,15 @@ def on_post_tool(
             0,
             0,
             start_ms,
-            extra=build_error_fields(str(e), "AE_ON_POST_TOOL_FAILED"),
+            extra={
+                **_diagnostics_envelope(
+                    session_id=session_id,
+                    trace_id=resolved_trace_id,
+                    route="post_tool",
+                    scope="session",
+                ),
+                **build_error_fields(str(e), "AE_ON_POST_TOOL_FAILED"),
+            },
         )
 
 
@@ -785,23 +864,34 @@ def on_user_prompt(
         task_plane = state.task_plane or "build_delivery"
         save_state(state)
 
+        baseline_text = _baseline_text(intent_family)
+        baseline_proof = {
+            "advice_id": f"baseline_{intent_family}",
+            "insight_key": f"intent:{intent_family}",
+            "source": "baseline",
+        }
         baseline_packet = build_packet(
             project_key=project_key,
             session_context_key=session_context_key,
             tool_name="*",
             intent_family=intent_family,
             task_plane=task_plane,
-            advisory_text=_baseline_text(intent_family),
+            advisory_text=baseline_text,
             source_mode="baseline_deterministic",
             advice_items=[
                 {
                     "advice_id": f"baseline_{intent_family}",
                     "insight_key": f"intent:{intent_family}",
-                    "text": _baseline_text(intent_family),
+                    "text": baseline_text,
                     "confidence": max(0.75, float(intent_info.get("confidence", 0.75) or 0.75)),
                     "source": "baseline",
                     "context_match": 0.8,
                     "reason": "session_baseline",
+                    "proof_refs": baseline_proof,
+                    "evidence_hash": _evidence_hash_for_row(
+                        advice_text=baseline_text,
+                        proof_refs=baseline_proof,
+                    ),
                 }
             ],
             lineage={"sources": ["baseline"], "memory_absent_declared": False},
@@ -830,6 +920,27 @@ def on_user_prompt(
                     )
                 except Exception as e:
                     log_debug("advisory_engine", "inline prefetch worker failed", e)
+
+        _log_engine_event(
+            "user_prompt_prefetch",
+            "*",
+            1,
+            0,
+            start_ms,
+            extra={
+                **_diagnostics_envelope(
+                    session_id=session_id,
+                    trace_id=None,
+                    route="user_prompt",
+                    session_context_key=session_context_key,
+                    scope="session",
+                ),
+                "intent_family": intent_family,
+                "task_plane": task_plane,
+                "packet_id": baseline_packet.get("packet_id"),
+                "prefetch_queue_enabled": bool(ENABLE_PREFETCH_QUEUE),
+            },
+        )
     except Exception as e:
         log_debug("advisory_engine", "on_user_prompt failed", e)
         _log_engine_event(
@@ -838,7 +949,15 @@ def on_user_prompt(
             0,
             0,
             start_ms,
-            extra=build_error_fields(str(e), "AE_ON_USER_PROMPT_FAILED"),
+            extra={
+                **_diagnostics_envelope(
+                    session_id=session_id,
+                    trace_id=None,
+                    route="user_prompt",
+                    scope="session",
+                ),
+                **build_error_fields(str(e), "AE_ON_USER_PROMPT_FAILED"),
+            },
         )
 
 
