@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import json
+import os
 import re
 
 from .cognitive_learner import CognitiveLearner, CognitiveInsight
@@ -34,6 +35,11 @@ DEFAULT_MAX_PROMOTED = 6
 DEFAULT_HIGH_VALIDATION_OVERRIDE = 50
 DEFAULT_MAX_CHIP_HIGHLIGHTS = 4
 CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
+TUNEABLES_FILE = Path.home() / ".spark" / "tuneables.json"
+
+CORE_SYNC_ADAPTERS = ("openclaw", "exports")
+OPTIONAL_SYNC_ADAPTERS = ("claude_code", "cursor", "windsurf", "clawdbot")
+ALL_SYNC_ADAPTERS = CORE_SYNC_ADAPTERS + OPTIONAL_SYNC_ADAPTERS
 
 
 @dataclass
@@ -42,6 +48,63 @@ class SyncStats:
     selected: int
     promoted_selected: int
     diagnostics: Optional[Dict] = None
+
+
+def _parse_adapter_list(raw: Any) -> List[str]:
+    if isinstance(raw, str):
+        items = [p.strip().lower() for p in raw.split(",")]
+    elif isinstance(raw, (list, tuple, set)):
+        items = [str(p).strip().lower() for p in raw]
+    else:
+        return []
+    seen = set()
+    out: List[str] = []
+    for name in items:
+        if name in ALL_SYNC_ADAPTERS and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def _load_sync_adapter_policy() -> Dict[str, Any]:
+    mode = str(os.getenv("SPARK_SYNC_MODE", "") or "").strip().lower()
+    env_targets = _parse_adapter_list(os.getenv("SPARK_SYNC_TARGETS", ""))
+    env_disabled = set(_parse_adapter_list(os.getenv("SPARK_SYNC_DISABLE_TARGETS", "")))
+    cfg: Dict[str, Any] = {}
+
+    try:
+        if TUNEABLES_FILE.exists():
+            data = json.loads(TUNEABLES_FILE.read_text(encoding="utf-8"))
+            raw = data.get("sync") or {}
+            if isinstance(raw, dict):
+                cfg = raw
+    except Exception:
+        cfg = {}
+
+    cfg_mode = str(cfg.get("mode") or "").strip().lower()
+    if not mode:
+        mode = cfg_mode or "core"
+    if mode not in {"core", "all"}:
+        mode = "core"
+
+    enabled = set(ALL_SYNC_ADAPTERS if mode == "all" else CORE_SYNC_ADAPTERS)
+
+    cfg_enabled = _parse_adapter_list(cfg.get("adapters_enabled"))
+    if cfg_enabled:
+        enabled = set(cfg_enabled)
+
+    cfg_disabled = set(_parse_adapter_list(cfg.get("adapters_disabled")))
+    enabled -= cfg_disabled
+
+    if env_targets:
+        enabled = set(env_targets)
+    enabled -= env_disabled
+
+    return {
+        "mode": mode,
+        "enabled": sorted(enabled),
+        "disabled": sorted(set(ALL_SYNC_ADAPTERS) - set(enabled)),
+    }
 
 
 def _normalize_text(text: str) -> str:
@@ -511,43 +574,66 @@ def sync_context(
         chip_highlights=chip_highlights,
         project_profile=profile,
     )
+    adapter_policy = _load_sync_adapter_policy()
+    enabled_adapters = set(adapter_policy.get("enabled") or [])
+    if diagnostics is not None:
+        diagnostics["sync_policy"] = adapter_policy
+
     targets: Dict[str, str] = {}
 
-    try:
-        write_claude_code(context, project_dir=root)
-        targets["claude_code"] = "written"
-    except Exception:
-        targets["claude_code"] = "error"
+    if "claude_code" in enabled_adapters:
+        try:
+            write_claude_code(context, project_dir=root)
+            targets["claude_code"] = "written"
+        except Exception:
+            targets["claude_code"] = "error"
+    else:
+        targets["claude_code"] = "disabled"
 
-    try:
-        write_cursor(context, project_dir=root)
-        targets["cursor"] = "written"
-    except Exception:
-        targets["cursor"] = "error"
+    if "cursor" in enabled_adapters:
+        try:
+            write_cursor(context, project_dir=root)
+            targets["cursor"] = "written"
+        except Exception:
+            targets["cursor"] = "error"
+    else:
+        targets["cursor"] = "disabled"
 
-    try:
-        write_windsurf(context, project_dir=root)
-        targets["windsurf"] = "written"
-    except Exception:
-        targets["windsurf"] = "error"
+    if "windsurf" in enabled_adapters:
+        try:
+            write_windsurf(context, project_dir=root)
+            targets["windsurf"] = "written"
+        except Exception:
+            targets["windsurf"] = "error"
+    else:
+        targets["windsurf"] = "disabled"
 
-    try:
-        ok = write_clawdbot(context)
-        targets["clawdbot"] = "written" if ok else "skipped"
-    except Exception:
-        targets["clawdbot"] = "error"
+    if "clawdbot" in enabled_adapters:
+        try:
+            ok = write_clawdbot(context)
+            targets["clawdbot"] = "written" if ok else "skipped"
+        except Exception:
+            targets["clawdbot"] = "error"
+    else:
+        targets["clawdbot"] = "disabled"
 
-    try:
-        ok = write_openclaw(context)
-        targets["openclaw"] = "written" if ok else "skipped"
-    except Exception:
-        targets["openclaw"] = "error"
+    if "openclaw" in enabled_adapters:
+        try:
+            ok = write_openclaw(context)
+            targets["openclaw"] = "written" if ok else "skipped"
+        except Exception:
+            targets["openclaw"] = "error"
+    else:
+        targets["openclaw"] = "disabled"
 
-    try:
-        write_exports(context)
-        targets["exports"] = "written"
-    except Exception:
-        targets["exports"] = "error"
+    if "exports" in enabled_adapters:
+        try:
+            write_exports(context)
+            targets["exports"] = "written"
+        except Exception:
+            targets["exports"] = "error"
+    else:
+        targets["exports"] = "disabled"
 
     # Record sync stats for dashboard tracking
     try:
