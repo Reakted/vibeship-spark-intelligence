@@ -230,11 +230,42 @@ Compare:
 - `merge_eligible`
 - `statement_yield_rate`
 - `learning_quality_pass_rate`
+- `schema_payload_rate`
+- `schema_statement_rate`
 - `telemetry_observer_rate`
 - `missing_confidence_rate`
 - `missing_quality_rate`
 
 If these barely move under relaxed gates, the blocker is chip content quality (telemetry/noise), not tuneable strictness.
+
+## Schema Capture A/B/C/D Matrix
+
+Use schema-focused experiment arms to choose the best observer runtime profile:
+
+- `A_schema_baseline`
+- `B_schema_evidence2`
+- `C_schema_strict_runtime`
+- `D_schema_strict_runtime_merge`
+
+Plan file:
+- `benchmarks/data/chip_schema_experiment_plan_v1.json`
+
+Runner:
+
+```bash
+python scripts/run_chip_schema_experiments.py \
+  --plan benchmarks/data/chip_schema_experiment_plan_v1.json \
+  --chips social-convo,engagement-pulse,x_social \
+  --events-per-chip 20 \
+  --out-prefix chip_schema_experiments_v1
+```
+
+Promotion rule:
+- Prefer the arm with highest objective only when it also improves:
+  - `schema_statement_rate`
+  - `merge_eligible_rate`
+  - `payload_valid_emission_rate`
+- Reject any arm that regresses safety proxy (`telemetry_rate` increase).
 
 ## Theory Seeding for Controlled Memory Tests
 

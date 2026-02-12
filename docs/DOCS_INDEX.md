@@ -26,6 +26,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `docs/ADVISORY_REALISM_PLAYBOOK.md`: cross-system advisory realism loop (depth tiers, theory seeding, source-alignment gates)
 - `scripts/run_advisory_realism_domain_matrix.py`: multi-domain advisory realism matrix runner (10+ domain slices per run)
 - `scripts/run_advisory_chip_experiments.py`: chip strategy experiment runner (A/B/C/D off/on/targeted segment plans)
+- `scripts/run_chip_schema_experiments.py`: schema-capture A/B/C/D runner for chip observer quality and distillation readiness
 - `scripts/run_chip_learning_diagnostics.py`: chip learning/distillation diagnostics (telemetry rate, learnable statement yield, merge-eligible coverage)
 - `docs/OPENCLAW_RESEARCH_AND_UPDATES.md`: experiment log for OpenClaw tuning changes, outcomes, and keep/rollback decisions
 - `docs/reports/2026-02-12_openclaw_memory_advisory_concrete_plan_and_live_baseline.md`: concrete memory/advisory fix plan + live baseline + execution updates
@@ -62,6 +63,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `docs/reports/2026-02-13_chip_learning_diagnostics_and_distillation_pass_v1.md`: chip-to-learning yield diagnostics and indirect optimization outcomes
 - `docs/reports/2026-02-13_chip_learning_keep-vs-kill_assessment_v2.md`: keep-vs-kill decision with deep telemetry diagnostics, shipped runtime guards, and pilot chip activation policy
 - `docs/reports/2026-02-13_chip_learning_methodology_upgrade_v3.md`: schema-first observer learning pass (runtime payload enforcement, schema-priority distillation, and schema diagnostics KPIs)
+- `docs/reports/2026-02-13_chip_schema_experiments_abcd_v1.md`: schema-capture A/B/C/D benchmark results and selected operating profile
 - `PRODUCTION_READINESS.md`: production-hardening status and open blockers
 - `docs/VISION.md`: long-range architecture vision
 - `CHANGELOG.md`: chronological change log
