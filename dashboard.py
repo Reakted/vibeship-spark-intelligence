@@ -1036,9 +1036,9 @@ def _extract_no_evidence_streaks(store, limit: int = 10) -> List[Dict[str, Any]]
     return streaks[:limit]
 
 
-def get_mission_control_data() -> Dict[str, Any]:
+def get_mission_control_data(include_pulse_probe: bool = True) -> Dict[str, Any]:
     funnel = get_funnel_kpis()
-    services = service_status()
+    services = service_status(include_pulse_probe=include_pulse_probe)
     mind_ok = _http_ok(MIND_HEALTH_URL)
     services["mind_server"] = {
         "running": mind_ok,

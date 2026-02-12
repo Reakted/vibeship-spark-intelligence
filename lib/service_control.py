@@ -426,10 +426,10 @@ def _service_cmds(
     return cmds
 
 
-def service_status(bridge_stale_s: int = 90) -> dict[str, dict]:
+def service_status(bridge_stale_s: int = 90, include_pulse_probe: bool = True) -> dict[str, dict]:
     sparkd_ok = _http_ok(SPARKD_HEALTH_URL)
     dash_ok = _http_ok(DASHBOARD_STATUS_URL)
-    pulse_ok = _pulse_ok()
+    pulse_ok = _pulse_ok() if include_pulse_probe else False
     meta_ok = _http_ok(META_RALPH_HEALTH_URL)
     hb_age = _bridge_heartbeat_age()
 
