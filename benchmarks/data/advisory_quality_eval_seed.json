@@ -1,0 +1,171 @@
+{
+  "cases": [
+    {
+      "id": "read_codebase_alignment",
+      "tool": "Read",
+      "prompt": "Need to understand existing patterns before changing implementation details in core advisory routing.",
+      "tool_input": {
+        "file_path": "lib/advisory_engine.py"
+      },
+      "should_emit": true,
+      "expected_contains": [
+        "next check"
+      ],
+      "forbidden_contains": [
+        "multiplier granted",
+        "webfetch fails with other tasks"
+      ],
+      "notes": "Read-phase advice should be specific and actionable."
+    },
+    {
+      "id": "edit_safe_patching",
+      "tool": "Edit",
+      "prompt": "Applying a focused bug fix; avoid broad refactors and validate with tests immediately.",
+      "tool_input": {
+        "file_path": "lib/advisor.py",
+        "old_string": "old",
+        "new_string": "new"
+      },
+      "should_emit": true,
+      "expected_contains": [
+        "next check"
+      ],
+      "forbidden_contains": [
+        "multiplier granted",
+        "money printer"
+      ],
+      "notes": "Edit advisory should be cautionary and test-oriented."
+    },
+    {
+      "id": "task_planning_quality",
+      "tool": "Task",
+      "prompt": "Plan and sequence fixes for trace binding, dedupe, and tuneable consistency without noisy loops.",
+      "tool_input": {
+        "description": "Plan advisory improvements"
+      },
+      "should_emit": true,
+      "expected_contains": [
+        "next check"
+      ],
+      "forbidden_contains": [
+        "webfetch fails with other tasks",
+        "recovered"
+      ],
+      "notes": "Task guidance should avoid repetitive caution spam."
+    },
+    {
+      "id": "webfetch_failure_handling",
+      "tool": "WebFetch",
+      "prompt": "Investigate repeated WebFetch errors and suggest one concrete command-level next diagnostic step.",
+      "tool_input": {
+        "url": "https://example.com"
+      },
+      "should_emit": true,
+      "expected_contains": [
+        "next check"
+      ],
+      "forbidden_contains": [
+        "multiplier granted",
+        "money printer"
+      ],
+      "notes": "WebFetch advice should not collapse into generic repetitive cautions."
+    },
+    {
+      "id": "read_docs_consistency",
+      "tool": "Read",
+      "prompt": "Cross-check docs and implementation consistency for advisory gate tuneables and scheduler settings.",
+      "tool_input": {
+        "file_path": "TUNEABLES.md"
+      },
+      "should_emit": true,
+      "expected_contains": [
+        "next check"
+      ],
+      "forbidden_contains": [
+        "multiplier granted"
+      ],
+      "notes": "Should encourage verification, not unrelated social content."
+    },
+    {
+      "id": "edit_test_first",
+      "tool": "Edit",
+      "prompt": "Patch small logic error in advisory routing and immediately run focused test file.",
+      "tool_input": {
+        "file_path": "lib/advisory_gate.py"
+      },
+      "should_emit": true,
+      "expected_contains": [
+        "next check"
+      ],
+      "forbidden_contains": [
+        "money printer"
+      ],
+      "notes": "Actionable and concise."
+    },
+    {
+      "id": "task_root_cause",
+      "tool": "Task",
+      "prompt": "Identify root causes for no-emit spikes and propose one measurable experiment.",
+      "tool_input": {
+        "description": "Root cause analysis"
+      },
+      "should_emit": true,
+      "expected_contains": [
+        "next check"
+      ],
+      "forbidden_contains": [
+        "webfetch_error tasks"
+      ],
+      "notes": "Should be measurement-oriented."
+    },
+    {
+      "id": "webfetch_timeout_path",
+      "tool": "WebFetch",
+      "prompt": "Timeout-heavy network path: require deterministic fallback and error taxonomy clarity.",
+      "tool_input": {
+        "url": "https://example.org/slow"
+      },
+      "should_emit": true,
+      "expected_contains": [
+        "next check"
+      ],
+      "forbidden_contains": [
+        "multiplier granted"
+      ],
+      "notes": "Should promote concrete diagnostics."
+    },
+    {
+      "id": "read_memory_alignment",
+      "tool": "Read",
+      "prompt": "Evaluate whether memory retrieval actually improves current action quality and avoid stale context borrowing.",
+      "tool_input": {
+        "file_path": "docs/reports/2026-02-12_advisory_tuning_delta.md"
+      },
+      "should_emit": true,
+      "expected_contains": [
+        "next check"
+      ],
+      "forbidden_contains": [
+        "money printer",
+        "multiplier granted"
+      ],
+      "notes": "Memory-centric case."
+    },
+    {
+      "id": "edit_trace_binding",
+      "tool": "Edit",
+      "prompt": "Refine trace_id propagation in pre-tool and post-tool paths and verify with tests.",
+      "tool_input": {
+        "file_path": "lib/advisory_engine.py"
+      },
+      "should_emit": true,
+      "expected_contains": [
+        "next check"
+      ],
+      "forbidden_contains": [
+        "webfetch fails with other tasks"
+      ],
+      "notes": "Trace discipline case."
+    }
+  ]
+}
