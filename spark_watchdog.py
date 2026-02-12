@@ -27,6 +27,7 @@ SPARK_DIR = Path(__file__).resolve().parent
 LOG_DIR = Path.home() / ".spark" / "logs"
 STATE_FILE = Path.home() / ".spark" / "watchdog_state.json"
 PID_FILE = Path.home() / ".spark" / "pids" / "watchdog.pid"
+PLUGIN_ONLY_SENTINEL = Path.home() / ".spark" / "plugin_only_mode"
 
 LOG_MAX_BYTES = int(os.environ.get("SPARK_LOG_MAX_BYTES", "10485760"))
 LOG_BACKUPS = int(os.environ.get("SPARK_LOG_BACKUPS", "5"))
@@ -372,6 +373,13 @@ def _scheduler_heartbeat_age() -> Optional[float]:
     return scheduler_heartbeat_age_s()
 
 
+def _plugin_only_mode_enabled() -> bool:
+    env = (os.environ.get("SPARK_PLUGIN_ONLY") or "").strip().lower()
+    if env in {"1", "true", "yes", "on"}:
+        return True
+    return PLUGIN_ONLY_SENTINEL.exists()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--interval", type=int, default=60, help="seconds between checks")
@@ -384,6 +392,8 @@ def main() -> None:
     ap.add_argument("--startup-delay", type=int, default=15, help="seconds to wait before first check (grace period for services to start)")
     args = ap.parse_args()
 
+    plugin_only_mode = _plugin_only_mode_enabled()
+
     _ensure_log_dir()
 
     # Prevent multiple watchdogs from running simultaneously
@@ -395,6 +405,8 @@ def main() -> None:
     atexit.register(_cleanup_pid_file)
 
     _log("watchdog started")
+    if plugin_only_mode:
+        _log("plugin-only mode enabled: skipping sparkd/pulse/bridge_worker restarts")
 
     # Grace period: wait for other services to fully start before checking
     # This prevents race condition where watchdog starts spawning services
@@ -434,7 +446,7 @@ def main() -> None:
         # sparkd
         sparkd_ok = _http_ok(SPARKD_HEALTH_URL)
         sparkd_fail = _bump_fail("sparkd", sparkd_ok)
-        if not sparkd_ok:
+        if (not plugin_only_mode) and (not sparkd_ok):
             # Match either invocation style:
             # - python -m sparkd
             # - python sparkd.py
@@ -471,7 +483,7 @@ def main() -> None:
         # spark pulse -- unified startup via service_control
         pulse_ok = _http_ok(PULSE_DOCS_URL, timeout=2.0) and _http_ok(PULSE_UI_URL, timeout=2.0)
         pulse_fail = _bump_fail("pulse", pulse_ok)
-        if not pulse_ok:
+        if (not plugin_only_mode) and (not pulse_ok):
             # Check PID file first (covers external pulse started by service_control)
             try:
                 from lib.service_control import _read_pid, _pid_alive, _get_pulse_command
@@ -523,7 +535,7 @@ def main() -> None:
         hb_age = _bridge_heartbeat_age()
         bridge_ok = hb_age is not None and hb_age <= args.bridge_stale_s
         bridge_fail = _bump_fail("bridge_worker", bridge_ok)
-        if not bridge_ok:
+        if (not plugin_only_mode) and (not bridge_ok):
             bridge_pids = _find_pids_by_any_keywords(
                 [["bridge_worker.py"], ["-m bridge_worker"]],
                 snapshot,
