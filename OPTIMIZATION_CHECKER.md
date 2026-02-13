@@ -26,6 +26,10 @@ These optimizations were shipped as isolated commits so we can `git revert <sha>
 12) `9439361` — Pipeline: importance-sample low-priority events under backlog (flagged)
 13) `81d627e` — Pipeline: mine successful tool macros (flagged)
 
+### Phase-2 memory upgrades (2026-02-14)
+14) `fec25da` — Memory store: patchified (chunked) storage and parent dedupe (flagged)
+15) `7c05d8b` — Memory store: optional delta compaction for near-duplicate memories (flagged)
+
 Notes:
 - Prefer `git revert <sha>` (keeps history) instead of reset.
 - For GC behavior specifically, you can override without rollback: `SPARK_BRIDGE_GC_EVERY=1`.
@@ -111,6 +115,51 @@ Look for:
 
 #### J) Macro mining (temporal tool-sequence abstractions)
 **Change:** `SPARK_MACROS_ENABLED=1` mines frequent successful tool n-grams and stores at most one macro insight per cycle.
+
+---
+
+### Phase 2 memory upgrades (precision + size control)
+
+#### K) Patchified memory store (chunked storage + parent dedupe)
+**Change:** `SPARK_MEMORY_PATCHIFIED=1` stores long memories as multiple chunk entries for more precise retrieval, while returning at most one hit per parent group.
+
+**What to look for:**
+- Retrieval results feel *more specific* (less giant irrelevant blobs).
+- Memory store size growth slows (fewer huge content rows).
+
+**Checks:**
+- DB exists: `%USERPROFILE%\.spark\memory_store.sqlite`
+- Spot-check retrieval:
+  ```powershell
+  python -c "from lib.memory_store import retrieve; import json; print(json.dumps(retrieve('oauth', limit=6), indent=2)[:1200])"
+  ```
+- Ensure results don’t include multiple `#pN` chunks from the same parent in the top-k.
+
+**Knobs:**
+- `SPARK_MEMORY_PATCHIFIED=1|0`
+- `SPARK_MEMORY_PATCH_MAX_CHARS=600` (default)
+- `SPARK_MEMORY_PATCH_MIN_CHARS=120` (default)
+
+---
+
+#### L) Delta memory compaction (store updates as deltas when near-duplicate)
+**Change:** `SPARK_MEMORY_DELTAS=1` attempts to store only the “delta” when a new memory is very similar to a recent one (same scope/project/category).
+
+**What to look for:**
+- Repeated re-statements become short “Update (delta from …)” rows.
+- Retrieval stays useful (deltas still understandable).
+
+**Checks:**
+- Search for delta entries:
+  ```powershell
+  python -c "import sqlite3, os; from pathlib import Path; db=Path.home()/'.spark'/'memory_store.sqlite'; conn=sqlite3.connect(str(db)); rows=conn.execute(\"select memory_id, content from memories where content like 'Update (delta from %' order by created_at desc limit 5\").fetchall(); print(rows); conn.close()"
+  ```
+
+**Knobs:**
+- `SPARK_MEMORY_DELTAS=1|0`
+- `SPARK_MEMORY_DELTA_MIN_SIM=0.86` (default)
+
+---
 
 **What to look for:**
 - Over time, you should see macro-style insights appear in cognitive insights (META_LEARNING).
