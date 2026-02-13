@@ -42,7 +42,8 @@ If you can paste the original Carmack post/link, I can make this 100% exact (a f
 - Looks like a JEPA-family paper (LeCun/FAIR line). Need exact PDF.
 
 ### 9) floq: Training Critics via Flow-Matching for Scaling Compute in Value-Based RL
-- Flow-matching critics paper; need exact arXiv entry.
+- Paper: **floq: Training Critics via Flow-Matching for Scaling Compute in Value-Based RL**
+- arXiv: https://arxiv.org/abs/2509.06863
 
 ### 8) Beyond Gradient Averaging in Parallel Optimization: Improved Robustness through Gradient Agreement Filtering
 - Paper: **Beyond Gradient Averaging in Parallel Optimization: Improved Robustness through Gradient Agreement Filtering**
