@@ -45,7 +45,8 @@ If you can paste the original Carmack post/link, I can make this 100% exact (a f
 - Flow-matching critics paper; need exact arXiv entry.
 
 ### 8) Beyond Gradient Averaging in Parallel Optimization: Improved Robustness through Gradient Agreement Filtering
-- Distributed optimization paper; need exact arXiv entry.
+- Paper: **Beyond Gradient Averaging in Parallel Optimization: Improved Robustness through Gradient Agreement Filtering**
+- arXiv: https://arxiv.org/abs/2412.18052
 
 ### 7) Cautious Weight Decay
 - Paper: **Cautious Weight Decay**
