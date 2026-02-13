@@ -6,11 +6,13 @@ priority processing, queue consumption, and deep learning extraction.
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
+from threading import Lock
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from lib.bridge import update_spark_context
@@ -55,6 +57,40 @@ CHIP_MERGE_MIN_CONFIDENCE = _env_float("SPARK_CHIP_MERGE_MIN_CONFIDENCE", 0.55)
 CHIP_MERGE_MIN_QUALITY = _env_float("SPARK_CHIP_MERGE_MIN_QUALITY", 0.55)
 
 
+# Shared executor to avoid per-step threadpool construction overhead.
+# Note: timeouts are "soft"; if a step blocks beyond timeout, the thread may
+# remain busy. We use a small pool to allow subsequent steps to proceed.
+_STEP_EXECUTOR: Optional[ThreadPoolExecutor] = None
+_STEP_EXECUTOR_LOCK = Lock()
+_STEP_EXECUTOR_WORKERS = max(2, int(os.environ.get("SPARK_BRIDGE_STEP_EXECUTOR_WORKERS", "4")))
+
+
+def _shutdown_step_executor() -> None:
+    global _STEP_EXECUTOR
+    with _STEP_EXECUTOR_LOCK:
+        if _STEP_EXECUTOR is None:
+            return
+        try:
+            _STEP_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        _STEP_EXECUTOR = None
+
+
+def _get_step_executor() -> ThreadPoolExecutor:
+    global _STEP_EXECUTOR
+    with _STEP_EXECUTOR_LOCK:
+        if _STEP_EXECUTOR is None:
+            _STEP_EXECUTOR = ThreadPoolExecutor(
+                max_workers=_STEP_EXECUTOR_WORKERS,
+                thread_name_prefix="spark_step",
+            )
+        return _STEP_EXECUTOR
+
+
+atexit.register(_shutdown_step_executor)
+
+
 def _run_step(name: str, fn: Callable[..., Any], *args: Any, timeout_s: Optional[float] = None, **kwargs: Any) -> Tuple[bool, Any, str]:
     """
     Run a bridge sub-step with a soft timeout.
@@ -69,8 +105,8 @@ def _run_step(name: str, fn: Callable[..., Any], *args: Any, timeout_s: Optional
         except Exception as e:
             return False, None, str(e)
 
-    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"spark_{name}")
-    future = pool.submit(fn, *args, **kwargs)
+    executor = _get_step_executor()
+    future = executor.submit(fn, *args, **kwargs)
     try:
         return True, future.result(timeout=timeout), ""
     except FuturesTimeoutError:
@@ -78,8 +114,6 @@ def _run_step(name: str, fn: Callable[..., Any], *args: Any, timeout_s: Optional
         return False, None, f"timeout after {timeout:.0f}s"
     except Exception as e:
         return False, None, str(e)
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def run_bridge_cycle(
