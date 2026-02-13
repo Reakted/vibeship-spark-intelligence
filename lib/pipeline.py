@@ -22,7 +22,9 @@ Design Principles:
 from __future__ import annotations
 
 import json
+import os
 import time
+import hashlib
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -72,6 +74,15 @@ _load_pipeline_config()
 QUEUE_HEALTHY = 200       # Below this, normal processing
 QUEUE_ELEVATED = 500      # Increase batch size
 QUEUE_CRITICAL = 2000     # Maximum batch size + drain mode
+
+# Importance sampling under backlog (reduce work on low-value events).
+# Enabled only when explicitly turned on.
+IMPORTANCE_SAMPLING_ENABLED = os.getenv("SPARK_PIPELINE_IMPORTANCE_SAMPLING", "0") == "1"
+try:
+    LOW_PRIORITY_KEEP_RATE = float(os.getenv("SPARK_PIPELINE_LOW_KEEP_RATE", "0.25"))
+except Exception:
+    LOW_PRIORITY_KEEP_RATE = 0.25
+LOW_PRIORITY_KEEP_RATE = max(0.0, min(1.0, LOW_PRIORITY_KEEP_RATE))
 
 # Processing health metrics file
 PIPELINE_STATE_FILE = Path.home() / ".spark" / "pipeline_state.json"
@@ -545,6 +556,22 @@ def store_deep_learnings(
 
 # ============= Main Processing Pipeline =============
 
+def _stable_sample_keep(*, key: str, keep_rate: float) -> bool:
+    """Deterministic sampling gate based on a stable hash.
+
+    Avoids randomness across processes while still downsampling under backlog.
+    """
+    rate = max(0.0, min(1.0, float(keep_rate)))
+    if rate >= 1.0:
+        return True
+    if rate <= 0.0:
+        return False
+    digest = hashlib.sha1(str(key or "").encode("utf-8", errors="ignore")).hexdigest()[:8]
+    # Map first 8 hex chars to [0,1)
+    value = int(digest, 16) / float(16 ** 8)
+    return value < rate
+
+
 def run_processing_cycle(
     *,
     force_batch_size: Optional[int] = None,
@@ -627,6 +654,16 @@ def run_processing_cycle(
         aggregator = get_aggregator()
 
         for event in processing_order:
+            # Under heavy backlog, skip low-priority events in the expensive
+            # pattern detection pass to drain faster while preserving signal.
+            if IMPORTANCE_SAMPLING_ENABLED and metrics.backpressure_level in {"critical", "emergency"}:
+                pr = classify_event_priority(event)
+                if pr == EventPriority.LOW:
+                    trace_id = (event.data or {}).get("trace_id") or ""
+                    sample_key = f"{event.session_id}|{event.event_type.value if hasattr(event.event_type,'value') else event.event_type}|{event.tool_name or ''}|{trace_id}"  # noqa
+                    if not _stable_sample_keep(key=sample_key, keep_rate=LOW_PRIORITY_KEEP_RATE):
+                        continue
+
             hook_event = (event.data or {}).get("hook_event") or ""
             payload = (event.data or {}).get("payload")
             pattern_event = {
