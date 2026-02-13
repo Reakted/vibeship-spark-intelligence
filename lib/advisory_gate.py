@@ -15,6 +15,7 @@ Principles:
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -43,6 +44,15 @@ AUTHORITY_THRESHOLDS = {
 }
 
 # ============= Gate Configuration =============
+
+# Agreement-gated escalation ("show more hints, shout only when sure")
+AGREEMENT_GATE_ENABLED = os.getenv("SPARK_ADVISORY_AGREEMENT_GATE", "0") == "1"
+try:
+    AGREEMENT_MIN_SOURCES = max(
+        1, min(5, int(os.getenv("SPARK_ADVISORY_AGREEMENT_MIN_SOURCES", "2") or 2))
+    )
+except Exception:
+    AGREEMENT_MIN_SOURCES = 2
 
 # Max advice items to emit per tool call (prevent flooding)
 MAX_EMIT_PER_CALL = 1
@@ -239,6 +249,51 @@ class GateResult:
     total_retrieved: int
 
 
+def _normalize_advice_signature(text: str) -> str:
+    """Normalize advice text into a grouping signature.
+
+    Used for agreement gating. We intentionally keep it cheap and robust:
+    remove bracket tags and punctuation, lowercase, and collapse whitespace.
+    """
+    t = str(text or "").strip().lower()
+    # Drop leading tags like [Caution]
+    if t.startswith("[") and "]" in t[:40]:
+        t = t.split("]", 1)[-1].strip()
+    t = re.sub(r"[^a-z0-9\s]+", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    # Keep signature bounded
+    return t[:180]
+
+
+def _agreement_map(advice_items: list) -> Dict[str, Dict[str, Any]]:
+    """Build agreement metadata for each advice item in this retrieval batch."""
+    by_sig: Dict[str, Dict[str, Any]] = {}
+    # First pass: group by normalized signature
+    for item in advice_items or []:
+        aid = str(getattr(item, "advice_id", "") or "")
+        text = str(getattr(item, "text", "") or "")
+        source = str(getattr(item, "source", "unknown") or "unknown").strip().lower() or "unknown"
+        sig = _normalize_advice_signature(text)
+        if not sig:
+            continue
+        bucket = by_sig.setdefault(sig, {"sources": set(), "advice_ids": []})
+        bucket["sources"].add(source)
+        if aid:
+            bucket["advice_ids"].append(aid)
+
+    # Second pass: assign per advice_id
+    out: Dict[str, Dict[str, Any]] = {}
+    for sig, bucket in by_sig.items():
+        sources = sorted(list(bucket.get("sources") or []))
+        for aid in bucket.get("advice_ids") or []:
+            out[aid] = {
+                "agreement_sources": sources,
+                "agreement_count": len(sources),
+                "signature": sig,
+            }
+    return out
+
+
 def evaluate(
     advice_items: list,
     state,  # SessionState
@@ -262,9 +317,17 @@ def evaluate(
     decisions = []
     phase = state.task_phase if state else "implementation"
 
+    agreement = _agreement_map(advice_items) if AGREEMENT_GATE_ENABLED else {}
+
     for advice in advice_items:
+        aid = str(getattr(advice, "advice_id", "") or "")
         decision = _evaluate_single(
-            advice, state, tool_name, tool_input, phase
+            advice,
+            state,
+            tool_name,
+            tool_input,
+            phase,
+            agreement_meta=(agreement.get(aid) if aid else None),
         )
         decisions.append(decision)
 
@@ -305,6 +368,8 @@ def _evaluate_single(
     tool_name: str,
     tool_input: Optional[dict],
     phase: str,
+    *,
+    agreement_meta: Optional[Dict[str, Any]] = None,
 ) -> GateDecision:
     """Evaluate a single advice item through all gate filters."""
     from .advisory_state import is_tool_suppressed, had_recent_read
@@ -372,19 +437,41 @@ def _evaluate_single(
     if state and state.consecutive_failures >= 1 and _is_caution(text):
         adjusted_score *= 1.5
 
+    # ---- Agreement gating (escalation only when corroborated) ----
+    agreement_count = 1
+    agreement_sources: List[str] = []
+    if isinstance(agreement_meta, dict):
+        try:
+            agreement_count = int(agreement_meta.get("agreement_count") or 1)
+        except Exception:
+            agreement_count = 1
+        raw_sources = agreement_meta.get("agreement_sources")
+        if isinstance(raw_sources, list):
+            agreement_sources = [str(s) for s in raw_sources if str(s).strip()]
+
     # ---- Determine authority level ----
     authority = _assign_authority(adjusted_score, confidence, text, source)
+
+    # If we're about to WARN but we don't have corroboration, downgrade to NOTE.
+    # This implements: "whisper/note freely; warnings require agreement".
+    if AGREEMENT_GATE_ENABLED and authority == AuthorityLevel.WARNING:
+        if agreement_count < AGREEMENT_MIN_SOURCES:
+            authority = AuthorityLevel.NOTE
 
     # ---- Final emit decision ----
     # WHISPER (0.35-0.49) was previously dead code — classified but never emitted.
     # Now included so low-confidence advice still reaches the user as a gentle hint.
     emit = authority in (AuthorityLevel.WHISPER, AuthorityLevel.NOTE, AuthorityLevel.WARNING)
 
+    agreement_note = ""
+    if AGREEMENT_GATE_ENABLED:
+        agreement_note = f", agree={agreement_count} ({','.join(agreement_sources[:3])})" if agreement_sources else f", agree={agreement_count}"
+
     return GateDecision(
         advice_id=advice_id,
         authority=authority,
         emit=emit,
-        reason=f"phase={phase}, score={adjusted_score:.2f}, authority={authority}",
+        reason=f"phase={phase}, score={adjusted_score:.2f}, authority={authority}{agreement_note}",
         adjusted_score=adjusted_score,
         original_score=base_score,
     )
