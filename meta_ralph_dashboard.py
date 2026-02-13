@@ -18,6 +18,7 @@ Run with: python meta_ralph_dashboard.py
 Open: http://localhost:<meta-ralph-port>
 """
 
+import os
 import json
 import time
 from datetime import datetime, timedelta
