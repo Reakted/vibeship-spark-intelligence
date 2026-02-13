@@ -14,6 +14,7 @@ import os
 import re
 import hashlib
 import time
+import configparser
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -46,6 +47,7 @@ OPPORTUNITY_DIR = Path.home() / ".spark" / "opportunity_scanner"
 SELF_FILE = OPPORTUNITY_DIR / "self_opportunities.jsonl"
 USER_FILE = OPPORTUNITY_DIR / "user_opportunities.jsonl"
 OUTCOME_FILE = OPPORTUNITY_DIR / "outcomes.jsonl"
+DECISIONS_FILE = OPPORTUNITY_DIR / "decisions.jsonl"
 OUTCOME_WINDOW_S = max(300.0, float(os.getenv("SPARK_OPPORTUNITY_OUTCOME_WINDOW_S", "21600") or 21600.0))
 OUTCOME_LOOKBACK = max(20, int(os.getenv("SPARK_OPPORTUNITY_OUTCOME_LOOKBACK", "200") or 200))
 PROMOTION_FILE = OPPORTUNITY_DIR / "promoted_opportunities.jsonl"
@@ -104,7 +106,13 @@ _SELF_CATEGORY_ALLOWLIST = {
     "compounding_learning",
 }
 _FORBIDDEN_LLM_PROVIDERS = {"deepseek", "deep-seek"}
-_LAST_LLM_ATTEMPT_BY_SESSION: Dict[str, float] = {}
+_LAST_LLM_ATTEMPT_BY_KEY: Dict[str, float] = {}
+
+_DECISION_LOOKBACK = max(50, int(os.getenv("SPARK_OPPORTUNITY_DECISION_LOOKBACK", "500") or 500))
+_DISMISS_TTL_S = max(0.0, float(os.getenv("SPARK_OPPORTUNITY_DISMISS_TTL_S", str(7 * 24 * 3600)) or (7 * 24 * 3600)))
+
+_GIT_ROOT_CACHE: Dict[str, str] = {}
+_GIT_ORIGIN_CACHE: Dict[str, str] = {}
 
 _QUESTION_STOPWORDS = {
     "the",
@@ -333,6 +341,161 @@ def _question_key(question: str) -> str:
     return " ".join(tokens[:14])
 
 
+def _extract_scope_and_operation(text: str) -> tuple[Optional[str], Optional[str]]:
+    """Extract explicit scope/operation markers from text.
+
+    Supported markers:
+    - scope:project|operation|global (or scope=...)
+    - op:<name> or operation:<name> (or op=...)
+    """
+    t = str(text or "")
+    scope = None
+    m = re.search(r"\bscope\s*[:=]\s*(project|operation|global)\b", t, flags=re.I)
+    if m:
+        scope = str(m.group(1) or "").strip().lower()
+
+    op = None
+    m = re.search(r"\b(?:op|operation)\s*[:=]\s*([a-z0-9][a-z0-9_-]{1,48})\b", t, flags=re.I)
+    if m:
+        op = str(m.group(1) or "").strip().lower()
+    return scope, op
+
+
+def _extract_event_cwd(ev: Any) -> Optional[str]:
+    try:
+        data = getattr(ev, "data", None) or {}
+        if isinstance(data, dict):
+            cwd = data.get("cwd")
+            if cwd:
+                return str(cwd)
+            payload = data.get("payload") or {}
+            if isinstance(payload, dict) and payload.get("cwd"):
+                return str(payload.get("cwd"))
+    except Exception:
+        return None
+    return None
+
+
+def _find_git_root(cwd: str) -> Optional[Path]:
+    if not cwd:
+        return None
+    key = str(cwd).strip()
+    cached = _GIT_ROOT_CACHE.get(key)
+    if cached is not None:
+        return Path(cached) if cached else None
+    try:
+        p = Path(key).expanduser()
+    except Exception:
+        _GIT_ROOT_CACHE[key] = ""
+        return None
+    try:
+        p = p.resolve()
+    except Exception:
+        pass
+
+    cur = p
+    for _ in range(30):
+        try:
+            git_marker = cur / ".git"
+            if git_marker.exists():
+                _GIT_ROOT_CACHE[key] = str(cur)
+                return cur
+        except Exception:
+            break
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+
+    _GIT_ROOT_CACHE[key] = ""
+    return None
+
+
+def _git_origin_url(root: Path) -> str:
+    if not root:
+        return ""
+    rkey = str(root)
+    cached = _GIT_ORIGIN_CACHE.get(rkey)
+    if cached is not None:
+        return cached
+
+    url = ""
+    try:
+        cfg_path = root / ".git" / "config"
+        if cfg_path.exists():
+            cp = configparser.ConfigParser()
+            cp.read(cfg_path, encoding="utf-8")
+            if cp.has_section('remote "origin"') and cp.has_option('remote "origin"', "url"):
+                url = str(cp.get('remote "origin"', "url") or "").strip()
+    except Exception:
+        url = ""
+
+    _GIT_ORIGIN_CACHE[rkey] = url
+    return url
+
+
+def _infer_project_identity(events: Sequence[Any]) -> tuple[Optional[str], Optional[str]]:
+    """Return (project_id, project_label) if possible."""
+    cwd = None
+    try:
+        recent = list(events or [])
+    except Exception:
+        recent = []
+    for ev in reversed(recent[-30:]):
+        cwd = _extract_event_cwd(ev)
+        if cwd:
+            break
+    if not cwd:
+        return None, None
+    root = _find_git_root(cwd)
+    if not root:
+        h = hashlib.sha1(str(cwd).encode("utf-8", errors="ignore")).hexdigest()[:16]
+        return f"path:{h}", Path(cwd).name
+    origin = _git_origin_url(root)
+    if origin:
+        h = hashlib.sha1(origin.encode("utf-8", errors="ignore")).hexdigest()[:16]
+        return f"git:{h}", root.name
+    h = hashlib.sha1(str(root).encode("utf-8", errors="ignore")).hexdigest()[:16]
+    return f"path:{h}", root.name
+
+
+def _load_blocked_question_keys(now_ts: Optional[float] = None) -> set[str]:
+    """Return question keys dismissed recently to reduce spam."""
+    now = float(now_ts or time.time())
+    blocked: set[str] = set()
+    if not DECISIONS_FILE.exists():
+        return blocked
+    try:
+        lines = DECISIONS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        return blocked
+    if len(lines) > _DECISION_LOOKBACK:
+        lines = lines[-_DECISION_LOOKBACK:]
+    latest: Dict[str, Dict[str, Any]] = {}
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        qk = str(row.get("question_key") or "").strip()
+        if not qk:
+            continue
+        try:
+            ts = float(row.get("ts") or 0.0)
+        except Exception:
+            ts = 0.0
+        prev = latest.get(qk)
+        if prev is None or ts >= float(prev.get("ts") or 0.0):
+            latest[qk] = {"ts": ts, "action": str(row.get("action") or "").strip().lower()}
+    for qk, meta in latest.items():
+        action = str(meta.get("action") or "")
+        ts = float(meta.get("ts") or 0.0)
+        if action == "dismiss" and ts > 0 and (now - ts) <= float(_DISMISS_TTL_S or 0.0):
+            blocked.add(qk)
+    return blocked
+
+
 def _extract_json_candidate(raw: str) -> Optional[Any]:
     text = str(raw or "").strip()
     if not text:
@@ -438,6 +601,7 @@ def _generate_llm_self_candidates(
     stats: Dict[str, Any],
     kernel_ok: bool,
     session_id: str = "default",
+    cooldown_key: Optional[str] = None,
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     meta: Dict[str, Any] = {
         "enabled": bool(LLM_ENABLED),
@@ -461,7 +625,8 @@ def _generate_llm_self_candidates(
         return [], meta
     try:
         now = time.time()
-        last = float(_LAST_LLM_ATTEMPT_BY_SESSION.get(str(session_id or "default"), 0.0) or 0.0)
+        key = str(cooldown_key or session_id or "default")
+        last = float(_LAST_LLM_ATTEMPT_BY_KEY.get(key, 0.0) or 0.0)
         if float(LLM_COOLDOWN_S or 0.0) > 0 and last > 0 and (now - last) < float(LLM_COOLDOWN_S or 0.0):
             meta["skipped_reason"] = "cooldown"
             return [], meta
@@ -515,7 +680,7 @@ def _generate_llm_self_candidates(
                 if str(provider or "").strip().lower() == "minimax":
                     provider_timeout = max(provider_timeout, 12.0)
                 synth.AI_TIMEOUT_S = provider_timeout
-                _LAST_LLM_ATTEMPT_BY_SESSION[str(session_id or "default")] = time.time()
+                _LAST_LLM_ATTEMPT_BY_KEY[str(cooldown_key or session_id or "default")] = time.time()
                 raw = synth._query_provider(provider, prompt)
             except Exception as e:
                 last_error = f"{provider}:{type(e).__name__}"
@@ -1033,6 +1198,8 @@ def scan_runtime_opportunities(
     prompts: List[str] = []
     edits: List[str] = []
     telemetry_filtered = 0
+    scope_hint = None
+    operation = None
 
     for ev in events or []:
         et = _event_type_name(ev)
@@ -1054,6 +1221,30 @@ def scan_runtime_opportunities(
             edits.append(text[:1200])
 
     has_context = bool(prompts or edits or (str(query or "").strip() and len(str(query or "").strip()) >= 24))
+    # Extract explicit tags from the most recent user prompt / edit / query.
+    try:
+        tag_text = " ".join([prompts[-1] if prompts else "", edits[-1] if edits else "", str(query or "")]).strip()
+        sh, op = _extract_scope_and_operation(tag_text)
+        scope_hint = sh or None
+        operation = op or None
+    except Exception:
+        scope_hint = None
+        operation = None
+
+    project_id, project_label = _infer_project_identity(events)
+    scope_type = "project"
+    scope_id = project_id or "default"
+    if scope_hint == "global":
+        scope_type = "spark_global"
+        scope_id = "global"
+    elif scope_hint == "operation" and operation:
+        scope_type = "operation"
+        scope_id = operation
+    elif scope_hint == "project":
+        scope_type = "project"
+        scope_id = project_id or "default"
+
+    cooldown_key = f"{scope_type}:{scope_id}"
 
     primary_trace_id = _select_primary_trace_id(events)
     combined_text = " ".join(prompts + edits + [query]).strip()
@@ -1107,10 +1298,12 @@ def scan_runtime_opportunities(
         stats=spark_stats,
         kernel_ok=kernel_ok,
         session_id=str(session_id or "default"),
+        cooldown_key=cooldown_key,
     )
     if llm_candidates:
         candidates.extend(llm_candidates)
-    recent_keys = _recent_self_question_keys()
+    blocked_keys = _load_blocked_question_keys()
+    recent_keys = _recent_self_question_keys() | blocked_keys
     deduped, dedup_recent_filtered = _select_diverse_self_rows(
         candidates,
         max_items=SELF_MAX_ITEMS,
@@ -1144,6 +1337,11 @@ def scan_runtime_opportunities(
                 "trace_id": primary_trace_id or None,
                 "opportunity_id": opp_id,
                 "scope": "self",
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "project_id": project_id,
+                "project_label": project_label,
+                "operation": operation,
                 "mode": mode,
                 **row,
             }
@@ -1166,6 +1364,12 @@ def scan_runtime_opportunities(
         "captured_edits": len(edits),
         "telemetry_filtered": telemetry_filtered,
         "dedup_recent_filtered": dedup_recent_filtered,
+        "decision_blocked_filtered": len(blocked_keys) if isinstance(blocked_keys, set) else 0,
+        "scope_type": scope_type,
+        "scope_id": scope_id,
+        "project_id": project_id,
+        "project_label": project_label,
+        "operation": operation,
         "outcomes_tracked": int(outcome_stats.get("tracked") or 0),
         "outcomes_improved": int(outcome_stats.get("improved") or 0),
         "llm": llm_meta,
