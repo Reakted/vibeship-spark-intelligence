@@ -143,7 +143,7 @@ def start_scorer_job():
 
 def get_tracer_data() -> Dict[str, Any]:
     """Get current tracer data for dashboard."""
-    _, state, store = get_tracer_components()
+    _, state, store, _ = get_tracer_components()
     
     kpis = state.get_kpis()
     stats = state.get_detailed_stats()
