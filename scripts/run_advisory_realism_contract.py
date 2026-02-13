@@ -129,6 +129,23 @@ def main() -> int:
     ap.add_argument("--primary-prefix", default="advisory_realism_primary_contract", help="Out prefix for primary run")
     ap.add_argument("--shadow-prefix", default="advisory_realism_shadow_contract", help="Out prefix for shadow run")
     ap.add_argument("--profiles", default="", help="Override profiles comma list")
+    live = ap.add_mutually_exclusive_group(required=False)
+    live.add_argument(
+        "--force-live",
+        action="store_true",
+        help="Override contract runtime and force live advisory retrieval",
+    )
+    live.add_argument(
+        "--no-force-live",
+        action="store_true",
+        help="Override contract runtime and disable live advisory retrieval (uses packet path)",
+    )
+    ap.add_argument(
+        "--repeats",
+        type=int,
+        default=0,
+        help="Override contract repeats (0 means use contract value)",
+    )
     ap.add_argument(
         "--run-timeout-s",
         type=int,
@@ -146,6 +163,14 @@ def main() -> int:
     runtime = contract.get("runtime") or {}
     repeats = int(runtime.get("repeats") or 1)
     force_live = bool(runtime.get("force_live", True))
+
+    # CLI overrides (useful when force-live hangs or when we want deterministic local runs).
+    if int(args.repeats or 0) > 0:
+        repeats = max(1, int(args.repeats))
+    if bool(args.force_live):
+        force_live = True
+    if bool(args.no_force_live):
+        force_live = False
     profiles = ",".join(contract.get("profiles") or ["baseline", "balanced", "strict"])
     if str(args.profiles or "").strip():
         profiles = str(args.profiles).strip()

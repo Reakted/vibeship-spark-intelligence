@@ -22,6 +22,7 @@ import json
 import time
 import asyncio
 import threading
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -34,6 +35,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from trace_hud import TraceCollector, TraceState, TraceStore
+from trace_hud.id_connector import IDConnector, TraceContext
 from lib.diagnostics import setup_component_logging
 
 PORT = 8777
@@ -41,18 +43,23 @@ SPARK_DIR = Path.home() / ".spark"
 TRACER_STORE_DIR = SPARK_DIR / "tracer"
 AUTO_SCORER_LATEST = TRACER_STORE_DIR / "advisory_auto_score_latest.json"
 _AUTO_SCORER_LOCK = threading.Lock()
+ASSETS_DIR = Path(__file__).parent / "trace_hud" / "assets"
+HUB_CSS_PATH = ASSETS_DIR / "hub.css"
+HUB_JS_PATH = ASSETS_DIR / "hub.js"
 
 # Global state
 _tracer_state: Optional[TraceState] = None
 _tracer_collector: Optional[TraceCollector] = None
 _tracer_store: Optional[TraceStore] = None
+_id_connector: Optional[IDConnector] = None
 _poll_thread: Optional[threading.Thread] = None
+_scorer_thread: Optional[threading.Thread] = None
 _running = False
 
 
 def get_tracer_components():
     """Get or initialize tracer components."""
-    global _tracer_state, _tracer_collector, _tracer_store
+    global _tracer_state, _tracer_collector, _tracer_store, _id_connector
     
     if _tracer_collector is None:
         _tracer_collector = TraceCollector(spark_dir=SPARK_DIR)
@@ -60,13 +67,15 @@ def get_tracer_components():
         _tracer_state = TraceState()
     if _tracer_store is None:
         _tracer_store = TraceStore(store_dir=TRACER_STORE_DIR)
+    if _id_connector is None:
+        _id_connector = IDConnector(spark_dir=SPARK_DIR)
     
-    return _tracer_collector, _tracer_state, _tracer_store
+    return _tracer_collector, _tracer_state, _tracer_store, _id_connector
 
 
 def poll_once():
     """Single poll cycle."""
-    collector, state, store = get_tracer_components()
+    collector, state, store, connector = get_tracer_components()
     
     try:
         events = collector.poll_all_sources()
@@ -93,12 +102,43 @@ def start_polling():
         _running = True
         _poll_thread = threading.Thread(target=poll_loop, daemon=True)
         _poll_thread.start()
+        start_scorer_job()
 
 
 def stop_polling():
     """Stop background polling."""
     global _running
     _running = False
+
+
+def _scorer_loop(interval_s: float):
+    """Periodically refresh the latest auto-score report (server-side)."""
+    # Small delay so dashboard can come up without doing work immediately.
+    time.sleep(3.0)
+    while _running:
+        try:
+            # Default background run stays deterministic (no cloud calls).
+            _run_auto_scorer(use_minimax=False)
+        except Exception:
+            pass
+        # Sleep in small chunks so shutdown is responsive.
+        t_end = time.time() + interval_s
+        while _running and time.time() < t_end:
+            time.sleep(1.0)
+
+
+def start_scorer_job():
+    """Start background auto-scorer refresh job (default: every 15 minutes)."""
+    global _scorer_thread
+    enabled = os.getenv("TRACER_SCORER_AUTORUN", "1").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return
+    interval_s = float(os.getenv("TRACER_SCORER_INTERVAL_S", str(15 * 60)))
+    # Clamp: don't allow crazy small intervals.
+    interval_s = max(60.0, min(24 * 3600.0, interval_s))
+    if _scorer_thread is None or not _scorer_thread.is_alive():
+        _scorer_thread = threading.Thread(target=_scorer_loop, args=(interval_s,), daemon=True)
+        _scorer_thread.start()
 
 
 def get_tracer_data() -> Dict[str, Any]:
@@ -805,6 +845,11 @@ def generate_html() -> str:
                 <nav class="nav" aria-label="Dashboard pages">
                     <a class="active" href="/">Tracer</a>
                     <a href="/scorer">Scorer</a>
+                    <a href="/mission">Mission</a>
+                    <a href="/ops">Ops</a>
+                    <a href="/learning">Learning</a>
+                    <a href="/meta-ralph">Meta-Ralph</a>
+                    <a href="http://localhost:8765" target="_blank" rel="noopener">Pulse</a>
                 </nav>
             </div>
             <div class="live-indicator">
@@ -1130,6 +1175,595 @@ def generate_html() -> str:
 </html>'''
 
 
+def _safe_int(raw: str, default: int, *, lo: int, hi: int) -> int:
+    try:
+        v = int(raw)
+    except Exception:
+        return default
+    return max(lo, min(hi, v))
+
+
+def _read_json(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _write_json(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _run_auto_scorer(*, use_minimax: bool = False) -> Dict[str, Any]:
+    """Run scorer using in-repo modules and write latest report under ~/.spark/tracer/."""
+    with _AUTO_SCORER_LOCK:
+        from lib.action_matcher import match_actions
+        from lib.advisory_parser import load_advisories
+        from lib.effect_evaluator import evaluate_effect
+        from lib.score_reporter import build_report
+
+        advisories = load_advisories(limit_requests=2000, include_engine_fallback=True)
+        matches = match_actions(advisories, max_match_window_s=6 * 3600)
+        by_instance = {str(m.get("advisory_instance_id") or ""): m for m in matches}
+
+        scored_items: List[Dict[str, Any]] = []
+        for adv in advisories:
+            instance_id = str(adv.get("advisory_instance_id") or "")
+            match = by_instance.get(instance_id, {})
+            ev = evaluate_effect(adv, match, use_minimax=use_minimax)
+            try:
+                conf = float(ev.get("confidence") or match.get("confidence_hint") or 0.35)
+            except Exception:
+                conf = 0.35
+            conf = max(0.0, min(1.0, conf))
+
+            evidence: List[str] = []
+            for x in (adv.get("evidence_refs") or []) + (match.get("evidence_refs") or []):
+                s = str(x or "").strip()
+                if s and s not in evidence:
+                    evidence.append(s)
+
+            scored_items.append({
+                "advisory_instance_id": instance_id,
+                "advisory_id": str(adv.get("advisory_id") or ""),
+                "recommendation": str(adv.get("recommendation") or ""),
+                "status": str(match.get("status") or "unresolved"),
+                "latency_s": match.get("latency_s"),
+                "effect": str(ev.get("effect") or "neutral"),
+                "confidence": round(conf, 3),
+                "evidence_refs": evidence,
+                "match_type": str(match.get("match_type") or "none"),
+                "effect_reason": str(ev.get("reason") or ""),
+                "created_at": float(adv.get("created_at") or 0.0),
+                "session_id": str(adv.get("session_id") or ""),
+                "tool": str(adv.get("tool") or ""),
+                "route": str(adv.get("route") or ""),
+                "source_kind": str(adv.get("source_kind") or ""),
+                "source_file": str(adv.get("source_file") or ""),
+            })
+
+        scored_items.sort(key=lambda x: float(x.get("created_at") or 0.0))
+        report = build_report(scored_items)
+        _write_json(AUTO_SCORER_LATEST, report)
+        return report
+
+
+def _filter_scorer_items(items: List[Dict[str, Any]], *, status: str, effect: str, q: str) -> List[Dict[str, Any]]:
+    status = (status or "").strip().lower()
+    effect = (effect or "").strip().lower()
+    qn = (q or "").strip().lower()
+
+    out = []
+    for it in items:
+        if status and status != "all":
+            if str(it.get("status") or "").lower() != status:
+                continue
+        if effect and effect != "all":
+            if str(it.get("effect") or "").lower() != effect:
+                continue
+        if qn:
+            hay = " ".join([
+                str(it.get("recommendation") or ""),
+                str(it.get("tool") or ""),
+                str(it.get("match_type") or ""),
+                str(it.get("effect_reason") or ""),
+            ]).lower()
+            if qn not in hay:
+                continue
+        out.append(it)
+    return out
+
+
+def get_scorer_data(query: Dict[str, List[str]]) -> Dict[str, Any]:
+    report = _read_json(AUTO_SCORER_LATEST)
+    if report is None:
+        return {
+            "ok": False,
+            "error": "no_report",
+            "hint": "Click Run Scorer to generate a report.",
+            "latest_path": str(AUTO_SCORER_LATEST),
+        }
+
+    limit = _safe_int((query.get("limit") or ["300"])[0], 300, lo=0, hi=2000)
+    offset = _safe_int((query.get("offset") or ["0"])[0], 0, lo=0, hi=2_000_000)
+    status = (query.get("status") or ["all"])[0]
+    effect = (query.get("effect") or ["all"])[0]
+    q = (query.get("q") or [""])[0]
+
+    items = list(report.get("items") or [])
+    filtered = _filter_scorer_items(items, status=status, effect=effect, q=q)
+    total_filtered = len(filtered)
+    sliced = filtered[offset : offset + limit] if limit > 0 else []
+    sliced = sorted(sliced, key=lambda x: float(x.get("created_at") or 0.0), reverse=True)
+
+    return {
+        "ok": True,
+        "latest_path": str(AUTO_SCORER_LATEST),
+        "generated_at": report.get("generated_at"),
+        "kpis": report.get("kpis") or {},
+        "total_items": len(items),
+        "total_filtered": total_filtered,
+        "offset": offset,
+        "limit": limit,
+        "filters": {"status": status, "effect": effect, "q": q},
+        "items": sliced,
+    }
+
+
+def generate_scorer_html() -> str:
+    return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scorer | Spark Intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #0e1016;
+            --bg-card: #1a1e28;
+            --border: #2a3042;
+            --green: #00C49A;
+            --orange: #D97757;
+            --gold: #c8a84e;
+            --text-primary: #ffffff;
+            --text-secondary: #9ca3af;
+            --text-tertiary: #6b7280;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'JetBrains Mono', monospace; background: var(--bg-deep); color: var(--text-primary); min-height: 100vh; line-height: 1.5; }
+        .bg-atmosphere { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 45% 20%, rgba(217, 119, 87, 0.04) 0%, transparent 70%), radial-gradient(ellipse at 80% 30%, rgba(0, 196, 154, 0.03) 0%, transparent 50%); z-index: 0; }
+        .container { position: relative; z-index: 10; max-width: 1920px; margin: 0 auto; padding: 40px 60px; }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+        .header-left { display: flex; flex-direction: column; gap: 14px; }
+        .brand { display: flex; align-items: center; gap: 16px; }
+        .logo { width: 48px; height: 48px; background: var(--orange); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: var(--bg-deep); }
+        .brand-text h1 { font-family: 'Instrument Serif', serif; font-size: 42px; font-weight: 400; letter-spacing: -0.5px; }
+        .brand-text p { color: var(--text-tertiary); font-size: 14px; margin-top: 4px; letter-spacing: 2px; text-transform: uppercase; }
+        .nav { display: flex; gap: 10px; flex-wrap: wrap; }
+        .nav a { display: inline-flex; align-items: center; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-secondary); text-decoration: none; border: 1px solid var(--border); padding: 8px 12px; background: var(--bg-deep); }
+        .nav a.active { color: var(--text-primary); border-color: rgba(217, 119, 87, 0.9); box-shadow: 0 0 0 1px rgba(217, 119, 87, 0.25); }
+        .actions { display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+        .btn { border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); padding: 10px 14px; font-size: 12px; text-transform: uppercase; letter-spacing: 2px; cursor: pointer; }
+        .btn.primary { border-color: rgba(217, 119, 87, 0.7); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .meta { color: var(--text-tertiary); font-size: 12px; }
+        .kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 20px; margin-bottom: 22px; }
+        .kpi-card { background: var(--bg-card); border: 1px solid var(--border); padding: 20px; position: relative; }
+        .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--orange); }
+        .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; color: var(--text-tertiary); margin-bottom: 8px; }
+        .kpi-value { font-size: 32px; font-weight: 700; color: var(--orange); line-height: 1; }
+        .kpi-sub { font-size: 12px; color: var(--text-secondary); margin-top: 8px; }
+        .panel { background: var(--bg-card); border: 1px solid var(--border); margin-bottom: 18px; }
+        .panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .panel-title { font-size: 13px; text-transform: uppercase; letter-spacing: 2px; font-weight: 600; }
+        .filters { display: flex; gap: 10px; align-items: center; }
+        select, input { border: 1px solid var(--border); background: var(--bg-deep); color: var(--text-primary); padding: 8px 10px; font-size: 12px; outline: none; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border-bottom: 1px solid var(--border); padding: 12px 16px; vertical-align: top; font-size: 12px; }
+        th { color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 2px; font-weight: 600; background: rgba(0,0,0,0.18); position: sticky; top: 0; }
+        .tag { display: inline-block; border: 1px solid var(--border); padding: 3px 8px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-secondary); background: rgba(0,0,0,0.25); }
+        .tag.pos { border-color: rgba(0,196,154,0.5); color: var(--green); }
+        .tag.neg { border-color: rgba(239,68,68,0.5); color: #ef4444; }
+        .tag.neu { border-color: rgba(200,168,78,0.4); color: var(--gold); }
+        .rec { max-width: 980px; color: var(--text-primary); }
+        .muted { color: var(--text-secondary); }
+        .small { font-size: 11px; color: var(--text-tertiary); }
+        @media (max-width: 1200px) { .container { padding: 24px 18px; } .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+    </style>
+</head>
+<body>
+    <div class="bg-atmosphere"></div>
+    <div class="container">
+        <header class="header">
+            <div class="header-left">
+                <div class="brand">
+                    <div class="logo">A2A</div>
+                    <div class="brand-text">
+                        <h1>Scorer</h1>
+                        <p>Advice to Action Loop</p>
+                    </div>
+                </div>
+                <nav class="nav" aria-label="Dashboard pages">
+                    <a href="/">Tracer</a>
+                    <a class="active" href="/scorer">Scorer</a>
+                    <a href="/mission">Mission</a>
+                    <a href="/ops">Ops</a>
+                    <a href="/learning">Learning</a>
+                    <a href="/meta-ralph">Meta-Ralph</a>
+                    <a href="http://localhost:8765" target="_blank" rel="noopener">Pulse</a>
+                </nav>
+            </div>
+            <div class="actions">
+                <button id="run-btn" class="btn primary">Run Scorer</button>
+                <label class="meta" style="display:flex; gap:10px; align-items:center;">
+                    <input id="use-minimax" type="checkbox" />
+                    Use MiniMax (costs + slower)
+                </label>
+                <div id="meta" class="meta">No report loaded yet.</div>
+            </div>
+        </header>
+
+        <section class="kpi-grid" aria-label="KPIs">
+            <div class="kpi-card"><div class="kpi-label">Total</div><div class="kpi-value" id="k-total">0</div><div class="kpi-sub">items scored</div></div>
+            <div class="kpi-card"><div class="kpi-label">Acted</div><div class="kpi-value" id="k-acted">0</div><div class="kpi-sub">matched actions</div></div>
+            <div class="kpi-card"><div class="kpi-label">Action Rate</div><div class="kpi-value" id="k-action-rate">0%</div><div class="kpi-sub">acted / total</div></div>
+            <div class="kpi-card"><div class="kpi-label">Helpful Rate</div><div class="kpi-value" id="k-helpful-rate">0%</div><div class="kpi-sub">positive / acted</div></div>
+            <div class="kpi-card"><div class="kpi-label">Median TTA</div><div class="kpi-value" id="k-median-tta">-</div><div class="kpi-sub">seconds</div></div>
+            <div class="kpi-card"><div class="kpi-label">Ignored Themes</div><div class="kpi-value" id="k-top-ignored">-</div><div class="kpi-sub">top bucket</div></div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">
+                <div class="panel-title">Items</div>
+                <div class="filters">
+                    <label class="small">status</label>
+                    <select id="f-status">
+                        <option value="all">all</option>
+                        <option value="acted">acted</option>
+                        <option value="skipped">skipped</option>
+                        <option value="unresolved">unresolved</option>
+                    </select>
+                    <label class="small">effect</label>
+                    <select id="f-effect">
+                        <option value="all">all</option>
+                        <option value="positive">positive</option>
+                        <option value="neutral">neutral</option>
+                        <option value="negative">negative</option>
+                    </select>
+                    <label class="small">q</label>
+                    <input id="f-q" type="text" placeholder="search text/tool/match..." />
+                    <button id="refresh-btn" class="btn">Refresh</button>
+                </div>
+            </div>
+            <div style="max-height: 66vh; overflow: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 130px;">Status</th>
+                            <th style="width: 120px;">Effect</th>
+                            <th style="width: 120px;">Latency</th>
+                            <th style="width: 110px;">Conf</th>
+                            <th>Recommendation</th>
+                            <th style="width: 150px;">Tool</th>
+                        </tr>
+                    </thead>
+                    <tbody id="items-body">
+                        <tr><td colspan="6" class="muted">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        function fmtPct(v) { if (v === null || v === undefined) return '0%'; return String(v) + '%'; }
+        function fmtLatency(v) {
+            if (v === null || v === undefined) return '-';
+            const n = Number(v);
+            if (!Number.isFinite(n)) return '-';
+            if (n < 60) return Math.round(n) + 's';
+            if (n < 3600) return Math.round(n/60) + 'm';
+            return Math.round(n/3600) + 'h';
+        }
+        function escapeHtml(text) { if (!text) return ''; const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+        function effectTag(effect) {
+            const e = String(effect || 'neutral').toLowerCase();
+            const cls = (e === 'positive') ? 'pos' : (e === 'negative') ? 'neg' : 'neu';
+            return `<span class="tag ${cls}">${escapeHtml(e)}</span>`;
+        }
+        function statusTag(status) { const s = String(status || 'unresolved').toLowerCase(); return `<span class="tag">${escapeHtml(s)}</span>`; }
+
+        async function fetchLatest() {
+            const status = document.getElementById('f-status').value;
+            const effect = document.getElementById('f-effect').value;
+            const q = document.getElementById('f-q').value || '';
+            const params = new URLSearchParams({ limit: '300', offset: '0', status, effect, q });
+            const r = await fetch('/api/scorer/latest?' + params.toString());
+            return await r.json();
+        }
+
+        function render(data) {
+            const meta = document.getElementById('meta');
+            const body = document.getElementById('items-body');
+            if (!data || !data.ok) {
+                meta.textContent = (data && data.hint) ? data.hint : 'No report.';
+                body.innerHTML = `<tr><td colspan="6" class="muted">${escapeHtml(meta.textContent)}</td></tr>`;
+                return;
+            }
+            const k = data.kpis || {};
+            document.getElementById('k-total').textContent = k.total_advisories ?? 0;
+            document.getElementById('k-acted').textContent = k.acted ?? 0;
+            document.getElementById('k-action-rate').textContent = fmtPct(k.action_rate_pct ?? 0);
+            document.getElementById('k-helpful-rate').textContent = fmtPct(k.helpful_rate_pct ?? 0);
+            document.getElementById('k-median-tta').textContent = (k.median_time_to_action_s === null || k.median_time_to_action_s === undefined) ? '-' : String(k.median_time_to_action_s);
+            const topIgnored = (k.top_ignored_advisory_themes || [])[0];
+            document.getElementById('k-top-ignored').textContent = topIgnored ? `${topIgnored.theme} (${topIgnored.count})` : '-';
+            const ga = data.generated_at ? new Date(Number(data.generated_at) * 1000) : null;
+            meta.textContent = ga ? `Generated: ${ga.toLocaleString()} | items: ${data.total_items} | showing: ${data.items.length}` : `items: ${data.total_items}`;
+            const rows = (data.items || []).map(it => {
+                const latency = fmtLatency(it.latency_s);
+                const conf = (it.confidence === null || it.confidence === undefined) ? '-' : String(it.confidence);
+                return `<tr><td>${statusTag(it.status)}</td><td>${effectTag(it.effect)}</td><td class="muted">${escapeHtml(latency)}</td><td class="muted">${escapeHtml(conf)}</td><td class="rec">${escapeHtml(it.recommendation || '')}<div class="small muted">${escapeHtml(it.match_type || '')}${it.effect_reason ? ' | ' + escapeHtml(it.effect_reason) : ''}</div></td><td class="muted">${escapeHtml(it.tool || '')}</td></tr>`;
+            }).join('');
+            body.innerHTML = rows || `<tr><td colspan="6" class="muted">No items for filters.</td></tr>`;
+        }
+
+        async function refresh() {
+            try { render(await fetchLatest()); }
+            catch (e) { render({ ok: false, hint: 'Failed to fetch scorer data.' }); }
+        }
+
+        async function runScorer() {
+            const btn = document.getElementById('run-btn');
+            const useMinimax = document.getElementById('use-minimax').checked;
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+            try {
+                const r = await fetch('/api/scorer/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ use_minimax: useMinimax }) });
+                await r.json();
+                await refresh();
+            } catch (e) {
+                render({ ok: false, hint: 'Failed to run scorer.' });
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Run Scorer';
+            }
+        }
+
+        document.getElementById('refresh-btn').addEventListener('click', refresh);
+        document.getElementById('run-btn').addEventListener('click', runScorer);
+        document.getElementById('f-status').addEventListener('change', refresh);
+        document.getElementById('f-effect').addEventListener('change', refresh);
+        document.getElementById('f-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') refresh(); });
+        refresh();
+</script>
+</body>
+</html>'''
+
+
+def _legacy_import(name: str):
+    import importlib
+    try:
+        return importlib.import_module(name), None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
+def get_mission_data() -> Dict[str, Any]:
+    legacy, err = _legacy_import("dashboard")
+    if not legacy:
+        return {"ok": False, "error": err}
+    try:
+        data = legacy.get_mission_control_data(include_pulse_probe=False)
+        if not isinstance(data, dict):
+            return {"ok": False, "error": "mission data is not a dict"}
+        return {"ok": True, **data}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def get_ops_page_data() -> Dict[str, Any]:
+    legacy, err = _legacy_import("dashboard")
+    if not legacy:
+        return {"ok": False, "error": err}
+    try:
+        data = legacy.get_ops_data()
+        if not isinstance(data, dict):
+            return {"ok": False, "error": "ops data is not a dict"}
+        return {"ok": True, **data}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def get_learning_data() -> Dict[str, Any]:
+    legacy, err = _legacy_import("dashboard")
+    if not legacy:
+        return {"ok": False, "error": err}
+    try:
+        data = legacy.get_learning_factory_data()
+        if not isinstance(data, dict):
+            return {"ok": False, "error": "learning data is not a dict"}
+        return {"ok": True, **data}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def get_meta_ralph_data() -> Dict[str, Any]:
+    legacy, err = _legacy_import("meta_ralph_dashboard")
+    if not legacy:
+        return {"ok": False, "error": err}
+    try:
+        data = legacy.get_dashboard_data()
+        if not isinstance(data, dict):
+            return {"ok": False, "error": "meta-ralph data is not a dict"}
+        return {"ok": True, **data}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+
+def _hub_page_html(title: str, subtitle: str, logo: str, active: str, accent_hex: str) -> str:
+    # Keep this minimal: styling + rendering lives in /assets/hub.css and /assets/hub.js.
+    def a(label: str, href: str, key: str, external: bool = False) -> str:
+        cls = ' class="active"' if key == active else ""
+        extra = ' target="_blank" rel="noopener"' if external else ""
+        return f'<a{cls} href="{href}"{extra}>{label}</a>'
+
+    nav = "\n                    ".join([
+        a("Tracer", "/", "tracer"),
+        a("Scorer", "/scorer", "scorer"),
+        a("Mission", "/mission", "mission"),
+        a("Ops", "/ops", "ops"),
+        a("Learning", "/learning", "learning"),
+        a("Meta-Ralph", "/meta-ralph", "meta-ralph"),
+        a("Pulse", "http://localhost:8765", "pulse", external=True),
+    ])
+
+    # Note: no JS braces here; we keep JS in hub.js to avoid formatting pitfalls.
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title} | Spark Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/hub.css">
+</head>
+<body style="--accent: {accent_hex}">
+  <div class="bg-atmosphere"></div>
+  <div class="container">
+    <header class="header">
+      <div class="header-left">
+        <div class="brand">
+          <div class="logo">{logo}</div>
+          <div class="brand-text">
+            <h1>{title}</h1>
+            <p>{subtitle}</p>
+          </div>
+        </div>
+        <nav class="nav" aria-label="Dashboard pages">
+                    {nav}
+        </nav>
+      </div>
+      <div class="actions">
+        <button id="refresh" class="btn primary">Refresh</button>
+        <div id="meta" class="meta">No data loaded yet.</div>
+      </div>
+    </header>
+
+    <main id="app" data-page="{active}">
+      <div class="muted">Loading…</div>
+    </main>
+  </div>
+
+  <script src="/assets/hub.js"></script>
+  <script>window.HubPages && window.HubPages.init("{active}");</script>
+</body>
+</html>'''
+
+
+def generate_mission_html() -> str:
+    return _hub_page_html("Mission", "System Health & Run Loop", "MC", "mission", "#00C49A")
+
+
+def generate_ops_html() -> str:
+    return _hub_page_html("Ops", "Skill & Orchestration Operations", "OP", "ops", "#c8a84e")
+
+
+def generate_learning_html() -> str:
+    return _hub_page_html("Learning", "Memory Funnel & Validation", "LF", "learning", "#D97757")
+
+
+def generate_meta_ralph_html() -> str:
+    return _hub_page_html("Meta-Ralph", "Advice Quality Gate", "MR", "meta-ralph", "#D97757")
+
+def get_trace_context(trace_id: str, session_id: str) -> Dict[str, Any]:
+    """Get full context for a trace from all ID systems."""
+    _, _, _, connector = get_tracer_components()
+    
+    context = connector.get_full_context(trace_id, session_id)
+    
+    return {
+        "trace_id": trace_id,
+        "session_id": session_id,
+        "eidos": [
+            {
+                "episode_id": ep.episode_id,
+                "goal": ep.goal,
+                "outcome": ep.outcome,
+                "phase": ep.phase,
+                "step_count": ep.step_count,
+                "steps": [
+                    {
+                        "step_id": step.step_id,
+                        "intent": step.intent,
+                        "prediction": step.prediction,
+                        "result": step.result,
+                        "evaluation": step.evaluation,
+                        "lesson": step.lesson,
+                        "confidence_before": step.confidence_before,
+                        "confidence_after": step.confidence_after,
+                        "surprise_level": step.surprise_level,
+                    }
+                    for step in ep.steps
+                ],
+            }
+            for ep in context.eidos_episodes
+        ],
+        "advisories": [
+            {
+                "advisory_id": adv.advisory_id,
+                "task_plane": adv.task_plane,
+                "intent_family": adv.intent_family,
+                "emitted": adv.emitted,
+                "advice_preview": adv.advice[:100] if adv.advice else "",
+            }
+            for adv in context.advisories
+        ],
+        "agent_feedback": [
+            {
+                "report_id": fb.report_id,
+                "task": fb.task,
+                "success": fb.success,
+                "outcome": fb.outcome,
+                "lesson_learned": fb.lesson_learned,
+            }
+            for fb in context.agent_feedback
+        ],
+        "cognitive_insights": [
+            {
+                "insight_id": ins.insight_id,
+                "category": ins.category,
+                "signal_preview": ins.signal[:100] if ins.signal else "",
+                "confidence": ins.confidence,
+                "times_validated": ins.times_validated,
+            }
+            for ins in context.cognitive_insights
+        ],
+    }
+
+
+def get_session_timeline(session_id: str) -> Dict[str, Any]:
+    """Get timeline of all ID system activity for a session."""
+    _, _, _, connector = get_tracer_components()
+    
+    timeline = connector.get_session_timeline(session_id)
+    
+    return {
+        "session_id": session_id,
+        "timestamp": datetime.now().isoformat(),
+        "eidos_episodes": timeline.get('eidos_episodes', []),
+        "recent_traces": [],  # Would need to query trace store by session
+    }
+
+
 class TracerHandler(SimpleHTTPRequestHandler):
     """HTTP handler for tracer dashboard."""
     
@@ -1140,12 +1774,67 @@ class TracerHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        query = parse_qs(parsed.query or "")
         
-        if path == '/' or path == '/index.html':
+        if path == '/assets/hub.css':
+            try:
+                css = HUB_CSS_PATH.read_text(encoding="utf-8")
+                self.send_response(200)
+                self.send_header('Content-type', 'text/css; charset=utf-8')
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+                self.wfile.write(css.encode('utf-8'))
+            except Exception:
+                self.send_response(404)
+                self.end_headers()
+
+        elif path == '/assets/hub.js':
+            try:
+                js = HUB_JS_PATH.read_text(encoding="utf-8")
+                self.send_response(200)
+                self.send_header('Content-type', 'application/javascript; charset=utf-8')
+                self.send_header('Cache-Control', 'no-cache')
+                self.end_headers()
+                self.wfile.write(js.encode('utf-8'))
+            except Exception:
+                self.send_response(404)
+                self.end_headers()
+
+        elif path == '/' or path == '/index.html':
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
             self.wfile.write(generate_html().encode('utf-8'))
+
+        elif path == '/scorer' or path == '/scorer.html':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(generate_scorer_html().encode('utf-8'))
+
+        elif path == '/mission' or path == '/mission.html':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(generate_mission_html().encode('utf-8'))
+
+        elif path == '/ops' or path == '/ops.html':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(generate_ops_html().encode('utf-8'))
+
+        elif path == '/learning' or path == '/learning.html':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(generate_learning_html().encode('utf-8'))
+
+        elif path == '/meta-ralph' or path == '/meta-ralph.html':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(generate_meta_ralph_html().encode('utf-8'))
         
         elif path == '/api/data':
             self.send_response(200)
@@ -1154,10 +1843,110 @@ class TracerHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             data = get_tracer_data()
             self.wfile.write(json.dumps(data).encode('utf-8'))
+
+        elif path == '/api/scorer/latest':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            data = get_scorer_data(query)
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+        
+        elif path == '/api/trace/context':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            trace_id = query.get('id', [''])[0]
+            session_id = query.get('session', [''])[0]
+            data = get_trace_context(trace_id, session_id)
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+        
+        elif path == '/api/session/timeline':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            session_id = query.get('id', [''])[0]
+            data = get_session_timeline(session_id)
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+
+        elif path == '/api/mission':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            data = get_mission_data()
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+
+        elif path == '/api/ops':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            data = get_ops_page_data()
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+
+        elif path == '/api/learning':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            data = get_learning_data()
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+
+        elif path == '/api/meta-ralph':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            data = get_meta_ralph_data()
+            self.wfile.write(json.dumps(data).encode('utf-8'))
         
         else:
             self.send_response(404)
             self.end_headers()
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+
+        if path != '/api/scorer/run':
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        try:
+            raw_len = self.headers.get("Content-Length", "0")
+            n = _safe_int(raw_len, 0, lo=0, hi=5_000_000)
+            body = self.rfile.read(n) if n else b""
+            payload = json.loads(body.decode("utf-8", errors="replace") or "{}") if body else {}
+        except Exception:
+            payload = {}
+
+        use_minimax = bool(payload.get("use_minimax", False))
+
+        try:
+            report = _run_auto_scorer(use_minimax=use_minimax)
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "ok": True,
+                "latest_path": str(AUTO_SCORER_LATEST),
+                "generated_at": report.get("generated_at"),
+                "kpis": report.get("kpis") or {},
+            }).encode('utf-8'))
+        except Exception as e:
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "ok": False,
+                "error": f"{type(e).__name__}: {e}",
+            }).encode('utf-8'))
 
 
 def open_browser(port: int):
