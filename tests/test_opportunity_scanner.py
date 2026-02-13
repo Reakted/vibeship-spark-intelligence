@@ -516,3 +516,82 @@ def test_generate_llm_self_candidates_honors_forced_provider(monkeypatch):
     assert len(rows) == 1
     assert meta.get("used") is True
     assert meta.get("provider") == "minimax"
+
+
+def test_generate_llm_self_candidates_surfaces_empty_or_timeout(monkeypatch):
+    monkeypatch.setattr(scanner, "LLM_ENABLED", True)
+    monkeypatch.setattr(scanner, "LLM_PROVIDER", "minimax")
+    monkeypatch.setattr(scanner, "LLM_TIMEOUT_S", 0.1)
+
+    class _DummySynth:
+        AI_TIMEOUT_S = 1.0
+
+        @staticmethod
+        def _get_provider_chain(_preferred=None):
+            return ["minimax"]
+
+        @staticmethod
+        def _query_provider(_provider, _prompt):
+            return None
+
+    monkeypatch.setitem(__import__("sys").modules, "lib.advisory_synthesizer", _DummySynth)
+
+    rows, meta = scanner._generate_llm_self_candidates(
+        prompts=["Improve scanner quality"],
+        edits=["def x(): return True"],
+        query="",
+        stats={},
+        kernel_ok=True,
+    )
+
+    assert rows == []
+    assert meta.get("attempted") is True
+    assert meta.get("used") is False
+    assert str(meta.get("error") or "").startswith("minimax:empty_or_timeout")
+
+
+def test_extract_json_candidate_handles_think_wrapped_multiple_json_objects():
+    # Some providers (notably MiniMax) can return a think block that itself includes JSON,
+    # then the real output JSON afterwards.
+    raw = (
+        "<think> reason {\"foo\": 1} more </think>\n"
+        "{\"opportunities\":[{\"category\":\"assumption_audit\",\"priority\":\"high\",\"confidence\":0.72,"
+        "\"question\":\"What assumption could break this?\",\"next_step\":\"List top 1 assumption and test it.\","
+        "\"rationale\":\"Assumptions drive hidden risk.\"}]}"
+    )
+    obj = scanner._extract_json_candidate(raw)
+    assert isinstance(obj, dict)
+    assert "opportunities" in obj
+
+
+def test_scan_runtime_opportunities_does_not_repersist_recent_duplicates(tmp_path, monkeypatch):
+    # Isolate persistence to temp files.
+    monkeypatch.setattr(scanner, "SELF_FILE", tmp_path / "self.jsonl")
+    monkeypatch.setattr(scanner, "OUTCOME_FILE", tmp_path / "outcomes.jsonl")
+    monkeypatch.setattr(scanner, "SCANNER_ENABLED", True)
+    monkeypatch.setattr(scanner, "LLM_ENABLED", False)
+    monkeypatch.setattr(scanner, "SELF_DEDUP_WINDOW_S", 3600.0)
+    monkeypatch.setattr(scanner, "SELF_RECENT_LOOKBACK", 200)
+
+    out1 = scanner.scan_runtime_opportunities(
+        [_mk_event(EventType.USER_PROMPT, payload={"text": "Improve opportunity scanner reliability and usefulness"})],
+        stats={},
+        query="",
+        session_id="s_dup",
+        persist=True,
+    )
+    assert out1.get("persisted", 0) >= 1
+    n1 = len((tmp_path / "self.jsonl").read_text(encoding="utf-8").splitlines())
+
+    out2 = scanner.scan_runtime_opportunities(
+        [_mk_event(EventType.USER_PROMPT, payload={"text": "Improve opportunity scanner reliability and usefulness"})],
+        stats={},
+        query="",
+        session_id="s_dup",
+        persist=True,
+    )
+    n2 = len((tmp_path / "self.jsonl").read_text(encoding="utf-8").splitlines())
+
+    # Second run may still output repeated items, but it should not keep appending
+    # identical questions into history inside the dedup window.
+    assert n2 == n1

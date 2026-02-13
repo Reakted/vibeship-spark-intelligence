@@ -430,6 +430,7 @@ def _query_minimax(prompt: str) -> Optional[str]:
             log_debug("advisory_synth", "HTTPX_MISSING_MINIMAX", None)
             return None
         with _httpx.Client(timeout=AI_TIMEOUT_S) as client:
+            want_json = "return only json" in str(prompt or "").strip().lower()
             resp = client.post(
                 f"{MINIMAX_BASE_URL}/chat/completions",
                 headers={
@@ -439,8 +440,11 @@ def _query_minimax(prompt: str) -> Optional[str]:
                 json={
                     "model": MINIMAX_MODEL,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 200,
+                    # MiniMax often emits a <think> block before the final answer; for JSON-only
+                    # prompts we give it a larger budget so the structured output isn't truncated.
+                    "max_tokens": 480 if want_json else 200,
                     "temperature": 0.3,
+                    **({"response_format": {"type": "json_object"}} if want_json else {}),
                 },
             )
             if resp.status_code == 200:

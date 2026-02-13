@@ -333,28 +333,37 @@ def _extract_json_candidate(raw: str) -> Optional[Any]:
     text = str(raw or "").strip()
     if not text:
         return None
+
+    # MiniMax and some other providers may return:
+    #   <think> ... {"foo": 1} ... </think> {"opportunities": [...]}
+    # which breaks naive "first { ... last }" slicing due to braces in the think block.
+    # Use JSONDecoder.raw_decode scanning to extract the first valid JSON value, and
+    # prefer the schema we actually want (dict with "opportunities").
+    decoder = json.JSONDecoder()
+
     candidates = [text]
-    # Prefer fenced JSON payloads if present.
     for m in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE):
         payload = str(m.group(1) or "").strip()
         if payload:
             candidates.append(payload)
-    # Fallback: first JSON object/array slice.
-    first_obj = text.find("{")
-    last_obj = text.rfind("}")
-    if first_obj >= 0 and last_obj > first_obj:
-        candidates.append(text[first_obj : last_obj + 1])
-    first_arr = text.find("[")
-    last_arr = text.rfind("]")
-    if first_arr >= 0 and last_arr > first_arr:
-        candidates.append(text[first_arr : last_arr + 1])
 
+    best: Optional[Any] = None
     for cand in candidates:
-        try:
-            return json.loads(cand)
-        except Exception:
+        s = str(cand or "").strip()
+        if not s:
             continue
-    return None
+        for i, ch in enumerate(s):
+            if ch not in "{[":
+                continue
+            try:
+                obj, _end = decoder.raw_decode(s[i:])
+            except Exception:
+                continue
+            if isinstance(obj, dict) and "opportunities" in obj:
+                return obj
+            if best is None:
+                best = obj
+    return best
 
 
 def _sanitize_llm_self_rows(rows: Any) -> List[Dict[str, Any]]:
@@ -477,6 +486,9 @@ def _generate_llm_self_candidates(
                 last_error = f"{provider}:{type(e).__name__}"
                 continue
             if not raw:
+                # Surface timeouts/empty responses in scanner meta so operators can tune
+                # SPARK_OPPORTUNITY_LLM_TIMEOUT_S or switch providers.
+                last_error = last_error or f"{provider}:empty_or_timeout"
                 continue
             parsed = _extract_json_candidate(raw)
             rows = _sanitize_llm_self_rows(parsed)
@@ -1021,6 +1033,10 @@ def scan_runtime_opportunities(
     persisted = 0
     if persist and deduped:
         for idx, row in enumerate(deduped):
+            # If we had to fall back to repeated prompts (pass-3 selection), avoid
+            # re-persisting the same question into history every cycle.
+            if _question_key(str(row.get("question") or "")) in recent_keys:
+                continue
             row_ts = now_ts + (idx * 0.0001)
             opp_id = _opportunity_id(
                 session_id=str(session_id or "default"),
