@@ -51,7 +51,8 @@ If you can paste the original Carmack post/link, I can make this 100% exact (a f
 - Optimizer/regularization paper; need exact arXiv entry.
 
 ### 6) Local Feature Swapping for Generalization in Reinforcement Learning
-- RL generalization augmentation paper; need exact arXiv entry.
+- Paper: **Local Feature Swapping for Generalization in Reinforcement Learning**
+- arXiv: https://arxiv.org/abs/2204.06355
 
 ### 5) Small Batch Size Training for Language Models: When Vanilla SGD Works, and Why Gradient Accumulation Is Wasteful
 - Paper: **Small Batch Size Training for Language Models: When Vanilla SGD Works, and Why Gradient Accumulation Is Wasteful**
