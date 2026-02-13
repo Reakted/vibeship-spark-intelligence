@@ -113,6 +113,39 @@ def test_telemetry_observer_blocklist_skips_runtime_emission(monkeypatch, tmp_pa
     assert called["n"] == 0
 
 
+def test_chip_level_and_unknown_observers_are_blocked_by_default(monkeypatch, tmp_path):
+    runtime = _build_runtime(monkeypatch, tmp_path)
+
+    called = {"n": 0}
+
+    def _spy(_match, _event):
+        called["n"] += 1
+        return None
+
+    monkeypatch.setattr(runtime, "_execute_observer", _spy)
+
+    for observer_name in ("chip_level", "unknown"):
+        observer = ChipObserver(
+            name=observer_name,
+            description="default telemetry noise observer",
+            triggers=["post_tool"],
+            capture_required={},
+            capture_optional={},
+            extraction=[],
+        )
+        match = TriggerMatch(
+            chip=_chip("vibecoding"),
+            observer=observer,
+            trigger="post_tool",
+            confidence=0.95,
+            content_snippet="post_tool",
+        )
+        out = runtime._process_matches([match], {"event_type": "post_tool"})
+        assert out == []
+
+    assert called["n"] == 0
+
+
 def test_blocked_chip_ids_filter_runtime_chip_set(monkeypatch, tmp_path):
     monkeypatch.setenv("SPARK_CHIP_BLOCKED_IDS", "bench_core,spark-core")
     runtime = _build_runtime(monkeypatch, tmp_path)

@@ -41,6 +41,7 @@ def check_env_vars() -> None:
         "AZURE_OPENAI_ENDPOINT",
         "TOGETHER_API_KEY",
         "GROQ_API_KEY",
+        "MINIMAX_API_KEY",
     ]
     for key in keys:
         print(f"{key} = {'set' if os.environ.get(key) else '(not set)'}")

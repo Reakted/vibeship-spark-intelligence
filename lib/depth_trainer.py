@@ -33,6 +33,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import random
 import sys
 import time
@@ -155,6 +156,11 @@ class DepthAnswerGenerator:
             "endpoint": "https://api.deepseek.com/v1/chat/completions",
             "model": "deepseek-chat",
             "key_env": "DEEPSEEK_API_KEY",
+        },
+        "minimax": {
+            "endpoint": os.getenv("DEPTH_MINIMAX_ENDPOINT", "https://api.minimax.io/v1/chat/completions"),
+            "model": os.getenv("DEPTH_MINIMAX_MODEL", "MiniMax-M2.5"),
+            "key_env": "MINIMAX_API_KEY",
         },
         "ollama": {
             "endpoint": OLLAMA_URL,

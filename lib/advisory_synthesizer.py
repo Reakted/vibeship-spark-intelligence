@@ -41,6 +41,10 @@ OLLAMA_MODEL = os.getenv("SPARK_OLLAMA_MODEL", "phi4-mini")  # Default quality-f
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("CODEX_API_KEY")
 OPENAI_MODEL = os.getenv("SPARK_OPENAI_MODEL", "gpt-4o-mini")  # Cost-efficient
 
+MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY") or os.getenv("SPARK_MINIMAX_API_KEY")
+MINIMAX_BASE_URL = os.getenv("SPARK_MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
+MINIMAX_MODEL = os.getenv("SPARK_MINIMAX_MODEL", "MiniMax-M2.5")
+
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
 ANTHROPIC_MODEL = os.getenv("SPARK_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
@@ -55,6 +59,7 @@ SOUL_UPGRADE_PROMPT_ENABLED = os.getenv("SPARK_SOUL_UPGRADE_PROMPT", "0") in {"1
 
 # Max time for AI synthesis (fail fast - hooks must be quick)
 AI_TIMEOUT_S = float(os.getenv("SPARK_SYNTH_TIMEOUT", "3.0"))
+PREFERRED_PROVIDER_ENV = os.getenv("SPARK_SYNTH_PREFERRED_PROVIDER", "")
 
 # Cache synthesized results (same inputs → same output)
 _synth_cache: Dict[str, tuple] = {}  # key → (result, timestamp)
@@ -73,7 +78,10 @@ def _sanitize_provider(raw: Any) -> Optional[str]:
     provider = str(raw or "").strip().lower()
     if provider in {"", "auto", "none"}:
         return None
-    return provider if provider in {"ollama", "gemini", "openai", "anthropic"} else None
+    return provider if provider in {"ollama", "gemini", "openai", "anthropic", "minimax"} else None
+
+
+PREFERRED_PROVIDER = _sanitize_provider(PREFERRED_PROVIDER_ENV)
 
 
 def _apply_synth_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
@@ -115,6 +123,11 @@ def _apply_synth_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     if "preferred_provider" in cfg:
         PREFERRED_PROVIDER = _sanitize_provider(cfg.get("preferred_provider"))
         applied.append("preferred_provider")
+
+    env_provider = _sanitize_provider(PREFERRED_PROVIDER_ENV)
+    if env_provider is not None:
+        PREFERRED_PROVIDER = env_provider
+        applied.append("preferred_provider_env")
 
     return {"applied": applied, "warnings": warnings}
 
@@ -240,7 +253,7 @@ def synthesize_with_ai(
     # Build the synthesis prompt
     prompt = _build_synthesis_prompt(advice_items, phase, user_intent, tool_name)
 
-    # Try providers in order: Ollama (local) → OpenAI → Anthropic → Gemini
+    # Try providers in order: local first, then configured cloud fallbacks.
     providers = _get_provider_chain(provider)
 
     for prov in providers:
@@ -313,6 +326,8 @@ def _get_provider_chain(preferred: Optional[str] = None) -> List[str]:
     # Then cloud fallbacks (by cost: cheapest first)
     if GEMINI_API_KEY and "gemini" not in chain:
         chain.append("gemini")
+    if MINIMAX_API_KEY and "minimax" not in chain:
+        chain.append("minimax")
     if OPENAI_API_KEY and "openai" not in chain:
         chain.append("openai")
     if ANTHROPIC_API_KEY and "anthropic" not in chain:
@@ -327,6 +342,8 @@ def _query_provider(provider: str, prompt: str) -> Optional[str]:
         return _query_ollama(prompt)
     elif provider == "openai":
         return _query_openai(prompt)
+    elif provider == "minimax":
+        return _query_minimax(prompt)
     elif provider == "anthropic":
         return _query_anthropic(prompt)
     elif provider == "gemini":
@@ -392,6 +409,41 @@ def _query_openai(prompt: str) -> Optional[str]:
                 return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
         log_debug("advisory_synth", "OpenAI query failed", e)
+    return None
+
+
+def _query_minimax(prompt: str) -> Optional[str]:
+    """Query MiniMax OpenAI-compatible API."""
+    if not MINIMAX_API_KEY:
+        return None
+    try:
+        if _httpx is None:
+            log_debug("advisory_synth", "HTTPX_MISSING_MINIMAX", None)
+            return None
+        with _httpx.Client(timeout=AI_TIMEOUT_S) as client:
+            resp = client.post(
+                f"{MINIMAX_BASE_URL}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {MINIMAX_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": MINIMAX_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 200,
+                    "temperature": 0.3,
+                },
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                choices = data.get("choices", [])
+                if choices:
+                    msg = choices[0].get("message", {})
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        return content.strip()
+    except Exception as e:
+        log_debug("advisory_synth", "MiniMax query failed", e)
     return None
 
 
@@ -560,6 +612,7 @@ def check_ai_available() -> Dict[str, bool]:
     available = {
         "ollama": False,
         "openai": bool(OPENAI_API_KEY),
+        "minimax": bool(MINIMAX_API_KEY),
         "anthropic": bool(ANTHROPIC_API_KEY),
         "gemini": bool(GEMINI_API_KEY),
     }
@@ -595,4 +648,5 @@ def get_synth_status() -> Dict[str, Any]:
         "tier_label": "AI-Enhanced" if any_ai else "Programmatic",
         "cache_size": len(_synth_cache),
         "ollama_model": OLLAMA_MODEL if ai.get("ollama") else None,
+        "minimax_model": MINIMAX_MODEL if ai.get("minimax") else None,
     }

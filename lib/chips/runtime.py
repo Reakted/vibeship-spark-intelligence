@@ -34,6 +34,8 @@ log = logging.getLogger("spark.chips")
 CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
 OBSERVER_POLICY_FILE = Path.home() / ".spark" / "chip_observer_policy.json"
 TELEMETRY_OBSERVER_BLOCKLIST = {
+    "chip_level",
+    "unknown",
     "tool_event",
     "pre_tool_event",
     "post_tool_event",
