@@ -1911,11 +1911,6 @@ class TracerHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        if path != '/api/scorer/run':
-            self.send_response(404)
-            self.end_headers()
-            return
-
         try:
             raw_len = self.headers.get("Content-Length", "0")
             n = _safe_int(raw_len, 0, lo=0, hi=5_000_000)
@@ -1923,6 +1918,43 @@ class TracerHandler(SimpleHTTPRequestHandler):
             payload = json.loads(body.decode("utf-8", errors="replace") or "{}") if body else {}
         except Exception:
             payload = {}
+
+        if path == '/api/ops/record':
+            # Record skill effectiveness outcome: {"skill": "name", "outcome": "success"|"failure"}
+            skill_id = (payload.get("skill") or "").strip()
+            outcome = (payload.get("outcome") or "").strip().lower()
+            if not skill_id or outcome not in ("success", "failure"):
+                self.send_response(400)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "error": "need skill + outcome (success|failure)"}).encode())
+                return
+            try:
+                eff_file = Path.home() / ".spark" / "skills_effectiveness.json"
+                data = json.loads(eff_file.read_text(encoding="utf-8")) if eff_file.exists() else {}
+                stats = data.get(skill_id, {"success": 0, "fail": 0})
+                if outcome == "success":
+                    stats["success"] = int(stats.get("success", 0)) + 1
+                else:
+                    stats["fail"] = int(stats.get("fail", 0)) + 1
+                data[skill_id] = stats
+                eff_file.parent.mkdir(parents=True, exist_ok=True)
+                eff_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": True, "skill": skill_id, "stats": stats}).encode())
+            except Exception as e:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
+            return
+
+        if path != '/api/scorer/run':
+            self.send_response(404)
+            self.end_headers()
+            return
 
         use_minimax = bool(payload.get("use_minimax", False))
 

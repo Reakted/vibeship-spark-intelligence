@@ -71,9 +71,26 @@ def _parse_skill(text: str) -> Dict[str, List[str] | str]:
             key = m.group(1).strip()
             rest = m.group(2).strip()
 
-            if key in ("name", "description") and rest:
-                out[key] = _strip_quotes(rest)
+            if key in ("name", "description"):
+                if rest and rest not in ("|", ">", "|+", "|-", ">+", ">-"):
+                    out[key] = _strip_quotes(rest)
+                    i += 1
+                    continue
+                # Block scalar: collect indented lines that follow
+                block_lines: List[str] = []
                 i += 1
+                while i < len(lines):
+                    bl = lines[i]
+                    if bl and not bl.startswith((" ", "\t")):
+                        break
+                    stripped = bl.strip()
+                    if stripped:
+                        block_lines.append(stripped)
+                    elif block_lines:
+                        break  # blank line after content ends the block
+                    i += 1
+                if block_lines:
+                    out[key] = _strip_quotes(" ".join(block_lines))
                 continue
 
             if key in ("owns", "delegates", "anti_patterns", "detection"):

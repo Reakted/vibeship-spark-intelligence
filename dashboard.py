@@ -723,6 +723,16 @@ def generate_system_badges(data: Dict) -> str:
 
 
 def get_ops_data() -> Dict:
+    # Auto-refresh skills index from H70 YAML files if SPARK_SKILLS_DIR is set.
+    # load_skills_index() uses mtime caching so this is lightweight (no re-parse
+    # unless files changed on disk).
+    if os.environ.get("SPARK_SKILLS_DIR"):
+        try:
+            from lib.skills_registry import load_skills_index
+            load_skills_index()  # refreshes ~/.spark/skills_index.json if stale
+        except Exception:
+            pass
+
     index_data = _load_json(SKILLS_INDEX_FILE)
     skills = index_data.get("skills") if isinstance(index_data.get("skills"), list) else []
     categories: Dict[str, int] = {}
