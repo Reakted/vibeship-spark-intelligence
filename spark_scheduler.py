@@ -65,6 +65,9 @@ OPENCLAW_WORKSPACE = Path(
 TREND_BUILD_QUEUE_FILE = TREND_BUILD_QUEUE_DIR / "latest_build_queue.json"
 TREND_BUILD_DISPATCH_LOG = OPENCLAW_HANDOFF_DIR / "build_dispatch_log.jsonl"
 TREND_MAX_QUEUED_ITEMS = int(os.getenv("TREND_MAX_QUEUED_ITEMS", "24"))
+TREND_BUILD_QUEUE_MIN_CONFIDENCE = float(os.getenv("TREND_BUILD_QUEUE_MIN_CONFIDENCE", "0.62"))
+TREND_BUILD_QUEUE_MIN_TREND_SCORE = float(os.getenv("TREND_BUILD_QUEUE_MIN_TREND_SCORE", "0.72"))
+TREND_BUILD_QUEUE_MIN_EVIDENCE = int(os.getenv("TREND_BUILD_QUEUE_MIN_EVIDENCE", "10"))
 TREND_NOTIFY_OPENCLAW = os.getenv("TREND_NOTIFY_OPENCLAW", "1").strip().lower() in {
     "1",
     "true",
@@ -246,6 +249,17 @@ def _collect_build_queue_items(result: Dict[str, Any]) -> List[Dict[str, Any]]:
             if not isinstance(item, dict):
                 continue
             item_type = _normalize_build_type(item.get("type"), bucket)
+            item_confidence = _safe_float(item.get("confidence"), 0.0)
+            trend_profile = item.get("trend_profile", {})
+            if not isinstance(trend_profile, dict):
+                trend_profile = {}
+            if item_confidence < TREND_BUILD_QUEUE_MIN_CONFIDENCE:
+                continue
+            if _safe_float(trend_profile.get("trend_score"), 0.0) < TREND_BUILD_QUEUE_MIN_TREND_SCORE:
+                continue
+            if _safe_int(trend_profile.get("evidence_count"), 0) < TREND_BUILD_QUEUE_MIN_EVIDENCE:
+                continue
+
             engine = _resolve_engine_for_item(item, item_type)
             item_slug = _slugify(item.get("name") or item.get("title") or item_type)
             run_payload = {
@@ -256,7 +270,7 @@ def _collect_build_queue_items(result: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "title": item.get("title") or item.get("name") or item_slug,
                 "assigned_engine": engine,
                 "source_topic": item.get("source_topic", ""),
-                "confidence": _safe_float(item.get("confidence"), 0.0),
+                "confidence": item_confidence,
                 "trend_rank": _safe_int(
                     item.get("trend_profile", {}).get("trend_rank")
                     if isinstance(item.get("trend_profile"), dict)
@@ -490,6 +504,7 @@ def _emit_claw_handoff(payload: Dict[str, Any]) -> Dict[str, Any]:
     handoff = {
         "generated_at": datetime.fromtimestamp(time.time(), tz=None).isoformat(),
         "source": "spark_scheduler.daily_research",
+        "build_queue_file": str(TREND_BUILD_QUEUE_FILE),
         "status": payload.get("status"),
         "topics_processed": payload.get("topics_processed"),
         "queries_run": payload.get("queries_run"),
@@ -697,15 +712,18 @@ def task_daily_research(state: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": result.get("error"), "stdout": result.get("stdout", ""), "stderr": result.get("stderr", "")}
 
     handoff = _emit_claw_handoff(result)
+    build_queue = _emit_build_queue(result)
+    handoff["build_queue"] = build_queue
     build_candidates = result.get("build_candidates", {})
     logger.info(
-        "daily_research: delegated run complete: %d candidates (S:%d M:%d U:%d), delivered=%s",
+        "daily_research: delegated run complete: %d candidates (S:%d M:%d U:%d), queue=%d delivered=%s",
         len(build_candidates.get("skills", []))
         + len(build_candidates.get("mcps", []))
         + len(build_candidates.get("startup_ideas", [])),
         len(build_candidates.get("skills", [])),
         len(build_candidates.get("mcps", [])),
         len(build_candidates.get("startup_ideas", [])),
+        build_queue.get("queued", 0),
         handoff.get("deliveries", {}),
     )
     return {
@@ -719,6 +737,7 @@ def task_daily_research(state: Dict[str, Any]) -> Dict[str, Any]:
             "mcps": len(build_candidates.get("mcps", [])),
             "startups": len(build_candidates.get("startup_ideas", [])),
         },
+        "build_queue": build_queue,
         "handoff_file": str(OPENCLAW_HANDOFF_FILE),
         "deliveries": handoff.get("deliveries", {}),
     }
