@@ -21,7 +21,8 @@ This means our advisory loop is still mostly `cognitive + outcomes` driven, with
 ## New capabilities added for this loop
 
 - `benchmarks/advisory_quality_ab.py` profile overlays can now tune:
-  - retrieval policy (`advisor.retrieval_policy.*`)
+  - benchmark-only routing override (`retrieval_policy.*` -> in-process `advisor.retrieval_policy`)
+  - live routing tuneables live in `~/.spark/tuneables.json` -> `retrieval.overrides.*`
   - chip retrieval pressure (`chip_advice_limit`, `chip_advice_min_score`, `chip_advice_max_files`, `chip_advice_file_tail`)
   - chip ranking influence (`chip_source_boost`)
 

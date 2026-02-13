@@ -80,7 +80,8 @@ No persistent tuneable change was left active during this decision pass.
 
 ## Next step
 
-Run a 24h canary with only `advisor.retrieval_policy` from `B_retrieval_v2` applied, then re-run:
+Run a 24h canary with only the retrieval routing tuneables from `B_retrieval_v2` applied
+(`~/.spark/tuneables.json` -> `retrieval.overrides.*`), then re-run:
 1. `scripts/run_advisory_realism_contract.py`
 2. `scripts/advisory_self_review.py --window-hours 24`
 3. `benchmarks/memory_retrieval_ab.py` (same real-user set)

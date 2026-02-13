@@ -166,6 +166,12 @@ DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# Live routing tuneables are loaded from ~/.spark/tuneables.json -> "retrieval".
+# Historically, some reports referenced "advisor.retrieval_policy.*" which is a benchmark-only
+# overlay (or in-process override) and not read from tuneables.json at runtime. Keep a light
+# guardrail to prevent silent misconfiguration.
+_WARNED_DEPRECATED_ADVISOR_RETRIEVAL_POLICY = False
+
 DEFAULT_COMPLEXITY_HINTS = (
     "root cause",
     "multi hop",
@@ -314,6 +320,54 @@ def _load_advisor_config() -> None:
 
 
 _load_advisor_config()
+
+
+def _maybe_warn_deprecated_advisor_retrieval_policy(
+    advisor_policy: Optional[Dict[str, Any]],
+    retrieval_keys_present: Optional[set],
+    effective_policy: Dict[str, Any],
+) -> None:
+    """Warn if user sets advisor.retrieval_policy.* in tuneables.json expecting it to apply."""
+    global _WARNED_DEPRECATED_ADVISOR_RETRIEVAL_POLICY
+    if _WARNED_DEPRECATED_ADVISOR_RETRIEVAL_POLICY:
+        return
+    if not isinstance(advisor_policy, dict):
+        return
+
+    keys = (
+        "semantic_context_min",
+        "semantic_lexical_min",
+        "semantic_strong_override",
+        "lexical_weight",
+    )
+    present = [k for k in keys if k in advisor_policy]
+    if not present:
+        return
+
+    retrieval_keys_present = retrieval_keys_present if isinstance(retrieval_keys_present, set) else set()
+    has_all_in_retrieval = all(k in retrieval_keys_present for k in present)
+
+    mismatches: List[str] = []
+    for k in present:
+        try:
+            want = float(advisor_policy.get(k))
+            got = float(effective_policy.get(k))
+        except Exception:
+            continue
+        if abs(want - got) > 1e-12:
+            mismatches.append(f"{k}={want} (effective={got})")
+
+    # If tuneables.json already sets retrieval.* for these keys and values match, avoid noisy warnings.
+    if has_all_in_retrieval and not mismatches:
+        return
+
+    _WARNED_DEPRECATED_ADVISOR_RETRIEVAL_POLICY = True
+    details = "; ".join(mismatches) if mismatches else ", ".join(present)
+    sys.stderr.write(
+        "[SPARK][warn] 'advisor.retrieval_policy.*' in ~/.spark/tuneables.json is ignored by runtime. "
+        "Routing is loaded from the 'retrieval' section (prefer 'retrieval.overrides.*'). "
+        f"Detected: {details}\n"
+    )
 
 
 def _tail_jsonl(path: Path, count: int) -> List[str]:
@@ -772,10 +826,17 @@ class SparkAdvisor:
         policy["level"] = level
 
         # Optional overrides from tuneables.json -> retrieval section.
+        advisor_policy: Optional[Dict[str, Any]] = None
+        retrieval_keys_present: set = set()
         try:
             tuneables = Path.home() / ".spark" / "tuneables.json"
             if tuneables.exists():
                 data = json.loads(tuneables.read_text(encoding="utf-8"))
+                advisor = data.get("advisor") or {}
+                if isinstance(advisor, dict):
+                    ap = advisor.get("retrieval_policy")
+                    if isinstance(ap, dict):
+                        advisor_policy = ap
                 retrieval = data.get("retrieval") or {}
                 if isinstance(retrieval, dict):
                     lvl = str(retrieval.get("level") or level).strip()
@@ -790,6 +851,14 @@ class SparkAdvisor:
                             policy.update(by_level)
                     overrides = retrieval.get("overrides") or {}
                     if isinstance(overrides, dict):
+                        for key in (
+                            "semantic_context_min",
+                            "semantic_lexical_min",
+                            "semantic_strong_override",
+                            "lexical_weight",
+                        ):
+                            if key in overrides:
+                                retrieval_keys_present.add(key)
                         policy.update(overrides)
                     # Flat top-level retrieval keys are also treated as overrides.
                     for key in (
@@ -819,8 +888,21 @@ class SparkAdvisor:
                     ):
                         if key in retrieval:
                             policy[key] = retrieval.get(key)
+                            if key in {
+                                "semantic_context_min",
+                                "semantic_lexical_min",
+                                "semantic_strong_override",
+                                "lexical_weight",
+                            }:
+                                retrieval_keys_present.add(key)
         except Exception:
             pass
+
+        _maybe_warn_deprecated_advisor_retrieval_policy(
+            advisor_policy=advisor_policy,
+            retrieval_keys_present=retrieval_keys_present,
+            effective_policy=policy,
+        )
 
         env_mode = str(os.getenv("SPARK_RETRIEVAL_MODE", "") or "").strip().lower()
         if env_mode in {"auto", "embeddings_only", "hybrid_agentic"}:
