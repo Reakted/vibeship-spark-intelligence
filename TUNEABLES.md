@@ -856,6 +856,48 @@ Chip behavior is influenced by activation policy, auto-activation sensitivity, a
 
 ---
 
+## 18. Opportunity Scanner (Self-Socratic Evolution Loop)
+
+**File:** `lib/opportunity_scanner.py`
+
+The Opportunity Scanner generates self-Socratic prompts, tracks acted outcomes with strict trace linkage, and promotes high-performing opportunity patterns into EIDOS distillation observations.
+
+### Parameters (Environment Variables)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SPARK_OPPORTUNITY_SCANNER` | `1` | Master enable/disable for scanner runtime. |
+| `SPARK_OPPORTUNITY_SELF_MAX` | `3` | Max self-opportunities emitted per cycle. |
+| `SPARK_OPPORTUNITY_USER_MAX` | `2` | Max user-facing opportunities when user scan is enabled. |
+| `SPARK_OPPORTUNITY_USER_SCAN` | `0` | Opt-in switch for user-facing opportunity prompts. Self-scan remains active by default. |
+| `SPARK_OPPORTUNITY_HISTORY_MAX` | `500` | Max retained JSONL lines per scanner file. |
+| `SPARK_OPPORTUNITY_SELF_DEDUP_WINDOW_S` | `14400` | Recent-window de-dup horizon for self-opportunity questions. |
+| `SPARK_OPPORTUNITY_SELF_RECENT_LOOKBACK` | `240` | Number of recent rows inspected for de-dup checks. |
+| `SPARK_OPPORTUNITY_SELF_CATEGORY_CAP` | `1` | Per-cycle cap per category during diversity selection. |
+| `SPARK_OPPORTUNITY_OUTCOME_WINDOW_S` | `21600` | Max age window for evaluating acted outcomes against recent opportunities. |
+| `SPARK_OPPORTUNITY_OUTCOME_LOOKBACK` | `200` | Number of recent opportunities/outcomes scanned for attribution. |
+| `SPARK_OPPORTUNITY_PROMOTION_MIN_SUCCESSES` | `2` | Minimum good outcomes required before promotion candidate generation. |
+| `SPARK_OPPORTUNITY_PROMOTION_MIN_EFFECTIVENESS` | `0.66` | Minimum good/acted ratio for promotion eligibility. |
+| `SPARK_OPPORTUNITY_PROMOTION_LOOKBACK` | `400` | Rows scanned when building promotion candidates. |
+
+### Operational Checks
+
+```bash
+# Status summary (enabled, adoption_rate, recent files)
+python -c "from lib.opportunity_scanner import get_scanner_status; import json; print(json.dumps(get_scanner_status(), indent=2))"
+
+# Recent self-opportunities
+python -c "from lib.opportunity_scanner import get_recent_self_opportunities; import json; print(json.dumps(get_recent_self_opportunities(limit=5), indent=2))"
+
+# Bridge heartbeat includes scanner stats
+python -c "import json; from pathlib import Path; p=Path.home()/'.spark'/'bridge_worker_heartbeat.json'; d=json.loads(p.read_text(encoding='utf-8')); print(json.dumps((d.get('stats') or {}).get('opportunity_scanner') or {}, indent=2))"
+
+# Raw scanner artifacts (self, outcomes, promotions)
+python -c "from pathlib import Path; b=Path.home()/'.spark'/'opportunity_scanner'; print('self', (b/'self_opportunities.jsonl').exists(), 'outcomes', (b/'outcomes.jsonl').exists(), 'promotions', (b/'promoted_opportunities.jsonl').exists())"
+```
+
+---
+
 ## Monitoring Commands
 
 ```bash

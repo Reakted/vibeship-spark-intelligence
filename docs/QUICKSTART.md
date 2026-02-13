@@ -86,6 +86,30 @@ python3 -m spark.cli services
 # or: spark services
 ```
 
+### Opportunity Scanner Runtime Checks
+
+Verify scanner status and recent self-Socratic prompts:
+
+```bash
+python -c "from lib.opportunity_scanner import get_scanner_status, get_recent_self_opportunities; import json; print(json.dumps(get_scanner_status(), indent=2)); print(json.dumps(get_recent_self_opportunities(limit=5), indent=2))"
+```
+
+Verify scanner stats are present in bridge heartbeat:
+
+```bash
+python -c "import json; from pathlib import Path; p=Path.home()/'.spark'/'bridge_worker_heartbeat.json'; d=json.loads(p.read_text(encoding='utf-8')); print(json.dumps((d.get('stats') or {}).get('opportunity_scanner') or {}, indent=2))"
+```
+
+Inspect persisted scanner artifacts:
+
+```bash
+# self-opportunities
+python -c "from pathlib import Path; p=Path.home()/'.spark'/'opportunity_scanner'/'self_opportunities.jsonl'; print(p, 'exists=', p.exists())"
+
+# acted outcomes + promotion candidates
+python -c "from pathlib import Path; base=Path.home()/'.spark'/'opportunity_scanner'; print((base/'outcomes.jsonl').exists(), (base/'promoted_opportunities.jsonl').exists())"
+```
+
 The watchdog auto-restarts workers and warns when the queue grows. Set
 `SPARK_NO_WATCHDOG=1` to disable it when using the launch scripts.
 
