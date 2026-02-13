@@ -483,3 +483,36 @@ def test_generate_llm_self_candidates_blocks_deepseek(monkeypatch):
     assert rows == []
     assert meta.get("attempted") is False
     assert str(meta.get("error") or "").startswith("provider_blocked:")
+
+
+def test_generate_llm_self_candidates_honors_forced_provider(monkeypatch):
+    monkeypatch.setattr(scanner, "LLM_ENABLED", True)
+    monkeypatch.setattr(scanner, "LLM_PROVIDER", "minimax")
+    monkeypatch.setattr(scanner, "LLM_TIMEOUT_S", 0.5)
+
+    class _DummySynth:
+        AI_TIMEOUT_S = 1.0
+
+        @staticmethod
+        def _get_provider_chain(_preferred=None):
+            return ["minimax", "ollama"]
+
+        @staticmethod
+        def _query_provider(provider, _prompt):
+            if provider != "minimax":
+                raise AssertionError("forced provider should prevent fallback calls")
+            return '{"opportunities":[{"category":"verification_gap","priority":"high","confidence":0.8,"question":"What proof validates this change?","next_step":"Run one focused test.","rationale":"Need evidence."}]}'
+
+    monkeypatch.setitem(__import__("sys").modules, "lib.advisory_synthesizer", _DummySynth)
+
+    rows, meta = scanner._generate_llm_self_candidates(
+        prompts=["Improve scanner quality"],
+        edits=["def x(): return True"],
+        query="",
+        stats={},
+        kernel_ok=True,
+    )
+
+    assert len(rows) == 1
+    assert meta.get("used") is True
+    assert meta.get("provider") == "minimax"

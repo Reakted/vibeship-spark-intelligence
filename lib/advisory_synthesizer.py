@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -67,6 +68,7 @@ CACHE_TTL_S = 120
 MAX_CACHE_ENTRIES = 50
 PREFERRED_PROVIDER: Optional[str] = None
 _CONFIG_MTIME_S: Optional[float] = None
+_THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 
 
 def _sanitize_mode(raw: Any) -> str:
@@ -79,6 +81,13 @@ def _sanitize_provider(raw: Any) -> Optional[str]:
     if provider in {"", "auto", "none"}:
         return None
     return provider if provider in {"ollama", "gemini", "openai", "anthropic", "minimax"} else None
+
+
+def _strip_thinking_tags(text: Optional[str]) -> str:
+    """Strip provider reasoning blocks like <think>...</think> from output."""
+    if not text:
+        return ""
+    return _THINK_TAG_RE.sub("", text).strip()
 
 
 PREFERRED_PROVIDER = _sanitize_provider(PREFERRED_PROVIDER_ENV)
@@ -258,9 +267,9 @@ def synthesize_with_ai(
 
     for prov in providers:
         try:
-            result = _query_provider(prov, prompt)
-            if result and len(result.strip()) > 10:
-                return result.strip()
+            result = _strip_thinking_tags(_query_provider(prov, prompt))
+            if result and len(result) > 10:
+                return result
         except Exception as e:
             log_debug("advisory_synth", f"Provider {prov} failed", e)
             continue

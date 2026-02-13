@@ -286,14 +286,24 @@ class TraceCollector:
         role = payload.get('role', '')
         
         if event_type == 'user_prompt':
-            if role == 'user':
+            text = payload.get('text', '')
+            
+            # Keep: role=user (explicit user) OR role=None with text (implicit user)
+            # Skip: role=assistant (AI responses)
+            if role == 'assistant':
+                return None  # Skip assistant acknowledgments
+            
+            if role == 'user' or (role is None and text and len(text.strip()) > 5):
                 # This is a user message - extract their intent
-                text = payload.get('text', '')
                 intent = self._extract_user_intent(text)
                 intent_category = "user_intent"
-            else:
-                # This is an assistant message - skip it (not actionable)
+            elif not text or len(text.strip()) < 5:
+                # Too short to be meaningful
                 return None
+            else:
+                # Fallback - treat as user intent
+                intent = self._extract_user_intent(text)
+                intent_category = "user_intent"
         
         elif event_type in ('pre_tool', 'post_tool', 'post_tool_failure'):
             # This is a tool execution - use cached user intent if available
@@ -386,6 +396,22 @@ class TraceCollector:
             elif tool_input.get('view_range'):
                 action = f"{tool_name} (lines {tool_input['view_range']})"
         
+        # FILTER: Skip low-value/generic intents
+        if intent and len(intent.strip()) < 10 and intent_category == 'user_intent':
+            return None  # Skip short responses like "Yes", "Ok"
+        
+        if intent == 'Learning: learning':
+            return None  # Skip generic learning events
+        
+        if intent == 'Run exec command' and not tool_input.get('command'):
+            return None  # Skip generic exec without actual command
+        
+        # FILTER: Skip reads of internal Spark files
+        if intent_category == 'read' and intent:
+            skip_patterns = ['SPARK_', '.openclaw/workspace/SPARK_', 'spark_reports/']
+            if any(p in intent for p in skip_patterns):
+                return None
+        
         return TraceEvent(
             trace_id=trace_id,
             event_id=self._generate_event_id("queue"),
@@ -406,6 +432,16 @@ class TraceCollector:
     
     def _parse_advisory_event(self, event: Dict) -> Optional[TraceEvent]:
         """Parse advisory engine event."""
+        # FILTER: Skip most advisory events - they're telemetry, not real work
+        # Only keep actual advice that was emitted to the user
+        if not event.get('emitted'):
+            return None
+        
+        # Skip meta-planning task planes (telemetry, not real work)
+        task_plane = event.get('task_plane', '')
+        if task_plane in ('research_decision', 'build_delivery', 'orchestration_execution'):
+            return None
+        
         advisory_id = event.get('advisory_id') or event.get('id') or event.get('packet_id')
         trace_id = event.get('trace_id') or f"adv_{advisory_id or 'unknown'}"
         
@@ -502,6 +538,10 @@ class TraceCollector:
         """Parse detected pattern."""
         pattern_id = pattern.get('pattern_id', 'unknown')
         pattern_type = pattern.get('type', 'unknown')
+        
+        # FILTER: Skip unknown patterns - they're noise
+        if pattern_type == 'unknown':
+            return None
         
         return TraceEvent(
             trace_id=f"pat_{pattern_id}",

@@ -463,6 +463,8 @@ def _generate_llm_self_candidates(
     try:
         synth.AI_TIMEOUT_S = LLM_TIMEOUT_S
         chain = synth._get_provider_chain(LLM_PROVIDER or None)
+        if LLM_PROVIDER:
+            chain = [p for p in chain if str(p or "").strip().lower() == LLM_PROVIDER]
         chain = [p for p in chain if str(p or "").strip().lower() not in _FORBIDDEN_LLM_PROVIDERS]
         if not chain:
             meta["error"] = "no_allowed_provider"

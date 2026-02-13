@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -82,6 +83,16 @@ def _is_gibberish(text: str) -> bool:
     if leak_count >= 4:
         return True
     return False
+
+
+_THINK_TAG_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+
+
+def _strip_thinking_tags(text: Optional[str]) -> str:
+    """Strip provider reasoning blocks like <think>...</think>."""
+    if not text:
+        return ""
+    return _THINK_TAG_RE.sub("", text).strip()
 
 DEPTH_API = "http://localhost:5555"
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -289,7 +300,7 @@ class DepthAnswerGenerator:
         if not raw:
             return None
         # Strip to plain text, truncate
-        answer = raw.strip()[:_MAX_ANSWER_LENGTH]
+        answer = _strip_thinking_tags(raw)[:_MAX_ANSWER_LENGTH]
         # Coherence check
         if not answer or len(answer) < 20 or _is_gibberish(answer):
             return None

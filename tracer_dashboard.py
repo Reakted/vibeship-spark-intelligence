@@ -109,6 +109,54 @@ def get_tracer_data() -> Dict[str, Any]:
     blocked_traces = state.get_blocked_traces()
     recent_completed = state.get_recent_completed(10)
     
+    # Filter out advisory/telemetry noise (same as terminal)
+    SKIP_CATEGORIES = {'research_decision', 'build_delivery', 'unknown', 'advisory'}
+    SKIP_INTENT_PREFIXES = [
+        'research_decision_support', 'emergent_other', 'knowledge_alignment',
+        'team_coordination', 'deployment_ops', 'orchestration_execution',
+    ]
+    SKIP_TRACE_PREFIXES = ['advisory-', 'bridge_', 'bridge-', 'pattern_']
+    SKIP_GENERIC_INTENTS = ['learning: learning', 'run exec command', 'execute process']
+    SKIP_FILE_PATTERNS = ['SPARK_', 'spark_reports/', '.openclaw/workspace/SPARK_']
+    
+    def is_real_work(trace) -> bool:
+        """Check if trace represents real work, not advisory noise."""
+        # Skip advisory categories
+        if trace.intent_category in SKIP_CATEGORIES:
+            return False
+        
+        intent_lower = (trace.intent or "").lower()
+        intent = trace.intent or ""
+        
+        # Skip advisory intent prefixes
+        if any(intent_lower.startswith(prefix) for prefix in SKIP_INTENT_PREFIXES):
+            return False
+        
+        # Skip generic/low-value intents
+        if any(intent_lower == gi for gi in SKIP_GENERIC_INTENTS):
+            return False
+        
+        # Skip very short intents (like "Yes", "Ok", "Hi")
+        if len(intent.strip()) < 10:
+            return False
+        
+        # Skip meta trace IDs
+        if any(trace.trace_id.startswith(prefix) for prefix in SKIP_TRACE_PREFIXES):
+            return False
+        
+        # Skip reads of internal Spark files
+        if trace.intent_category == 'read' and intent:
+            for pattern in SKIP_FILE_PATTERNS:
+                if pattern in intent:
+                    return False
+        
+        return True
+    
+    # Filter traces
+    active_traces = [t for t in active_traces if is_real_work(t)]
+    blocked_traces = [t for t in blocked_traces if is_real_work(t)]
+    recent_completed = [t for t in recent_completed if is_real_work(t)]
+    
     # Format active traces
     active_list = []
     for t in active_traces[:20]:
