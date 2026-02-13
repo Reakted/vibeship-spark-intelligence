@@ -158,22 +158,32 @@ def _active_file_bytes() -> int:
     return max(0, size - head)
 
 
-def _iter_active_lines(path: Path) -> List[str]:
-    """Return decoded active lines from queue head to end."""
+def _iter_active_lines_iter(path: Path):
+    """Yield decoded active lines from queue head to end (streaming).
+
+    This avoids materializing the entire queue into memory.
+    """
     if not path.exists():
-        return []
+        return
     head = _queue_head_bytes()
-    out: List[str] = []
     try:
         with path.open("rb") as f:
             f.seek(head)
             for raw in f:
                 if not raw:
                     continue
-                out.append(raw.decode("utf-8", errors="replace").rstrip("\r\n"))
+                yield raw.decode("utf-8", errors="replace").rstrip("\r\n")
     except Exception as e:
         log_debug("queue", "_iter_active_lines failed", e)
-    return out
+        return
+
+
+def _iter_active_lines(path: Path) -> List[str]:
+    """Return decoded active lines from queue head to end.
+
+    Prefer _iter_active_lines_iter() in hot paths.
+    """
+    return list(_iter_active_lines_iter(path) or [])
 
 
 def _merge_overflow_locked() -> None:
@@ -302,7 +312,7 @@ def read_events(limit: int = 100, offset: int = 0) -> List[SparkEvent]:
     
     try:
         idx = 0
-        for line in _iter_active_lines(EVENTS_FILE):
+        for line in (_iter_active_lines_iter(EVENTS_FILE) or []):
             if idx < offset:
                 idx += 1
                 continue
@@ -625,7 +635,7 @@ def get_events_by_type(event_type: EventType, limit: int = 100) -> List[SparkEve
         return events
     
     try:
-        for line in _iter_active_lines(EVENTS_FILE):
+        for line in (_iter_active_lines_iter(EVENTS_FILE) or []):
             try:
                 data = json.loads(line.strip())
                 if data.get("event_type") == event_type.value:
@@ -654,7 +664,7 @@ def get_session_events(session_id: str) -> List[SparkEvent]:
         return events
     
     try:
-        for line in _iter_active_lines(EVENTS_FILE):
+        for line in (_iter_active_lines_iter(EVENTS_FILE) or []):
             try:
                 data = json.loads(line.strip())
                 if data.get("session_id") == session_id:
