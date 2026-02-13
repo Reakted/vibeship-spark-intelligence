@@ -30,6 +30,9 @@ These optimizations were shipped as isolated commits so we can `git revert <sha>
 14) `fec25da` — Memory store: patchified (chunked) storage and parent dedupe (flagged)
 15) `7c05d8b` — Memory store: optional delta compaction for near-duplicate memories (flagged)
 
+### Phase-3 advisory intelligence (2026-02-14)
+16) `5c69b10` — Outcome predictor: lightweight risk scoring + advisory gate boost (flagged)
+
 Notes:
 - Prefer `git revert <sha>` (keeps history) instead of reset.
 - For GC behavior specifically, you can override without rollback: `SPARK_BRIDGE_GC_EVERY=1`.
@@ -144,6 +147,30 @@ Look for:
 
 #### L) Delta memory compaction (store updates as deltas when near-duplicate)
 **Change:** `SPARK_MEMORY_DELTAS=1` attempts to store only the “delta” when a new memory is very similar to a recent one (same scope/project/category).
+
+---
+
+### Phase 3 advisory intelligence
+
+#### M) Outcome predictor (world-model-lite) for risk-aware advisories
+**Change:** `SPARK_OUTCOME_PREDICTOR=1` enables a tiny success/failure predictor keyed by `(phase, intent_family, tool)`.
+
+**What to look for:**
+- Cautionary advisories become slightly more insistent when Spark has evidence that a tool/intent combo often fails.
+- No added latency spikes on PreTool (predictor is just counters + cache).
+
+**Checks:**
+- Predictor file exists and grows slowly:
+  - `%USERPROFILE%\.spark\outcome_predictor.json`
+- Optional: print predictor stats:
+  ```powershell
+  python -c "from lib.outcome_predictor import get_stats; import json; print(json.dumps(get_stats(), indent=2))"
+  ```
+
+**Knobs:**
+- `SPARK_OUTCOME_PREDICTOR=1|0`
+
+---
 
 **What to look for:**
 - Repeated re-statements become short “Update (delta from …)” rows.
