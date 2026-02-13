@@ -36,6 +36,9 @@ if "%SPARK_MEMORY_PATCH_MIN_CHARS%"=="" set SPARK_MEMORY_PATCH_MIN_CHARS=120
 if "%SPARK_MEMORY_DELTAS%"=="" set SPARK_MEMORY_DELTAS=1
 if "%SPARK_MEMORY_DELTA_MIN_SIM%"=="" set SPARK_MEMORY_DELTA_MIN_SIM=0.86
 
+REM Phase 3 advisory intelligence flags (overridable via environment).
+if "%SPARK_OUTCOME_PREDICTOR%"=="" set SPARK_OUTCOME_PREDICTOR=1
+
 if "%SPARK_NO_MIND%"=="1" goto start_spark
 set MIND_PORT=%SPARK_MIND_PORT%
 if "%MIND_PORT%"=="" set MIND_PORT=8080
