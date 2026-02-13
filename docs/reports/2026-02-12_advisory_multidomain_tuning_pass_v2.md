@@ -30,7 +30,7 @@ This pass targeted weak-domain advisory quality while preserving low harmful out
 5. Benchmark tuning hooks:
 - `benchmarks/advisory_quality_ab.py`
   - profile overlays now support retrieval-policy overrides and chip tuning controls:
-    - `advisor.retrieval_policy.*`
+    - `retrieval.overrides.*`
     - `chip_advice_limit`, `chip_advice_min_score`, `chip_advice_max_files`, `chip_advice_file_tail`
     - `chip_source_boost`
 - candidate profile overlay added:

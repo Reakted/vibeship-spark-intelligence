@@ -169,8 +169,7 @@ python scripts/run_advisory_realism_domain_matrix.py \
 ```
 
 Profile overlays can now tune deeper advisor behavior in benchmark runs:
-- Benchmark-only routing override: profile `retrieval_policy.*` (applies to in-process `advisor.retrieval_policy`)
-- Live routing tuneables: `~/.spark/tuneables.json` -> `retrieval.overrides.{semantic_context_min, semantic_lexical_min, semantic_strong_override, lexical_weight}`
+- Retrieval routing thresholds (unified schema for benchmark overlays + live tuneables): `retrieval.overrides.{semantic_context_min, semantic_lexical_min, semantic_strong_override, lexical_weight}`
 - `chip_advice_limit`, `chip_advice_min_score`, `chip_advice_max_files`, `chip_advice_file_tail`
 - `chip_source_boost`
 

@@ -8,6 +8,13 @@
       "tool_cooldown_s": 120,
       "advice_repeat_cooldown_s": 3600
     },
+    "retrieval": {
+      "overrides": {
+        "semantic_context_min": 0.14,
+        "semantic_lexical_min": 0.02,
+        "semantic_strong_override": 0.9
+      }
+    },
     "advisor": {
       "max_items": 4,
       "max_advice_items": 4,
@@ -16,12 +23,7 @@
       "chip_advice_min_score": 0.4,
       "chip_advice_max_files": 8,
       "chip_advice_file_tail": 80,
-      "chip_source_boost": 1.28,
-      "retrieval_policy": {
-        "semantic_context_min": 0.14,
-        "semantic_lexical_min": 0.02,
-        "semantic_strong_override": 0.9
-      }
+      "chip_source_boost": 1.28
     }
   },
   "balanced": {
@@ -33,6 +35,13 @@
       "tool_cooldown_s": 120,
       "advice_repeat_cooldown_s": 3600
     },
+    "retrieval": {
+      "overrides": {
+        "semantic_context_min": 0.14,
+        "semantic_lexical_min": 0.02,
+        "semantic_strong_override": 0.9
+      }
+    },
     "advisor": {
       "max_items": 4,
       "max_advice_items": 4,
@@ -41,12 +50,7 @@
       "chip_advice_min_score": 0.4,
       "chip_advice_max_files": 8,
       "chip_advice_file_tail": 80,
-      "chip_source_boost": 1.28,
-      "retrieval_policy": {
-        "semantic_context_min": 0.14,
-        "semantic_lexical_min": 0.02,
-        "semantic_strong_override": 0.9
-      }
+      "chip_source_boost": 1.28
     }
   },
   "strict": {
@@ -58,6 +62,13 @@
       "tool_cooldown_s": 120,
       "advice_repeat_cooldown_s": 3600
     },
+    "retrieval": {
+      "overrides": {
+        "semantic_context_min": 0.14,
+        "semantic_lexical_min": 0.02,
+        "semantic_strong_override": 0.9
+      }
+    },
     "advisor": {
       "max_items": 4,
       "max_advice_items": 4,
@@ -66,12 +77,7 @@
       "chip_advice_min_score": 0.4,
       "chip_advice_max_files": 8,
       "chip_advice_file_tail": 80,
-      "chip_source_boost": 1.28,
-      "retrieval_policy": {
-        "semantic_context_min": 0.14,
-        "semantic_lexical_min": 0.02,
-        "semantic_strong_override": 0.9
-      }
+      "chip_source_boost": 1.28
     }
   }
 }

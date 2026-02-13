@@ -30,7 +30,7 @@ Applied temporary strict canary tuneables (with backup):
 - `advisor.max_items=3`
 - `advisor.max_advice_items=3`
 - `advisor.min_rank_score=0.62`
-- `advisor.retrieval_policy={semantic_context_min:0.22, semantic_lexical_min:0.07, semantic_strong_override:0.93, lexical_weight:0.38}`
+- `retrieval.overrides={semantic_context_min:0.22, semantic_lexical_min:0.07, semantic_strong_override:0.93, lexical_weight:0.38}`
 
 Backup path:
 - `C:\Users\USER\.spark\tuneables.json.canary_backup_20260213_152114`

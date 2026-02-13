@@ -1,13 +1,15 @@
 # Retrieval Routing A/B/C/D (Live) v1
 
-Generated at: `2026-02-13 23:11:31Z`
+Generated at: `2026-02-13 23:46:50Z`
 
 ## Purpose
 - Verify the retrieval routing tuneables are actually active (they must live under `~/.spark/tuneables.json` -> `retrieval.overrides.*`).
 - Benchmark A/B/C/D variants to pick a routing profile that improves advisory realism (primary) without destabilizing other KPIs.
 
 ## Key Finding
-- `advisor.retrieval_policy.*` in `~/.spark/tuneables.json` is not used by runtime. `lib/advisor.py` loads routing from the `retrieval` section.
+- Retrieval routing is configured in one place:
+  - `~/.spark/tuneables.json` -> `retrieval.overrides.*` (live)
+  - benchmark profile overlays -> `retrieval.overrides.*` (same schema)
 
 ## Arms
 | Arm | semantic_context_min | semantic_lexical_min | semantic_strong_override | lexical_weight |

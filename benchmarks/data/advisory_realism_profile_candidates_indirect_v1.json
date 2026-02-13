@@ -23,16 +23,18 @@
       "tool_cooldown_s": 120,
       "advice_repeat_cooldown_s": 3600
     },
-    "advisor": {
-      "max_items": 4,
-      "max_advice_items": 4,
-      "min_rank_score": 0.5,
-      "retrieval_policy": {
+    "retrieval": {
+      "overrides": {
         "semantic_context_min": 0.18,
         "semantic_lexical_min": 0.05,
         "semantic_strong_override": 0.92,
         "lexical_weight": 0.32
       }
+    },
+    "advisor": {
+      "max_items": 4,
+      "max_advice_items": 4,
+      "min_rank_score": 0.5
     }
   },
   "C_chip_targeted": {
@@ -64,6 +66,14 @@
       "tool_cooldown_s": 120,
       "advice_repeat_cooldown_s": 3600
     },
+    "retrieval": {
+      "overrides": {
+        "semantic_context_min": 0.18,
+        "semantic_lexical_min": 0.05,
+        "semantic_strong_override": 0.92,
+        "lexical_weight": 0.32
+      }
+    },
     "advisor": {
       "max_items": 4,
       "max_advice_items": 4,
@@ -72,13 +82,7 @@
       "chip_advice_min_score": 0.45,
       "chip_advice_max_files": 6,
       "chip_advice_file_tail": 60,
-      "chip_source_boost": 1.22,
-      "retrieval_policy": {
-        "semantic_context_min": 0.18,
-        "semantic_lexical_min": 0.05,
-        "semantic_strong_override": 0.92,
-        "lexical_weight": 0.32
-      }
+      "chip_source_boost": 1.22
     }
   }
 }

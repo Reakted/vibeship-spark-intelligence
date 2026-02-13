@@ -271,7 +271,15 @@ def _extract_decision_event(rows: List[Dict[str, Any]], trace_id: str) -> Dict[s
     return candidates[-1]
 
 
-def _apply_advisor_profile(advisor_mod: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
+_WARNED_PROFILE_RETRIEVAL_POLICY = False
+
+
+def _apply_advisor_profile(
+    advisor_mod: Any,
+    cfg: Dict[str, Any],
+    *,
+    retrieval_overrides: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     advisor = advisor_mod.get_advisor()
     snap = {
         "MAX_ADVICE_ITEMS": int(getattr(advisor_mod, "MAX_ADVICE_ITEMS", 8)),
@@ -302,7 +310,23 @@ def _apply_advisor_profile(advisor_mod: Any, cfg: Dict[str, Any]) -> Dict[str, A
             advisor._SOURCE_BOOST["chip"] = max(0.1, min(3.0, float(cfg.get("chip_source_boost") or snap["CHIP_SOURCE_BOOST"])))
         except Exception:
             pass
-    policy_overrides = cfg.get("retrieval_policy")
+
+    # Unified: benchmark profile overlays should use the same shape as live tuneables:
+    #   profile_cfg.retrieval.overrides.*  <->  ~/.spark/tuneables.json -> retrieval.overrides.*
+    #
+    # Legacy: some profile files used advisor.retrieval_policy.*; keep backward compat.
+    policy_overrides = retrieval_overrides if isinstance(retrieval_overrides, dict) else None
+    legacy = cfg.get("retrieval_policy")
+    if policy_overrides is None and isinstance(legacy, dict):
+        global _WARNED_PROFILE_RETRIEVAL_POLICY
+        if not _WARNED_PROFILE_RETRIEVAL_POLICY:
+            _WARNED_PROFILE_RETRIEVAL_POLICY = True
+            sys.stderr.write(
+                "[SPARK][warn] benchmark profile uses advisor.retrieval_policy.*; "
+                "prefer profile retrieval.overrides.* for consistency with live tuneables.\n"
+            )
+        policy_overrides = legacy
+
     if isinstance(policy_overrides, dict):
         merged_policy = copy.deepcopy(snap["RETRIEVAL_POLICY"])
         merged_policy.update(policy_overrides)
@@ -386,7 +410,17 @@ def run_profile(
     try:
         advisory_engine.apply_engine_config(profile_cfg.get("advisory_engine") or {})
         advisory_gate.apply_gate_config(profile_cfg.get("advisory_gate") or {})
-        advisor_snapshot = _apply_advisor_profile(advisor_mod, profile_cfg.get("advisor") or {})
+        retrieval_cfg = profile_cfg.get("retrieval") or {}
+        retrieval_overrides = None
+        if isinstance(retrieval_cfg, dict):
+            overrides = retrieval_cfg.get("overrides")
+            if isinstance(overrides, dict):
+                retrieval_overrides = overrides
+        advisor_snapshot = _apply_advisor_profile(
+            advisor_mod,
+            profile_cfg.get("advisor") or {},
+            retrieval_overrides=retrieval_overrides,
+        )
 
         if force_live:
             advisory_packet_store.lookup_exact = lambda **_kwargs: None  # type: ignore[assignment]

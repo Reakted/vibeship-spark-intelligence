@@ -8,16 +8,18 @@
       "tool_cooldown_s": 120,
       "advice_repeat_cooldown_s": 3600
     },
-    "advisor": {
-      "max_items": 4,
-      "max_advice_items": 4,
-      "min_rank_score": 0.5,
-      "retrieval_policy": {
+    "retrieval": {
+      "overrides": {
         "semantic_context_min": 0.18,
         "semantic_lexical_min": 0.05,
         "semantic_strong_override": 0.92,
         "lexical_weight": 0.32
       }
+    },
+    "advisor": {
+      "max_items": 4,
+      "max_advice_items": 4,
+      "min_rank_score": 0.5
     }
   },
   "balanced": {
@@ -29,16 +31,18 @@
       "tool_cooldown_s": 180,
       "advice_repeat_cooldown_s": 7200
     },
-    "advisor": {
-      "max_items": 3,
-      "max_advice_items": 3,
-      "min_rank_score": 0.58,
-      "retrieval_policy": {
+    "retrieval": {
+      "overrides": {
         "semantic_context_min": 0.2,
         "semantic_lexical_min": 0.06,
         "semantic_strong_override": 0.92,
         "lexical_weight": 0.35
       }
+    },
+    "advisor": {
+      "max_items": 3,
+      "max_advice_items": 3,
+      "min_rank_score": 0.58
     }
   },
   "strict": {
@@ -50,16 +54,18 @@
       "tool_cooldown_s": 240,
       "advice_repeat_cooldown_s": 10800
     },
-    "advisor": {
-      "max_items": 3,
-      "max_advice_items": 3,
-      "min_rank_score": 0.62,
-      "retrieval_policy": {
+    "retrieval": {
+      "overrides": {
         "semantic_context_min": 0.22,
         "semantic_lexical_min": 0.07,
         "semantic_strong_override": 0.93,
         "lexical_weight": 0.38
       }
+    },
+    "advisor": {
+      "max_items": 3,
+      "max_advice_items": 3,
+      "min_rank_score": 0.62
     }
   }
 }

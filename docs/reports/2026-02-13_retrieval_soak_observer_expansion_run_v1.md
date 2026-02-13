@@ -78,6 +78,7 @@ Sanity output:
 Verified in `C:\Users\USER\.spark\tuneables.json`:
 - advisory defaults remain balanced (`7200/120/3600`, `max_items=4`, `min_rank=0.5`)
 - retrieval-v2 canary remains active:
+  - via `retrieval.overrides.*`
   - `semantic_context_min=0.18`
   - `semantic_lexical_min=0.05`
   - `semantic_strong_override=0.92`
@@ -88,4 +89,3 @@ Verified in `C:\Users\USER\.spark\tuneables.json`:
 1. Retrieval-v2 remains promising but not ready for full promotion because shadow contract still fails the same two gates.
 2. Observer expansion confirmed the core bottleneck is still telemetry-heavy observer output quality, not advisory gate tuning.
 3. Next highest-value benchmark should focus on improving signal richness in observer outputs, then rerun retrieval-v2 contract/shadow.
-
