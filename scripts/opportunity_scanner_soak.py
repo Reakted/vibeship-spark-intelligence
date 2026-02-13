@@ -27,10 +27,13 @@ class Tick:
 
 
 def _read_json(path: Path) -> Optional[Dict[str, Any]]:
-    try:
-        return json.loads(path.read_text(encoding="utf-8", errors="ignore"))
-    except Exception:
-        return None
+    # Heartbeat is written via overwrite; on Windows we can occasionally read a partial file.
+    for _ in range(3):
+        try:
+            return json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+        except Exception:
+            time.sleep(0.05)
+    return None
 
 
 def _append_queue_events(*, prompt_text: str, edit_text: str = "") -> Tuple[str, str]:
@@ -155,10 +158,19 @@ def main() -> int:
         if injections < int(args.inject_count) and now >= next_inject:
             injections += 1
             next_inject = now + max(10, int(args.inject_every_s))
+            prompt_variants = [
+                "Tune novelty: avoid repeating evergreen prompts when context is thin.",
+                "Tune evidence: add measurable proof checks before persisting an opportunity.",
+                "Tune reversibility: add rollback criteria for any new autonomous behavior.",
+                "Tune safety: ensure humanity guardrails are explicit and non-telemetry.",
+                "Tune SLO: ensure >= 1 novel Minimax opportunity per 10 contextful cycles.",
+                "Tune reliability: minimize minimax empty/timeout by bounding context and retrying.",
+            ]
+            variant = prompt_variants[(injections - 1) % len(prompt_variants)]
             _append_queue_events(
                 prompt_text=(
-                    "Opportunity Scanner soak: generate 2 novel self-improvement opportunities. "
-                    "Include measurable proof and rollback criteria. Avoid telemetry."
+                    f"Opportunity Scanner soak ({injections}): {variant} "
+                    "Generate 2 novel self-improvement opportunities. Include measurable proof and rollback criteria. Avoid telemetry."
                 ),
                 edit_text="# soak: update scanner quality gate and SLO instrumentation\n",
             )
@@ -207,7 +219,7 @@ def main() -> int:
 
     out_dir = Path("docs") / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{time.strftime('%Y-%m-%d')}_opportunity_scanner_soak_summary.json"
+    out_path = out_dir / f"{time.strftime('%Y-%m-%d')}_opportunity_scanner_soak_summary_{int(start_ts)}.json"
     out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=True))
     return 0
@@ -215,4 +227,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
