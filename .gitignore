@@ -73,6 +73,11 @@ htmlcov/
 logs/
 tmp/
 
+# Run artifacts (keep canonical summaries tracked; stash per-run outputs)
+docs/reports/_runs/
+dashboard_out.txt
+dashboard_err.txt
+
 # Local npm scratch files (not tracked in repo)
 package.json
 package-lock.json
