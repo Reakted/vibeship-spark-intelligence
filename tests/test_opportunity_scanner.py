@@ -471,6 +471,9 @@ def test_scan_runtime_opportunities_merges_llm_candidates(monkeypatch, tmp_path:
 def test_generate_llm_self_candidates_blocks_deepseek(monkeypatch):
     monkeypatch.setattr(scanner, "LLM_ENABLED", True)
     monkeypatch.setattr(scanner, "LLM_PROVIDER", "deepseek")
+    monkeypatch.setattr(scanner, "LLM_MIN_CONTEXT_CHARS", 10)
+    monkeypatch.setattr(scanner, "LLM_COOLDOWN_S", 0.0)
+    scanner._LAST_LLM_ATTEMPT_BY_SESSION.clear()
 
     rows, meta = scanner._generate_llm_self_candidates(
         prompts=["Improve Spark autonomy with measurable checks"],
@@ -478,6 +481,7 @@ def test_generate_llm_self_candidates_blocks_deepseek(monkeypatch):
         query="",
         stats={},
         kernel_ok=True,
+        session_id="s1",
     )
 
     assert rows == []
@@ -489,6 +493,9 @@ def test_generate_llm_self_candidates_honors_forced_provider(monkeypatch):
     monkeypatch.setattr(scanner, "LLM_ENABLED", True)
     monkeypatch.setattr(scanner, "LLM_PROVIDER", "minimax")
     monkeypatch.setattr(scanner, "LLM_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(scanner, "LLM_MIN_CONTEXT_CHARS", 10)
+    monkeypatch.setattr(scanner, "LLM_COOLDOWN_S", 0.0)
+    scanner._LAST_LLM_ATTEMPT_BY_SESSION.clear()
 
     class _DummySynth:
         AI_TIMEOUT_S = 1.0
@@ -511,6 +518,7 @@ def test_generate_llm_self_candidates_honors_forced_provider(monkeypatch):
         query="",
         stats={},
         kernel_ok=True,
+        session_id="s1",
     )
 
     assert len(rows) == 1
@@ -522,6 +530,9 @@ def test_generate_llm_self_candidates_surfaces_empty_or_timeout(monkeypatch):
     monkeypatch.setattr(scanner, "LLM_ENABLED", True)
     monkeypatch.setattr(scanner, "LLM_PROVIDER", "minimax")
     monkeypatch.setattr(scanner, "LLM_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(scanner, "LLM_MIN_CONTEXT_CHARS", 10)
+    monkeypatch.setattr(scanner, "LLM_COOLDOWN_S", 0.0)
+    scanner._LAST_LLM_ATTEMPT_BY_SESSION.clear()
 
     class _DummySynth:
         AI_TIMEOUT_S = 1.0
@@ -542,12 +553,58 @@ def test_generate_llm_self_candidates_surfaces_empty_or_timeout(monkeypatch):
         query="",
         stats={},
         kernel_ok=True,
+        session_id="s1",
     )
 
     assert rows == []
     assert meta.get("attempted") is True
     assert meta.get("used") is False
     assert str(meta.get("error") or "").startswith("minimax:empty_or_timeout")
+
+
+def test_generate_llm_self_candidates_respects_cooldown(monkeypatch):
+    monkeypatch.setattr(scanner, "LLM_ENABLED", True)
+    monkeypatch.setattr(scanner, "LLM_PROVIDER", "minimax")
+    monkeypatch.setattr(scanner, "LLM_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(scanner, "LLM_COOLDOWN_S", 9999.0)
+    monkeypatch.setattr(scanner, "LLM_MIN_CONTEXT_CHARS", 10)
+    scanner._LAST_LLM_ATTEMPT_BY_SESSION.clear()
+
+    class _DummySynth:
+        AI_TIMEOUT_S = 1.0
+
+        @staticmethod
+        def _get_provider_chain(_preferred=None):
+            return ["minimax"]
+
+        @staticmethod
+        def _query_provider(_provider, _prompt):
+            return '{"opportunities":[{"category":"verification_gap","priority":"high","confidence":0.8,"question":"What proof validates this change?","next_step":"Run one focused test.","rationale":"Need evidence."}]}'
+
+    monkeypatch.setitem(__import__("sys").modules, "lib.advisory_synthesizer", _DummySynth)
+
+    rows1, meta1 = scanner._generate_llm_self_candidates(
+        prompts=["Improve scanner quality"],
+        edits=["def x(): return True"],
+        query="",
+        stats={},
+        kernel_ok=True,
+        session_id="s_cool",
+    )
+    assert len(rows1) == 1
+    assert meta1.get("attempted") is True
+
+    rows2, meta2 = scanner._generate_llm_self_candidates(
+        prompts=["Improve scanner quality"],
+        edits=["def x(): return True"],
+        query="",
+        stats={},
+        kernel_ok=True,
+        session_id="s_cool",
+    )
+    assert rows2 == []
+    assert meta2.get("attempted") is False
+    assert meta2.get("skipped_reason") == "cooldown"
 
 
 def test_extract_json_candidate_handles_think_wrapped_multiple_json_objects():

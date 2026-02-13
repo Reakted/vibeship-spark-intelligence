@@ -63,6 +63,8 @@ LLM_ENABLED = str(os.getenv("SPARK_OPPORTUNITY_LLM_ENABLED", "1")).strip().lower
 LLM_PROVIDER = str(os.getenv("SPARK_OPPORTUNITY_LLM_PROVIDER", "") or "").strip().lower()
 LLM_TIMEOUT_S = max(0.3, float(os.getenv("SPARK_OPPORTUNITY_LLM_TIMEOUT_S", "2.5") or 2.5))
 LLM_MAX_ITEMS = max(1, int(os.getenv("SPARK_OPPORTUNITY_LLM_MAX_ITEMS", "3") or 3))
+LLM_MIN_CONTEXT_CHARS = max(0, int(os.getenv("SPARK_OPPORTUNITY_LLM_MIN_CONTEXT_CHARS", "140") or 140))
+LLM_COOLDOWN_S = max(0.0, float(os.getenv("SPARK_OPPORTUNITY_LLM_COOLDOWN_S", "300") or 300))
 
 _TELEMETRY_MARKERS = (
     "tool_",
@@ -101,6 +103,7 @@ _SELF_CATEGORY_ALLOWLIST = {
     "compounding_learning",
 }
 _FORBIDDEN_LLM_PROVIDERS = {"deepseek", "deep-seek"}
+_LAST_LLM_ATTEMPT_BY_SESSION: Dict[str, float] = {}
 
 _QUESTION_STOPWORDS = {
     "the",
@@ -418,6 +421,7 @@ def _sanitize_llm_self_rows(rows: Any) -> List[Dict[str, Any]]:
                 "question": question,
                 "next_step": next_step,
                 "rationale": rationale or "LLM-suggested self-improvement opportunity.",
+                "source": "llm",
             }
         )
         if len(out) >= LLM_MAX_ITEMS:
@@ -432,6 +436,7 @@ def _generate_llm_self_candidates(
     query: str,
     stats: Dict[str, Any],
     kernel_ok: bool,
+    session_id: str = "default",
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     meta: Dict[str, Any] = {
         "enabled": bool(LLM_ENABLED),
@@ -440,6 +445,7 @@ def _generate_llm_self_candidates(
         "provider": None,
         "error": None,
         "candidates": 0,
+        "skipped_reason": None,
     }
     if not LLM_ENABLED:
         return [], meta
@@ -449,8 +455,17 @@ def _generate_llm_self_candidates(
 
     context_bits = prompts[-3:] + edits[-2:] + ([query] if query else [])
     context_text = " ".join(str(x or "").strip() for x in context_bits if str(x or "").strip()).strip()
-    if len(context_text) < 24:
+    if len(context_text) < max(24, int(LLM_MIN_CONTEXT_CHARS or 0)):
+        meta["skipped_reason"] = "insufficient_context"
         return [], meta
+    try:
+        now = time.time()
+        last = float(_LAST_LLM_ATTEMPT_BY_SESSION.get(str(session_id or "default"), 0.0) or 0.0)
+        if float(LLM_COOLDOWN_S or 0.0) > 0 and last > 0 and (now - last) < float(LLM_COOLDOWN_S or 0.0):
+            meta["skipped_reason"] = "cooldown"
+            return [], meta
+    except Exception:
+        pass
 
     try:
         from . import advisory_synthesizer as synth
@@ -495,6 +510,7 @@ def _generate_llm_self_candidates(
                 if str(provider or "").strip().lower() == "minimax":
                     provider_timeout = max(provider_timeout, 12.0)
                 synth.AI_TIMEOUT_S = provider_timeout
+                _LAST_LLM_ATTEMPT_BY_SESSION[str(session_id or "default")] = time.time()
                 raw = synth._query_provider(provider, prompt)
             except Exception as e:
                 last_error = f"{provider}:{type(e).__name__}"
@@ -512,6 +528,9 @@ def _generate_llm_self_candidates(
             meta["used"] = True
             meta["provider"] = provider
             meta["candidates"] = len(rows)
+            for r in rows:
+                if isinstance(r, dict):
+                    r.setdefault("llm_provider", provider)
             return rows, meta
         if last_error:
             meta["error"] = last_error
@@ -710,6 +729,8 @@ def _derive_self_candidates(
                 "rationale": "Compounding intelligence requires explicit transfer, not implicit recall.",
             }
         )
+    for r in rows:
+        r.setdefault("source", "heuristic")
     return rows
 
 
@@ -1043,6 +1064,7 @@ def scan_runtime_opportunities(
         query=query,
         stats=spark_stats,
         kernel_ok=kernel_ok,
+        session_id=str(session_id or "default"),
     )
     if llm_candidates:
         candidates.extend(llm_candidates)
@@ -1052,6 +1074,12 @@ def scan_runtime_opportunities(
         max_items=SELF_MAX_ITEMS,
         recent_keys=recent_keys,
     )
+    try:
+        llm_meta["selected"] = int(
+            sum(1 for r in (deduped or []) if isinstance(r, dict) and str(r.get("source") or "").strip().lower() == "llm")
+        )
+    except Exception:
+        llm_meta["selected"] = 0
 
     now_ts = time.time()
     persisted = 0
