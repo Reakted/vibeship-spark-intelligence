@@ -25,6 +25,7 @@ from lib.chips import process_chip_events
 from lib.chip_merger import merge_chip_insights
 from lib.context_sync import sync_context
 from lib.diagnostics import log_debug
+from lib.opportunity_scanner import scan_runtime_opportunities
 from lib.runtime_hygiene import cleanup_runtime_artifacts
 
 
@@ -315,6 +316,29 @@ def run_bridge_cycle(
         except Exception as e:
             stats["errors"].append("cognitive_signals")
             log_debug("bridge_worker", "cognitive signal extraction failed", e)
+
+        # --- Opportunity scanner (self-evolution loop) ---
+        def _scan_opportunities() -> Dict[str, Any]:
+            scan_session = "default"
+            for ev in reversed(events or []):
+                sid = str(getattr(ev, "session_id", "") or "").strip()
+                if sid:
+                    scan_session = sid
+                    break
+            return scan_runtime_opportunities(
+                events or [],
+                stats=stats,
+                query=query or "",
+                session_id=scan_session,
+                persist=True,
+            )
+
+        ok, opportunity_stats, error = _run_step("opportunity_scanner", _scan_opportunities, timeout_s=15)
+        if ok:
+            stats["opportunity_scanner"] = opportunity_stats or {}
+        else:
+            stats["errors"].append("opportunity_scanner")
+            log_debug("bridge_worker", f"opportunity scanner failed ({error})", None)
 
         # TODO: Filter chips by project context (game-dev shouldn't fire during spark-checker work)
         # See: spark_reports/day1_fixes_plan.md for details
@@ -899,6 +923,12 @@ def _maybe_notify_openclaw(stats: Dict[str, Any]) -> None:
     if stats.get("eidos_distillation"):
         findings.append("EIDOS identity updated")
 
+    # Check Opportunity Scanner loop output
+    opp = stats.get("opportunity_scanner") or {}
+    opp_count = int(opp.get("opportunities_found") or 0)
+    if opp_count > 0:
+        findings.append(f"opportunity scanner found {opp_count} self-improvement prompts")
+
     if not findings:
         return
 
@@ -933,6 +963,7 @@ def write_bridge_heartbeat(stats: Dict[str, Any]) -> bool:
                 "sync": stats.get("sync") or {},
                 "llm_advisory": bool(stats.get("llm_advisory")),
                 "eidos_distillation": bool(stats.get("eidos_distillation")),
+                "opportunity_scanner": stats.get("opportunity_scanner") or {},
                 "errors": stats.get("errors") or [],
             },
         }

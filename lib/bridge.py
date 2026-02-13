@@ -18,6 +18,7 @@ from lib.tastebank import infer_domain as taste_infer_domain, retrieve as taste_
 from lib.diagnostics import log_debug
 from lib.exposure_tracker import record_exposures, infer_latest_session_id, infer_latest_trace_id
 from lib.project_profile import load_profile, get_suggested_questions
+from lib.opportunity_scanner import get_recent_self_opportunities
 from lib.outcome_checkin import list_checkins
 
 # Paths
@@ -502,6 +503,25 @@ def generate_active_context(query: Optional[str] = None) -> str:
                 reason = item.get("reason") or item.get("event") or "check-in"
                 lines.append(f"- {reason}")
             lines.append("")
+
+    # Opportunity Scanner: self-Socratic path (Spark questions itself)
+    self_ops = []
+    try:
+        self_ops = get_recent_self_opportunities(limit=2)
+    except Exception as e:
+        log_debug("bridge", "recent self opportunities failed", e)
+    if self_ops:
+        lines.append("## Opportunity Scanner")
+        for row in self_ops[:2]:
+            question = str(row.get("question") or "").strip()
+            next_step = str(row.get("next_step") or "").strip()
+            if not question:
+                continue
+            if next_step:
+                lines.append(f"- [Spark] {question} -> {next_step}")
+            else:
+                lines.append(f"- [Spark] {question}")
+        lines.append("")
 
     if contextual:
         lines.append("## Relevant Right Now")

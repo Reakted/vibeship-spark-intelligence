@@ -1044,23 +1044,32 @@ class SparkAdvisor:
         # 4. Get tool-specific learnings
         advice_list.extend(self._get_tool_specific_advice(tool_name))
 
-        # 5. Get surprise-based cautions
+        # 5. Get opportunity-scanner prompts (Socratic opportunity lens)
+        advice_list.extend(
+            self._get_opportunity_advice(
+                tool_name=tool_name,
+                context_raw=context_raw,
+                task_context=task_context,
+            )
+        )
+
+        # 6. Get surprise-based cautions
         advice_list.extend(self._get_surprise_advice(tool_name, context))
 
-        # 6. Get skill-based hints
+        # 7. Get skill-based hints
         advice_list.extend(self._get_skill_advice(context))
 
-        # 7. Get EIDOS distillations (extracted rules from patterns)
+        # 8. Get EIDOS distillations (extracted rules from patterns)
         if HAS_EIDOS:
             advice_list.extend(self._get_eidos_advice(tool_name, context))
 
-        # 8. Get conversation intelligence advice (ConvoIQ)
+        # 9. Get conversation intelligence advice (ConvoIQ)
         advice_list.extend(self._get_convo_advice(tool_name, context))
 
-        # 9. Get engagement pulse advice
+        # 10. Get engagement pulse advice
         advice_list.extend(self._get_engagement_advice(tool_name, context))
 
-        # 10. Get niche intelligence advice
+        # 11. Get niche intelligence advice
         advice_list.extend(self._get_niche_advice(tool_name, context))
 
         # Global domain guard: do not let X-social specific learnings leak
@@ -1709,6 +1718,63 @@ class SparkAdvisor:
 
         return advice
 
+    def _get_opportunity_advice(
+        self,
+        *,
+        tool_name: str,
+        context_raw: str,
+        task_context: str = "",
+    ) -> List[Advice]:
+        """Generate Socratic opportunity prompts for user-facing guidance."""
+        try:
+            from .opportunity_scanner import generate_user_opportunities
+        except Exception:
+            return []
+
+        try:
+            rows = generate_user_opportunities(
+                tool_name=tool_name,
+                context=context_raw,
+                task_context=task_context,
+                session_id="default",
+                persist=False,
+            )
+        except Exception:
+            return []
+        if not rows:
+            return []
+
+        out: List[Advice] = []
+        for row in rows:
+            question = str(row.get("question") or "").strip()
+            next_step = str(row.get("next_step") or "").strip()
+            if not question:
+                continue
+            text = f"[Opportunity] Ask: {question}"
+            if next_step:
+                text = f"{text} Next: {next_step}"
+            out.append(
+                Advice(
+                    advice_id=self._generate_advice_id(f"opportunity:{tool_name}:{question}"),
+                    insight_key=f"opportunity:{str(row.get('category') or 'general')}",
+                    text=text,
+                    confidence=float(row.get("confidence") or 0.65),
+                    source="opportunity",
+                    context_match=max(
+                        0.55,
+                        float(
+                            row.get("context_match")
+                            or self._calculate_context_match(question, context_raw)
+                        ),
+                    ),
+                    reason=str(
+                        row.get("rationale")
+                        or "Opportunity scanner: Socratic improvement prompt"
+                    ),
+                )
+            )
+        return out
+
     def _get_chip_advice(self, context: str) -> List[Advice]:
         """Get advice from recent high-quality chip insights."""
         advice: List[Advice] = []
@@ -2243,6 +2309,7 @@ class SparkAdvisor:
         "semantic-hybrid": 1.08,  # Backward-compatible label for hybrid retrieval
         "semantic-agentic": 1.12,  # Agentic retrieval over semantic shortlist
         "trigger": 1.2,         # Explicit trigger rules
+        "opportunity": 1.18,    # Socratic opportunity prompts
     }
 
     def _rank_score(self, a: Advice) -> float:

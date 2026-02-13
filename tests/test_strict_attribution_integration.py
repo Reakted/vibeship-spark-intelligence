@@ -38,6 +38,7 @@ def _patch_advisor_retrieval(monkeypatch: pytest.MonkeyPatch, advice_items: list
     )
     monkeypatch.setattr(advisor_mod.SparkAdvisor, "_get_chip_advice", lambda _s, _c: [])
     monkeypatch.setattr(advisor_mod.SparkAdvisor, "_get_tool_specific_advice", lambda _s, _t: [])
+    monkeypatch.setattr(advisor_mod.SparkAdvisor, "_get_opportunity_advice", lambda _s, **_k: [])
     monkeypatch.setattr(advisor_mod.SparkAdvisor, "_get_surprise_advice", lambda _s, _t, _c: [])
     monkeypatch.setattr(advisor_mod.SparkAdvisor, "_get_skill_advice", lambda _s, _c: [])
     monkeypatch.setattr(advisor_mod.SparkAdvisor, "_get_convo_advice", lambda _s, _t, _c: [])
