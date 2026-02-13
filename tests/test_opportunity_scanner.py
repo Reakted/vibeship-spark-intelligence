@@ -608,3 +608,32 @@ def test_scan_runtime_opportunities_does_not_repersist_recent_duplicates(tmp_pat
     # Second run may still output repeated items, but it should not keep appending
     # identical questions into history inside the dedup window.
     assert n2 == n1
+
+
+def test_select_diverse_self_rows_returns_empty_if_all_recent():
+    candidates = [
+        {
+            "category": "humanity_guardrail",
+            "priority": "medium",
+            "confidence": 0.7,
+            "question": "How does this help people and reduce downside?",
+            "next_step": "State benefit and harm check.",
+            "rationale": "x",
+        }
+    ]
+    rk = {scanner._question_key("How does this help people and reduce downside?")}
+    selected, filtered = scanner._select_diverse_self_rows(candidates, max_items=3, recent_keys=rk)
+    assert selected == []
+    assert filtered >= 1
+
+
+def test_scan_runtime_opportunities_emits_nothing_when_no_context(monkeypatch, tmp_path):
+    # No events + empty query should not emit evergreen prompts.
+    monkeypatch.setattr(scanner, "SELF_FILE", tmp_path / "self.jsonl")
+    monkeypatch.setattr(scanner, "OUTCOME_FILE", tmp_path / "outcomes.jsonl")
+    monkeypatch.setattr(scanner, "SCANNER_ENABLED", True)
+    monkeypatch.setattr(scanner, "LLM_ENABLED", True)
+
+    out = scanner.scan_runtime_opportunities([], stats={}, query="", session_id="s0", persist=False)
+    assert out.get("opportunities_found") == 0
+    assert out.get("self_opportunities") == []

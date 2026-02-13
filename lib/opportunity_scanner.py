@@ -622,18 +622,6 @@ def _select_diverse_self_rows(
             if len(selected) >= max_items:
                 return selected, filtered_recent
 
-    # Pass 3: if everything is repeated, still provide bounded output.
-    if not selected and len(selected) < max_items:
-        seen = {_question_key(str(r.get("question") or "")) for r in selected}
-        for row in merged:
-            key = _question_key(str(row.get("question") or ""))
-            if key in seen:
-                continue
-            selected.append(row)
-            seen.add(key)
-            if len(selected) >= max_items:
-                break
-
     return selected, filtered_recent
 
 
@@ -1002,6 +990,8 @@ def scan_runtime_opportunities(
                 continue
             edits.append(text[:1200])
 
+    has_context = bool(prompts or edits or (str(query or "").strip() and len(str(query or "").strip()) >= 24))
+
     primary_trace_id = _select_primary_trace_id(events)
     combined_text = " ".join(prompts + edits + [query]).strip()
     outcome_stats = _track_recent_outcomes(
@@ -1019,6 +1009,26 @@ def scan_runtime_opportunities(
     except Exception:
         kernel_ok = False
     mode = "conscious" if kernel_ok else "conservative"
+
+    if not has_context:
+        # No new meaningful work context; do not spam the same evergreen prompts.
+        # (We still ran outcome tracking above to keep the loop's attribution consistent.)
+        return {
+            "enabled": True,
+            "kernel_pass": kernel_ok,
+            "mode": mode,
+            "captured_prompts": len(prompts),
+            "captured_edits": len(edits),
+            "telemetry_filtered": telemetry_filtered,
+            "dedup_recent_filtered": 0,
+            "outcomes_tracked": int(outcome_stats.get("tracked") or 0),
+            "outcomes_improved": int(outcome_stats.get("improved") or 0),
+            "llm": base["llm"],
+            "promoted_candidates": promoted_candidates,
+            "opportunities_found": 0,
+            "self_opportunities": [],
+            "persisted": 0,
+        }
 
     candidates = _derive_self_candidates(
         prompts=prompts,
