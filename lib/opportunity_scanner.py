@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import hashlib
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -43,6 +44,9 @@ USER_SCAN_ENABLED = str(os.getenv("SPARK_OPPORTUNITY_USER_SCAN", "0")).strip().l
 OPPORTUNITY_DIR = Path.home() / ".spark" / "opportunity_scanner"
 SELF_FILE = OPPORTUNITY_DIR / "self_opportunities.jsonl"
 USER_FILE = OPPORTUNITY_DIR / "user_opportunities.jsonl"
+OUTCOME_FILE = OPPORTUNITY_DIR / "outcomes.jsonl"
+OUTCOME_WINDOW_S = max(300.0, float(os.getenv("SPARK_OPPORTUNITY_OUTCOME_WINDOW_S", "21600") or 21600.0))
+OUTCOME_LOOKBACK = max(20, int(os.getenv("SPARK_OPPORTUNITY_OUTCOME_LOOKBACK", "200") or 200))
 
 _TELEMETRY_MARKERS = (
     "tool_",
@@ -184,6 +188,98 @@ def _extract_edit_text(ev: Any) -> str:
         or ""
     )
     return str(text or "").strip()
+
+
+def _extract_trace_id(ev: Any) -> str:
+    data = getattr(ev, "data", {}) or {}
+    if not isinstance(data, dict):
+        data = {}
+    tid = str(data.get("trace_id") or "").strip()
+    if tid:
+        return tid
+    payload = data.get("payload")
+    if isinstance(payload, dict):
+        return str(payload.get("trace_id") or "").strip()
+    return ""
+
+
+def _select_primary_trace_id(events: Sequence[Any]) -> str:
+    for ev in reversed(list(events or [])):
+        tid = _extract_trace_id(ev)
+        if tid:
+            return tid
+    return ""
+
+
+def _opportunity_id(
+    *,
+    session_id: str,
+    category: str,
+    question: str,
+    ts: float,
+) -> str:
+    seed = f"{session_id}|{category}|{question}|{ts:.6f}"
+    return f"opp:{hashlib.sha1(seed.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _load_recorded_outcome_ids() -> set[str]:
+    rows = _tail_jsonl(OUTCOME_FILE, OUTCOME_LOOKBACK * 3)
+    out: set[str] = set()
+    for row in rows:
+        oid = str(row.get("opportunity_id") or "").strip()
+        if oid:
+            out.add(oid)
+    return out
+
+
+def _evaluate_opportunity_signal(category: str, text: str, stats: Dict[str, Any]) -> tuple[bool, bool, str]:
+    cat = str(category or "").strip().lower()
+    tl = str(text or "").lower()
+    validation = stats.get("validation") if isinstance(stats, dict) else {}
+    validation = validation if isinstance(validation, dict) else {}
+
+    if cat == "verification_gap":
+        matched = int(validation.get("matched") or 0)
+        proved = _mentions_any(tl, ("pytest", "test", "assert", "verified", "validation", "proof", "smoke"))
+        improved = bool(proved or matched > 0)
+        acted = improved or _mentions_any(tl, ("check", "verify", "run test"))
+        evidence = "verification evidence detected" if improved else "verification still weak"
+        return acted, improved, evidence
+
+    if cat == "outcome_clarity":
+        improved = _mentions_any(tl, ("definition of done", "success criteria", "acceptance", "done when"))
+        acted = improved or _mentions_any(tl, ("outcome", "done", "success"))
+        evidence = "success criteria surfaced" if improved else "success criteria still implicit"
+        return acted, improved, evidence
+
+    if cat == "assumption_audit":
+        improved = _mentions_any(tl, ("hypothesis", "assumption", "falsifiable", "disprove", "experiment"))
+        acted = improved or _mentions_any(tl, ("debug", "root cause"))
+        evidence = "assumption testing signal found" if improved else "assumption audit not explicit"
+        return acted, improved, evidence
+
+    if cat == "reversibility":
+        improved = _mentions_any(tl, ("rollback", "fallback", "reversible", "undo plan", "safe revert"))
+        acted = improved or _mentions_any(tl, ("risk", "regress"))
+        evidence = "reversibility plan present" if improved else "rollback path not explicit"
+        return acted, improved, evidence
+
+    if cat == "humanity_guardrail":
+        improved = _mentions_any(tl, ("user benefit", "people", "human", "harm", "safety", "non-harm"))
+        acted = improved or _mentions_any(tl, ("guardrail", "ethic", "impact"))
+        evidence = "humanity/safety framing present" if improved else "humanity framing still missing"
+        return acted, improved, evidence
+
+    if cat in {"compounding_learning", "compounding"}:
+        improved = _mentions_any(tl, ("reusable", "pattern", "distill", "promote", "playbook", "eidos"))
+        acted = improved or _mentions_any(tl, ("learn", "transfer"))
+        evidence = "compounding learning captured" if improved else "transfer rule not yet captured"
+        return acted, improved, evidence
+
+    acted = _mentions_any(tl, ("improve", "opportunity", "next step"))
+    improved = acted
+    evidence = "generic opportunity progress" if improved else "no clear acted-on signal"
+    return acted, improved, evidence
 
 
 def _mentions_any(text: str, words: Sequence[str]) -> bool:
@@ -398,6 +494,125 @@ def _derive_self_candidates(
     return rows
 
 
+def _track_meta_retrieval(
+    *,
+    opportunity_id: str,
+    question: str,
+    category: str,
+    trace_id: str,
+) -> None:
+    try:
+        from .meta_ralph import get_meta_ralph
+
+        key_hash = hashlib.sha1(f"{category}|{question}".encode("utf-8")).hexdigest()[:10]
+        get_meta_ralph().track_retrieval(
+            opportunity_id,
+            question,
+            insight_key=f"opportunity:{category}:{key_hash}",
+            source="opportunity_scanner",
+            trace_id=(trace_id or None),
+        )
+    except Exception as e:
+        log_debug("opportunity_scanner", "meta retrieval tracking failed", e)
+
+
+def _track_meta_outcome(
+    *,
+    opportunity_id: str,
+    outcome: str,
+    evidence: str,
+    category: str,
+    trace_id: str,
+) -> None:
+    try:
+        from .meta_ralph import get_meta_ralph
+
+        get_meta_ralph().track_outcome(
+            opportunity_id,
+            outcome,
+            evidence,
+            trace_id=(trace_id or None),
+            insight_key=f"opportunity:{category}",
+            source="opportunity_scanner",
+        )
+    except Exception as e:
+        log_debug("opportunity_scanner", "meta outcome tracking failed", e)
+
+
+def _track_recent_outcomes(
+    *,
+    session_id: str,
+    text: str,
+    stats: Dict[str, Any],
+    trace_id: str,
+    persist: bool,
+) -> Dict[str, int]:
+    rows = _tail_jsonl(SELF_FILE, OUTCOME_LOOKBACK)
+    if not rows:
+        return {"tracked": 0, "improved": 0}
+    now = time.time()
+    seen_outcomes = _load_recorded_outcome_ids()
+    tracked = 0
+    improved_count = 0
+
+    for row in reversed(rows):
+        sid = str(row.get("session_id") or "").strip()
+        if sid and sid != session_id:
+            continue
+        ts = float(row.get("ts") or 0.0)
+        if ts <= 0:
+            continue
+        if OUTCOME_WINDOW_S > 0 and (now - ts) > OUTCOME_WINDOW_S:
+            continue
+        category = str(row.get("category") or "general")
+        question = str(row.get("question") or "").strip()
+        if not question:
+            continue
+        opp_id = str(row.get("opportunity_id") or "").strip()
+        if not opp_id:
+            opp_id = _opportunity_id(session_id=session_id, category=category, question=question, ts=ts)
+        if opp_id in seen_outcomes:
+            continue
+
+        acted, improved, evidence = _evaluate_opportunity_signal(category, text, stats)
+        if not acted:
+            continue
+
+        tracked += 1
+        if improved:
+            improved_count += 1
+
+        retrieve_trace = str(row.get("trace_id") or "").strip()
+        outcome_trace = trace_id or retrieve_trace
+        outcome = "good" if improved else "bad"
+        outcome_row = {
+            "ts": now,
+            "session_id": session_id,
+            "opportunity_id": opp_id,
+            "category": category,
+            "acted_on": True,
+            "improved": bool(improved),
+            "outcome": outcome,
+            "evidence": evidence,
+            "trace_id": retrieve_trace or None,
+            "outcome_trace_id": outcome_trace or None,
+            "strict_trace_match": bool(retrieve_trace and outcome_trace and retrieve_trace == outcome_trace),
+        }
+        if persist:
+            _append_jsonl_capped(OUTCOME_FILE, outcome_row)
+            seen_outcomes.add(opp_id)
+
+        _track_meta_outcome(
+            opportunity_id=opp_id,
+            outcome=outcome,
+            evidence=f"opportunity:{category} {evidence}",
+            category=category,
+            trace_id=outcome_trace,
+        )
+
+    return {"tracked": tracked, "improved": improved_count}
+
+
 def scan_runtime_opportunities(
     events: Sequence[Any],
     *,
@@ -415,6 +630,8 @@ def scan_runtime_opportunities(
         "captured_edits": 0,
         "telemetry_filtered": 0,
         "dedup_recent_filtered": 0,
+        "outcomes_tracked": 0,
+        "outcomes_improved": 0,
         "opportunities_found": 0,
         "self_opportunities": [],
     }
@@ -445,6 +662,16 @@ def scan_runtime_opportunities(
                 continue
             edits.append(text[:1200])
 
+    primary_trace_id = _select_primary_trace_id(events)
+    combined_text = " ".join(prompts + edits + [query]).strip()
+    outcome_stats = _track_recent_outcomes(
+        session_id=str(session_id or "default"),
+        text=combined_text,
+        stats=spark_stats,
+        trace_id=primary_trace_id,
+        persist=persist,
+    )
+
     try:
         soul = fetch_soul_state(session_id=session_id or "default")
         kernel_ok = bool(soul_kernel_pass(soul))
@@ -469,15 +696,32 @@ def scan_runtime_opportunities(
     now_ts = time.time()
     persisted = 0
     if persist and deduped:
-        for row in deduped:
+        for idx, row in enumerate(deduped):
+            row_ts = now_ts + (idx * 0.0001)
+            opp_id = _opportunity_id(
+                session_id=str(session_id or "default"),
+                category=str(row.get("category") or "general"),
+                question=str(row.get("question") or ""),
+                ts=row_ts,
+            )
             entry = {
-                "ts": now_ts,
+                "ts": row_ts,
                 "session_id": str(session_id or "default"),
+                "trace_id": primary_trace_id or None,
+                "opportunity_id": opp_id,
                 "scope": "self",
                 "mode": mode,
                 **row,
             }
             _append_jsonl_capped(SELF_FILE, entry)
+            row["opportunity_id"] = opp_id
+            row["trace_id"] = primary_trace_id or None
+            _track_meta_retrieval(
+                opportunity_id=opp_id,
+                question=str(row.get("question") or ""),
+                category=str(row.get("category") or "general"),
+                trace_id=primary_trace_id,
+            )
             persisted += 1
 
     return {
@@ -488,6 +732,8 @@ def scan_runtime_opportunities(
         "captured_edits": len(edits),
         "telemetry_filtered": telemetry_filtered,
         "dedup_recent_filtered": dedup_recent_filtered,
+        "outcomes_tracked": int(outcome_stats.get("tracked") or 0),
+        "outcomes_improved": int(outcome_stats.get("improved") or 0),
         "opportunities_found": len(deduped),
         "self_opportunities": deduped,
         "persisted": persisted,
@@ -650,13 +896,21 @@ def get_recent_self_opportunities(limit: int = 3, max_age_s: float = 172800.0) -
 def get_scanner_status() -> Dict[str, Any]:
     try:
         self_rows = _tail_jsonl(SELF_FILE, 20)
+        outcome_rows = _tail_jsonl(OUTCOME_FILE, 80)
     except Exception as e:
         log_debug("opportunity_scanner", "status read failed", e)
         self_rows = []
+        outcome_rows = []
+    acted = [r for r in outcome_rows if bool(r.get("acted_on"))]
+    improved = [r for r in acted if bool(r.get("improved"))]
+    adoption_rate = (len(improved) / max(len(acted), 1)) if acted else 0.0
     return {
         "enabled": bool(SCANNER_ENABLED),
         "user_scan_enabled": bool(USER_SCAN_ENABLED),
         "self_file": str(SELF_FILE),
         "user_file": str(USER_FILE),
+        "outcome_file": str(OUTCOME_FILE),
         "self_recent": len(self_rows),
+        "outcomes_recent": len(outcome_rows),
+        "adoption_rate": round(adoption_rate, 4),
     }

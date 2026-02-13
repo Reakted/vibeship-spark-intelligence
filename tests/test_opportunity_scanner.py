@@ -40,7 +40,10 @@ def test_scan_runtime_opportunities_filters_telemetry_and_persists(monkeypatch, 
         ),
     )
     monkeypatch.setattr(scanner, "SELF_FILE", tmp_path / "self_opportunities.jsonl")
+    monkeypatch.setattr(scanner, "OUTCOME_FILE", tmp_path / "outcomes.jsonl")
     monkeypatch.setattr(scanner, "SCANNER_ENABLED", True)
+    monkeypatch.setattr(scanner, "_track_meta_retrieval", lambda **_k: None)
+    monkeypatch.setattr(scanner, "_track_meta_outcome", lambda **_k: None)
 
     events = [
         _mk_event(
@@ -197,10 +200,13 @@ def test_scan_runtime_opportunities_filters_recent_repeats(monkeypatch, tmp_path
         ),
     )
     monkeypatch.setattr(scanner, "SELF_FILE", tmp_path / "self_opportunities.jsonl")
+    monkeypatch.setattr(scanner, "OUTCOME_FILE", tmp_path / "outcomes.jsonl")
     monkeypatch.setattr(scanner, "SCANNER_ENABLED", True)
     monkeypatch.setattr(scanner, "SELF_MAX_ITEMS", 10)
     monkeypatch.setattr(scanner, "SELF_DEDUP_WINDOW_S", 3600.0)
     monkeypatch.setattr(scanner, "SELF_RECENT_LOOKBACK", 100)
+    monkeypatch.setattr(scanner, "_track_meta_retrieval", lambda **_k: None)
+    monkeypatch.setattr(scanner, "_track_meta_outcome", lambda **_k: None)
 
     prior = {
         "ts": time.time(),
@@ -261,3 +267,61 @@ def test_select_diverse_self_rows_prefers_category_spread():
     cats = [str(r.get("category") or "") for r in selected]
     assert "assumption_audit" in cats
     assert "reversibility" in cats
+
+
+def test_scan_runtime_opportunities_tracks_acted_outcomes(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        scanner,
+        "fetch_soul_state",
+        lambda session_id="default": SoulState(
+            ok=True,
+            mood="builder",
+            soul_kernel={"non_harm": True, "service": True, "clarity": True},
+            source="test",
+        ),
+    )
+    monkeypatch.setattr(scanner, "SELF_FILE", tmp_path / "self_opportunities.jsonl")
+    monkeypatch.setattr(scanner, "OUTCOME_FILE", tmp_path / "outcomes.jsonl")
+    monkeypatch.setattr(scanner, "SCANNER_ENABLED", True)
+    monkeypatch.setattr(scanner, "_track_meta_retrieval", lambda **_k: None)
+    monkeypatch.setattr(scanner, "_track_meta_outcome", lambda **_k: None)
+
+    prior = {
+        "ts": time.time() - 5,
+        "session_id": "s1",
+        "trace_id": "trace-1",
+        "opportunity_id": "opp:test:1",
+        "scope": "self",
+        "mode": "conscious",
+        "category": "verification_gap",
+        "question": "What is the smallest proof that this change works before the next edit?",
+    }
+    scanner.SELF_FILE.write_text(json.dumps(prior) + "\n", encoding="utf-8")
+
+    events = [
+        _mk_event(
+            EventType.USER_PROMPT,
+            payload={"text": "I ran pytest to verify the change and confirm behavior.", "trace_id": "trace-1"},
+        ),
+    ]
+
+    out = scanner.scan_runtime_opportunities(
+        events,
+        stats={"validation": {"matched": 1}},
+        query="",
+        session_id="s1",
+        persist=True,
+    )
+
+    assert out["outcomes_tracked"] >= 1
+    assert out["outcomes_improved"] >= 1
+    rows = [
+        json.loads(line)
+        for line in scanner.OUTCOME_FILE.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert rows
+    assert rows[-1]["opportunity_id"] == "opp:test:1"
+    assert rows[-1]["acted_on"] is True
+    assert rows[-1]["outcome"] == "good"
+    assert rows[-1]["strict_trace_match"] is True
