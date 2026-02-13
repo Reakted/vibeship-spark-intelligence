@@ -14,6 +14,8 @@ import os
 import re
 import sqlite3
 import hashlib
+import difflib
+import time
 from array import array
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -25,6 +27,15 @@ _FTS_AVAILABLE: Optional[bool] = None
 
 # Phase 2: patchified (chunked) memory storage
 PATCHIFIED_ENABLED = os.getenv("SPARK_MEMORY_PATCHIFIED", "0") == "1"
+
+# Phase 2: delta memory compaction (store updates as deltas when near-duplicate)
+DELTAS_ENABLED = os.getenv("SPARK_MEMORY_DELTAS", "0") == "1"
+try:
+    DELTA_MIN_SIMILARITY = float(os.getenv("SPARK_MEMORY_DELTA_MIN_SIM", "0.86"))
+except Exception:
+    DELTA_MIN_SIMILARITY = 0.86
+DELTAS_WINDOW_DAYS = 30
+
 try:
     PATCH_MAX_CHARS = max(120, min(2000, int(os.getenv("SPARK_MEMORY_PATCH_MAX_CHARS", "600") or 600)))
 except Exception:
@@ -229,6 +240,86 @@ def _link_edges(
         _upsert_edge(conn, tid, memory_id, weight, reason, created_at)
 
 
+def _normalize_for_similarity(text: str) -> str:
+    t = str(text or "").strip().lower()
+    t = re.sub(r"\s+", " ", t)
+    return t[:5000]  # bound work
+
+
+def _best_delta(old_text: str, new_text: str) -> str:
+    """Extract a human-readable delta from new_text relative to old_text.
+
+    Conservative: if we can't find a meaningful delta, return empty string.
+    """
+    old_n = _normalize_for_similarity(old_text)
+    new_n = _normalize_for_similarity(new_text)
+    if not old_n or not new_n:
+        return ""
+
+    # Easiest case: old is contained in new.
+    if old_n in new_n and len(new_n) > len(old_n):
+        # attempt to take suffix/prefix around the match for readability
+        idx = new_n.find(old_n)
+        prefix = new_n[:idx].strip()
+        suffix = new_n[idx + len(old_n):].strip()
+        delta = " ".join([p for p in (prefix, suffix) if p])
+        return delta.strip()
+
+    sm = difflib.SequenceMatcher(a=old_n, b=new_n)
+    match = sm.find_longest_match(0, len(old_n), 0, len(new_n))
+    if match.size < 120:
+        return ""
+
+    prefix = new_n[: match.b].strip()
+    suffix = new_n[match.b + match.size :].strip()
+    parts = [p for p in (prefix, suffix) if p]
+    delta = " / ".join(parts).strip()
+    return delta
+
+
+def _find_recent_similar(
+    conn: sqlite3.Connection,
+    *,
+    content: str,
+    scope: str,
+    project_key: Optional[str],
+    category: str,
+) -> Optional[Tuple[str, str, float]]:
+    """Return (memory_id, content, similarity) for the best recent match."""
+    if not content:
+        return None
+    cutoff = time.time() - (max(1, int(DELTAS_WINDOW_DAYS)) * 86400.0)
+    rows = conn.execute(
+        """
+        SELECT memory_id, content
+        FROM memories
+        WHERE created_at >= ?
+          AND scope = ?
+          AND category = ?
+          AND (? IS NULL OR project_key = ?)
+        ORDER BY created_at DESC
+        LIMIT 25;
+        """,
+        (cutoff, scope, category, project_key, project_key),
+    ).fetchall()
+
+    best: Optional[Tuple[str, str, float]] = None
+    target = _normalize_for_similarity(content)
+    if not target:
+        return None
+    for r in rows:
+        old = r["content"] or ""
+        if not old:
+            continue
+        old_n = _normalize_for_similarity(old)
+        if not old_n:
+            continue
+        sim = difflib.SequenceMatcher(a=old_n, b=target).ratio()
+        if best is None or sim > best[2]:
+            best = (str(r["memory_id"]), old, float(sim))
+    return best
+
+
 def _split_patches(text: str) -> List[str]:
     """Split a memory into chunk-sized patches.
 
@@ -363,6 +454,34 @@ def upsert_entry(
 ) -> None:
     if _is_telemetry_memory(content):
         return
+
+    # Delta compaction: if this is near-duplicate of a recent memory, store only the delta.
+    if DELTAS_ENABLED and content and len(content) >= 240:
+        conn = _connect()
+        try:
+            best = _find_recent_similar(
+                conn,
+                content=content,
+                scope=scope,
+                project_key=project_key,
+                category=category,
+            )
+        finally:
+            conn.close()
+
+        if best:
+            base_id, base_text, sim = best
+            if sim >= float(DELTA_MIN_SIMILARITY):
+                delta = _best_delta(base_text, content)
+                # Only accept meaningful deltas.
+                if delta and len(delta) >= 80:
+                    meta = dict(meta or {})
+                    meta.update({
+                        "delta": True,
+                        "delta_from": base_id,
+                        "delta_similarity": round(float(sim), 4),
+                    })
+                    content = f"Update (delta from {base_id}): {delta}".strip()
 
     # Patchified mode: store a compact root + chunk entries for better retrieval precision.
     if PATCHIFIED_ENABLED and content and len(content) > PATCH_MAX_CHARS:
