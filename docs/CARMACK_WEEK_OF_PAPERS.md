@@ -48,7 +48,8 @@ If you can paste the original Carmack post/link, I can make this 100% exact (a f
 - Distributed optimization paper; need exact arXiv entry.
 
 ### 7) Cautious Weight Decay
-- Optimizer/regularization paper; need exact arXiv entry.
+- Paper: **Cautious Weight Decay**
+- arXiv: https://arxiv.org/abs/2510.12402
 
 ### 6) Local Feature Swapping for Generalization in Reinforcement Learning
 - Paper: **Local Feature Swapping for Generalization in Reinforcement Learning**
