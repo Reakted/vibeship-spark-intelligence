@@ -69,7 +69,8 @@ If you can paste the original Carmack post/link, I can make this 100% exact (a f
 - arXiv: https://arxiv.org/abs/2601.00417
 
 ### 1) Emergent temporal abstractions in autoregressive models enable hierarchical reinforcement learning
-- Need exact match.
+- Paper: **Emergent temporal abstractions in autoregressive models enable hierarchical reinforcement learning**
+- arXiv: https://arxiv.org/abs/2512.20605
 
 ---
 
