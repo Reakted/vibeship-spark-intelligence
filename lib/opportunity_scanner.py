@@ -54,6 +54,15 @@ PROMOTION_MIN_EFFECTIVENESS = max(
     min(1.0, float(os.getenv("SPARK_OPPORTUNITY_PROMOTION_MIN_EFFECTIVENESS", "0.66") or 0.66)),
 )
 PROMOTION_LOOKBACK = max(20, int(os.getenv("SPARK_OPPORTUNITY_PROMOTION_LOOKBACK", "400") or 400))
+LLM_ENABLED = str(os.getenv("SPARK_OPPORTUNITY_LLM_ENABLED", "1")).strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+LLM_PROVIDER = str(os.getenv("SPARK_OPPORTUNITY_LLM_PROVIDER", "") or "").strip().lower()
+LLM_TIMEOUT_S = max(0.3, float(os.getenv("SPARK_OPPORTUNITY_LLM_TIMEOUT_S", "2.5") or 2.5))
+LLM_MAX_ITEMS = max(1, int(os.getenv("SPARK_OPPORTUNITY_LLM_MAX_ITEMS", "3") or 3))
 
 _TELEMETRY_MARKERS = (
     "tool_",
@@ -83,6 +92,14 @@ _STRATEGIC_MARKERS = (
     "autonomy",
 )
 _HIGH_IMPACT_TOOLS = {"task", "edit", "write", "bash", "askuser"}
+_SELF_CATEGORY_ALLOWLIST = {
+    "verification_gap",
+    "outcome_clarity",
+    "assumption_audit",
+    "reversibility",
+    "humanity_guardrail",
+    "compounding_learning",
+}
 
 _QUESTION_STOPWORDS = {
     "the",
@@ -309,6 +326,167 @@ def _question_key(question: str) -> str:
     if not tokens:
         return ""
     return " ".join(tokens[:14])
+
+
+def _extract_json_candidate(raw: str) -> Optional[Any]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    candidates = [text]
+    # Prefer fenced JSON payloads if present.
+    for m in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE):
+        payload = str(m.group(1) or "").strip()
+        if payload:
+            candidates.append(payload)
+    # Fallback: first JSON object/array slice.
+    first_obj = text.find("{")
+    last_obj = text.rfind("}")
+    if first_obj >= 0 and last_obj > first_obj:
+        candidates.append(text[first_obj : last_obj + 1])
+    first_arr = text.find("[")
+    last_arr = text.rfind("]")
+    if first_arr >= 0 and last_arr > first_arr:
+        candidates.append(text[first_arr : last_arr + 1])
+
+    for cand in candidates:
+        try:
+            return json.loads(cand)
+        except Exception:
+            continue
+    return None
+
+
+def _sanitize_llm_self_rows(rows: Any) -> List[Dict[str, Any]]:
+    if isinstance(rows, dict):
+        arr = rows.get("opportunities")
+        rows = arr if isinstance(arr, list) else [rows]
+    if not isinstance(rows, list):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        category = str(row.get("category") or "assumption_audit").strip().lower()
+        if category not in _SELF_CATEGORY_ALLOWLIST:
+            continue
+        question = str(row.get("question") or "").strip()
+        next_step = str(row.get("next_step") or "").strip()
+        rationale = str(row.get("rationale") or "").strip()
+        if not question or not next_step:
+            continue
+        if _is_telemetry_noise(question) or _is_telemetry_noise(next_step):
+            continue
+        qk = _question_key(question)
+        if not qk or qk in seen:
+            continue
+        seen.add(qk)
+
+        priority = str(row.get("priority") or "medium").strip().lower()
+        if priority not in {"high", "medium", "low"}:
+            priority = "medium"
+
+        try:
+            confidence = float(row.get("confidence") or 0.72)
+        except Exception:
+            confidence = 0.72
+        confidence = max(0.55, min(0.95, confidence))
+
+        out.append(
+            {
+                "category": category,
+                "priority": priority,
+                "confidence": round(confidence, 2),
+                "question": question,
+                "next_step": next_step,
+                "rationale": rationale or "LLM-suggested self-improvement opportunity.",
+            }
+        )
+        if len(out) >= LLM_MAX_ITEMS:
+            break
+    return out
+
+
+def _generate_llm_self_candidates(
+    *,
+    prompts: List[str],
+    edits: List[str],
+    query: str,
+    stats: Dict[str, Any],
+    kernel_ok: bool,
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    meta: Dict[str, Any] = {
+        "enabled": bool(LLM_ENABLED),
+        "attempted": False,
+        "used": False,
+        "provider": None,
+        "error": None,
+        "candidates": 0,
+    }
+    if not LLM_ENABLED:
+        return [], meta
+
+    context_bits = prompts[-3:] + edits[-2:] + ([query] if query else [])
+    context_text = " ".join(str(x or "").strip() for x in context_bits if str(x or "").strip()).strip()
+    if len(context_text) < 24:
+        return [], meta
+
+    try:
+        from . import advisory_synthesizer as synth
+    except Exception as e:
+        meta["error"] = f"import_failed:{type(e).__name__}"
+        return [], meta
+
+    prompt = (
+        "Return ONLY JSON. Build self-Socratic improvement opportunities for Spark.\n"
+        "Rules:\n"
+        "- Filter out telemetry/noise (tool_*_error, status code, trace ids, heartbeat logs).\n"
+        "- Focus on meaningful improvement opportunities in current work.\n"
+        "- Category must be one of: verification_gap, outcome_clarity, assumption_audit, reversibility, humanity_guardrail, compounding_learning.\n"
+        "- priority must be high|medium|low.\n"
+        "- confidence in [0.55,0.95].\n"
+        "- Each question must be specific, self-directed, and actionable.\n"
+        "- Max 3 opportunities.\n\n"
+        f"Kernel mode: {'conscious' if kernel_ok else 'conservative'}\n"
+        f"Recent context:\n{context_text[:1800]}\n"
+        f"Runtime stats: {json.dumps({'errors': (stats or {}).get('errors', []), 'validation': (stats or {}).get('validation', {})}, ensure_ascii=True)[:500]}\n\n"
+        'Output schema: {"opportunities":[{"category":"...","priority":"...","confidence":0.72,"question":"...","next_step":"...","rationale":"..."}]}'
+    )
+
+    meta["attempted"] = True
+    prev_timeout = getattr(synth, "AI_TIMEOUT_S", None)
+    try:
+        synth.AI_TIMEOUT_S = LLM_TIMEOUT_S
+        chain = synth._get_provider_chain(LLM_PROVIDER or None)
+        last_error = None
+        for provider in chain:
+            try:
+                raw = synth._query_provider(provider, prompt)
+            except Exception as e:
+                last_error = f"{provider}:{type(e).__name__}"
+                continue
+            if not raw:
+                continue
+            parsed = _extract_json_candidate(raw)
+            rows = _sanitize_llm_self_rows(parsed)
+            if not rows:
+                last_error = f"{provider}:unparseable_or_empty"
+                continue
+            meta["used"] = True
+            meta["provider"] = provider
+            meta["candidates"] = len(rows)
+            return rows, meta
+        if last_error:
+            meta["error"] = last_error
+    finally:
+        if prev_timeout is not None:
+            try:
+                synth.AI_TIMEOUT_S = prev_timeout
+            except Exception:
+                pass
+
+    return [], meta
 
 
 def _priority_score(priority: Any) -> int:
@@ -749,6 +927,14 @@ def scan_runtime_opportunities(
         "dedup_recent_filtered": 0,
         "outcomes_tracked": 0,
         "outcomes_improved": 0,
+        "llm": {
+            "enabled": bool(LLM_ENABLED),
+            "attempted": False,
+            "used": False,
+            "provider": None,
+            "error": None,
+            "candidates": 0,
+        },
         "promoted_candidates": [],
         "opportunities_found": 0,
         "self_opportunities": [],
@@ -805,6 +991,15 @@ def scan_runtime_opportunities(
         query=query,
         kernel_ok=kernel_ok,
     )
+    llm_candidates, llm_meta = _generate_llm_self_candidates(
+        prompts=prompts,
+        edits=edits,
+        query=query,
+        stats=spark_stats,
+        kernel_ok=kernel_ok,
+    )
+    if llm_candidates:
+        candidates.extend(llm_candidates)
     recent_keys = _recent_self_question_keys()
     deduped, dedup_recent_filtered = _select_diverse_self_rows(
         candidates,
@@ -853,6 +1048,7 @@ def scan_runtime_opportunities(
         "dedup_recent_filtered": dedup_recent_filtered,
         "outcomes_tracked": int(outcome_stats.get("tracked") or 0),
         "outcomes_improved": int(outcome_stats.get("improved") or 0),
+        "llm": llm_meta,
         "promoted_candidates": promoted_candidates,
         "opportunities_found": len(deduped),
         "self_opportunities": deduped,
@@ -1029,6 +1225,9 @@ def get_scanner_status() -> Dict[str, Any]:
     return {
         "enabled": bool(SCANNER_ENABLED),
         "user_scan_enabled": bool(USER_SCAN_ENABLED),
+        "llm_enabled": bool(LLM_ENABLED),
+        "llm_provider": LLM_PROVIDER or "auto",
+        "llm_timeout_s": float(LLM_TIMEOUT_S),
         "self_file": str(SELF_FILE),
         "user_file": str(USER_FILE),
         "outcome_file": str(OUTCOME_FILE),

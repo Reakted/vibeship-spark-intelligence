@@ -42,6 +42,11 @@ def test_scan_runtime_opportunities_filters_telemetry_and_persists(monkeypatch, 
     monkeypatch.setattr(scanner, "SELF_FILE", tmp_path / "self_opportunities.jsonl")
     monkeypatch.setattr(scanner, "OUTCOME_FILE", tmp_path / "outcomes.jsonl")
     monkeypatch.setattr(scanner, "SCANNER_ENABLED", True)
+    monkeypatch.setattr(
+        scanner,
+        "_generate_llm_self_candidates",
+        lambda **_k: ([], {"enabled": False, "attempted": False, "used": False, "provider": None, "error": None, "candidates": 0}),
+    )
     monkeypatch.setattr(scanner, "_track_meta_retrieval", lambda **_k: None)
     monkeypatch.setattr(scanner, "_track_meta_outcome", lambda **_k: None)
 
@@ -205,6 +210,11 @@ def test_scan_runtime_opportunities_filters_recent_repeats(monkeypatch, tmp_path
     monkeypatch.setattr(scanner, "SELF_MAX_ITEMS", 10)
     monkeypatch.setattr(scanner, "SELF_DEDUP_WINDOW_S", 3600.0)
     monkeypatch.setattr(scanner, "SELF_RECENT_LOOKBACK", 100)
+    monkeypatch.setattr(
+        scanner,
+        "_generate_llm_self_candidates",
+        lambda **_k: ([], {"enabled": False, "attempted": False, "used": False, "provider": None, "error": None, "candidates": 0}),
+    )
     monkeypatch.setattr(scanner, "_track_meta_retrieval", lambda **_k: None)
     monkeypatch.setattr(scanner, "_track_meta_outcome", lambda **_k: None)
 
@@ -283,6 +293,11 @@ def test_scan_runtime_opportunities_tracks_acted_outcomes(monkeypatch, tmp_path:
     monkeypatch.setattr(scanner, "SELF_FILE", tmp_path / "self_opportunities.jsonl")
     monkeypatch.setattr(scanner, "OUTCOME_FILE", tmp_path / "outcomes.jsonl")
     monkeypatch.setattr(scanner, "SCANNER_ENABLED", True)
+    monkeypatch.setattr(
+        scanner,
+        "_generate_llm_self_candidates",
+        lambda **_k: ([], {"enabled": False, "attempted": False, "used": False, "provider": None, "error": None, "candidates": 0}),
+    )
     monkeypatch.setattr(scanner, "_track_meta_retrieval", lambda **_k: None)
     monkeypatch.setattr(scanner, "_track_meta_outcome", lambda **_k: None)
 
@@ -372,3 +387,82 @@ def test_promote_high_performing_opportunities_emits_candidates(monkeypatch, tmp
     assert promoted[0]["good"] >= 2
     assert "eidos_observation" in promoted[0]
     assert scanner.PROMOTION_FILE.exists()
+
+
+def test_sanitize_llm_self_rows_filters_telemetry_noise():
+    rows = scanner._sanitize_llm_self_rows(
+        {
+            "opportunities": [
+                {
+                    "category": "assumption_audit",
+                    "priority": "medium",
+                    "confidence": 0.8,
+                    "question": "I struggle with tool_49_error tasks",
+                    "next_step": "Check trace_id and heartbeat status code",
+                    "rationale": "bad telemetry row",
+                },
+                {
+                    "category": "verification_gap",
+                    "priority": "high",
+                    "confidence": 0.83,
+                    "question": "What proof test validates this edit?",
+                    "next_step": "Run one focused pytest command for the changed path.",
+                    "rationale": "good row",
+                },
+            ]
+        }
+    )
+    assert len(rows) == 1
+    assert rows[0]["category"] == "verification_gap"
+
+
+def test_scan_runtime_opportunities_merges_llm_candidates(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(
+        scanner,
+        "fetch_soul_state",
+        lambda session_id="default": SoulState(
+            ok=True,
+            mood="builder",
+            soul_kernel={"non_harm": True, "service": True, "clarity": True},
+            source="test",
+        ),
+    )
+    monkeypatch.setattr(scanner, "SELF_FILE", tmp_path / "self_opportunities.jsonl")
+    monkeypatch.setattr(scanner, "OUTCOME_FILE", tmp_path / "outcomes.jsonl")
+    monkeypatch.setattr(scanner, "SCANNER_ENABLED", True)
+    monkeypatch.setattr(scanner, "SELF_MAX_ITEMS", 10)
+    monkeypatch.setattr(
+        scanner,
+        "_generate_llm_self_candidates",
+        lambda **_k: (
+            [
+                {
+                    "category": "assumption_audit",
+                    "priority": "high",
+                    "confidence": 0.9,
+                    "question": "Which hidden assumption should Spark test first?",
+                    "next_step": "Write one falsifiable hypothesis and test it.",
+                    "rationale": "LLM generated",
+                }
+            ],
+            {"enabled": True, "attempted": True, "used": True, "provider": "minimax", "error": None, "candidates": 1},
+        ),
+    )
+    monkeypatch.setattr(scanner, "_track_meta_retrieval", lambda **_k: None)
+    monkeypatch.setattr(scanner, "_track_meta_outcome", lambda **_k: None)
+
+    out = scanner.scan_runtime_opportunities(
+        [
+            _mk_event(EventType.USER_PROMPT, payload={"text": "Improve Spark improvement loop quality"}),
+            _mk_event(EventType.POST_TOOL, tool_name="Edit", tool_input={"content": "def x():\n    return 1\n"}),
+        ],
+        stats={},
+        query="",
+        session_id="s1",
+        persist=False,
+    )
+
+    questions = [str(r.get("question") or "") for r in out.get("self_opportunities") or []]
+    assert any("hidden assumption" in q for q in questions)
+    assert out.get("llm", {}).get("used") is True
+    assert out.get("llm", {}).get("provider") == "minimax"

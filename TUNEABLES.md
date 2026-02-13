@@ -879,6 +879,10 @@ The Opportunity Scanner generates self-Socratic prompts, tracks acted outcomes w
 | `SPARK_OPPORTUNITY_PROMOTION_MIN_SUCCESSES` | `2` | Minimum good outcomes required before promotion candidate generation. |
 | `SPARK_OPPORTUNITY_PROMOTION_MIN_EFFECTIVENESS` | `0.66` | Minimum good/acted ratio for promotion eligibility. |
 | `SPARK_OPPORTUNITY_PROMOTION_LOOKBACK` | `400` | Rows scanned when building promotion candidates. |
+| `SPARK_OPPORTUNITY_LLM_ENABLED` | `1` | Enable LLM-backed opportunity proposal path (deterministic path still runs as fallback). |
+| `SPARK_OPPORTUNITY_LLM_PROVIDER` | `auto` | Preferred provider for scanner LLM path (`minimax`, `ollama`, `openai`, `anthropic`, `gemini`). |
+| `SPARK_OPPORTUNITY_LLM_TIMEOUT_S` | `2.5` | Per-provider timeout for scanner LLM synthesis. |
+| `SPARK_OPPORTUNITY_LLM_MAX_ITEMS` | `3` | Max sanitized LLM opportunity candidates merged each cycle. |
 
 ### Operational Checks
 
@@ -1176,7 +1180,11 @@ This is the active hot-path advisory stack used by hooks:
 | `SPARK_SYNTH_TIMEOUT` / `synthesizer.ai_timeout_s` | `3.0` | AI synthesis timeout ceiling. |
 | `SPARK_OLLAMA_MODEL` | `phi4-mini` | Default local model for synthesis. |
 | `SPARK_OLLAMA_API` | `http://localhost:11434` | Local Ollama endpoint. |
-| `synthesizer.preferred_provider` | `auto` | Provider preference (`ollama`, `gemini`, `openai`, `anthropic`). |
+| `SPARK_SYNTH_PREFERRED_PROVIDER` | _(unset)_ | Env override for preferred provider (`ollama`, `gemini`, `minimax`, `openai`, `anthropic`). |
+| `SPARK_MINIMAX_MODEL` | `MiniMax-M2.5` | MiniMax model for synthesis when provider route is `minimax`. |
+| `SPARK_MINIMAX_BASE_URL` | `https://api.minimax.io/v1` | MiniMax OpenAI-compatible base URL. |
+| `MINIMAX_API_KEY` | _(unset)_ | Enables MiniMax synthesis provider when set. |
+| `synthesizer.preferred_provider` | `auto` | Provider preference (`ollama`, `gemini`, `minimax`, `openai`, `anthropic`). |
 | `synthesizer.cache_ttl_s` | `120` | Synthesis cache TTL. |
 | `synthesizer.max_cache_entries` | `50` | Synthesis cache size cap. |
 

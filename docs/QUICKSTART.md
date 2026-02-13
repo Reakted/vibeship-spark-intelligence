@@ -94,6 +94,17 @@ Verify scanner status and recent self-Socratic prompts:
 python -c "from lib.opportunity_scanner import get_scanner_status, get_recent_self_opportunities; import json; print(json.dumps(get_scanner_status(), indent=2)); print(json.dumps(get_recent_self_opportunities(limit=5), indent=2))"
 ```
 
+Enable Minimax-backed scanner synthesis (optional):
+
+```bash
+set SPARK_OPPORTUNITY_LLM_ENABLED=1
+set SPARK_OPPORTUNITY_LLM_PROVIDER=minimax
+set SPARK_MINIMAX_API_KEY=your_key_here
+set SPARK_MINIMAX_MODEL=MiniMax-M2.5
+```
+
+After setting env vars, restart services (`spark down` then `spark up`) and check scanner heartbeat `llm` fields (`used`, `provider`, `error`).
+
 Verify scanner stats are present in bridge heartbeat:
 
 ```bash
