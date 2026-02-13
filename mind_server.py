@@ -211,6 +211,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
+        # Safety: only accept POSTs from localhost by default.
+        remote = str(self.client_address[0]) if getattr(self, 'client_address', None) else ''
+        allow_remote = (os.environ.get('MIND_ALLOW_REMOTE_POST') or '').strip().lower() in {'1','true','yes','on'}
+        if not allow_remote and remote not in {'127.0.0.1', '::1'}:
+            return self._json(403, {'error': 'remote_post_forbidden'})
+
         # Optional auth: if MIND_TOKEN is set, require Authorization: Bearer <token>
         if TOKEN:
             auth = (self.headers.get("Authorization") or "").strip()

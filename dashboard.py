@@ -4952,6 +4952,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
+        # Safety: only accept POSTs from localhost by default.
+        remote = str(self.client_address[0]) if getattr(self, 'client_address', None) else ''
+        allow_remote = str(os.environ.get('SPARK_DASHBOARD_ALLOW_REMOTE_POST') or '').strip().lower() in {'1','true','yes','on'}
+        if not allow_remote and remote not in {'127.0.0.1', '::1'}:
+            self.send_response(403)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'ok': False, 'error': 'remote POST forbidden'}).encode())
+            return
+
         if self.path == '/api/taste/add':
             length = int(self.headers.get('Content-Length', '0') or 0)
             raw = self.rfile.read(length) if length else b'{}'

@@ -213,6 +213,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
 
+        # Safety: only accept POSTs from localhost by default.
+        remote = str(self.client_address[0]) if getattr(self, 'client_address', None) else ''
+        allow_remote = (os.environ.get('SPARKD_ALLOW_REMOTE_POST') or '').strip().lower() in {'1','true','yes','on'}
+        if not allow_remote and remote not in {'127.0.0.1', '::1'}:
+            return _json(self, 403, {'ok': False, 'error': 'remote POST forbidden'})
+
         client_ip = self.client_address[0] if self.client_address else "unknown"
         allowed, retry_after = _allow_rate_limited_request(client_ip)
         if not allowed:
