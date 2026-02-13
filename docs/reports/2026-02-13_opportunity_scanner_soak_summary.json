@@ -1,17 +1,15 @@
 {
   "window": {
-    "start_ts": 1770994422.616982,
-    "end_ts": 1770994842.616982,
-    "duration_s": 420
+    "start_ts": 1770995117.9366724,
+    "end_ts": 1770995717.9366724,
+    "duration_s": 600
   },
-  "ticks": 7,
-  "contextful_ticks": 1,
-  "llm_attempted_contextful": 1,
+  "ticks": 1,
+  "contextful_ticks": 0,
+  "llm_attempted_contextful": 0,
   "llm_used_contextful": 0,
   "llm_selected_total": 0,
-  "llm_errors": {
-    "minimax:empty_or_timeout": 1
-  },
+  "llm_errors": {},
   "new_self_rows": 0,
   "new_self_rows_by_source": {},
   "providers_used": {}
