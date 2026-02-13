@@ -82,7 +82,9 @@ class TraceStore:
                 self._rotate_file()
         
         # Write events
-        with open(self.current_file, 'a', encoding='utf-8') as f:
+        # Note: some upstream sources can contain invalid Unicode surrogate codepoints.
+        # Use errors='replace' to avoid crashing the tracer/dashboard on write.
+        with open(self.current_file, 'a', encoding='utf-8', errors='replace') as f:
             for event_dict in self._write_buffer:
                 f.write(json.dumps(event_dict, ensure_ascii=False) + '\n')
         
