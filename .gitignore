@@ -85,6 +85,10 @@ dashboard_out.txt
 dashboard_err.txt
 reports/tune_replay_*.md
 
+# Large generated artifacts (keep repo lightweight)
+reports/advisory_auto_score_*.json
+visuals/out/*.mp4
+
 # Local npm scratch files (not tracked in repo)
 package.json
 package-lock.json

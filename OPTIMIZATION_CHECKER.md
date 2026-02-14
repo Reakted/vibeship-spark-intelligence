@@ -379,3 +379,34 @@ git push origin main
 ```
 
 Prefer `revert` (keeps history) over `reset`.
+
+### chg-20260214-190329-repo-lightweight-untrack-large-gener — Repo lightweight: untrack large generated artifacts
+
+- Status: **PLANNED**
+- Started: `2026-02-14T19:03:29Z`
+- Commit: ``
+- Baseline snapshot: ``
+- After snapshot: ``
+
+**Hypothesis:**
+Removing generated mp4/auto-score artifacts from git reduces repo bloat and speeds clones.
+
+**Risk:**
+Low: untracks only generated artifacts; files remain local.
+
+**Rollback:**
+git revert <sha>
+
+**Validation Today:**
+Confirm Spark still runs; visuals/out is regenerable; advisory auto score can be regenerated.
+
+**Validation Next Days:**
+No issues; artifacts continue to be generated locally but not committed.
+
+**Verification log:**
+- Day 0: 
+- Day 1: 
+- Day 2: 
+- Day 3: 
+
+- Mark verified: [ ]
