@@ -212,9 +212,13 @@ Look for:
   ```
 - (Optional) apply recommendations (not default):
   ```powershell
-  python scripts/tune_replay.py --apply --mode conservative
+  python scripts/tune_replay.py --apply --mode moderate
   ```
   This uses the built-in tuneable history snapshots for rollback.
+- (Optional) also apply source boost tuning (touches many sources; keep off unless intended):
+  ```powershell
+  python scripts/tune_replay.py --apply --apply-boosts --mode moderate
+  ```
 
 **Knobs:**
 - CLI-only: `--apply`, `--mode {conservative|moderate|aggressive}`, `--out <path>`

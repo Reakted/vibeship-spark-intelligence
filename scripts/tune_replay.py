@@ -16,7 +16,8 @@ Usage
 -----
 python scripts/tune_replay.py
 python scripts/tune_replay.py --out reports/tune_replay_latest.md
-python scripts/tune_replay.py --apply --mode conservative
+python scripts/tune_replay.py --apply --mode moderate
+python scripts/tune_replay.py --apply --mode moderate --apply-boosts
 
 """
 
@@ -103,7 +104,7 @@ def _top_outcome_risks(limit: int = 10, min_samples: int = 5) -> List[Dict[str, 
         return []
 
 
-def run(*, apply: bool, mode: str, out_path: Path | None) -> Dict[str, Any]:
+def run(*, apply: bool, apply_boosts: bool, mode: str, out_path: Path | None) -> Dict[str, Any]:
     from lib.auto_tuner import AutoTuner
     from lib.carmack_kpi import build_scorecard
 
@@ -130,7 +131,9 @@ def run(*, apply: bool, mode: str, out_path: Path | None) -> Dict[str, Any]:
         recs = [{"error": str(e)}]
 
     try:
-        boost_report = tuner.run(dry_run=not apply, force=True)
+        # Safety: even when --apply is set, do NOT apply boost tuning unless
+        # explicitly requested (boost tuning may touch many sources).
+        boost_report = tuner.run(dry_run=not (apply and apply_boosts), force=True)
     except Exception as e:
         boost_report = {"error": str(e)}
 
@@ -148,6 +151,7 @@ def run(*, apply: bool, mode: str, out_path: Path | None) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "generated_at": stamp,
         "apply": bool(apply),
+        "apply_boosts": bool(apply_boosts),
         "mode": str(mode),
         "scorecard": scorecard,
         "auto_tuner": {
@@ -190,7 +194,7 @@ def render_markdown(payload: Dict[str, Any]) -> str:
 
     lines: List[str] = []
     lines.append(f"# Tune Replay Report\n\nGenerated: `{generated_at}`\n")
-    lines.append(f"Mode: `{'APPLY' if apply else 'SUGGEST'}` (mode={mode})\n")
+    lines.append(f"Mode: `{'APPLY' if apply else 'SUGGEST'}` (mode={mode}, apply_boosts={bool(payload.get('apply_boosts'))})\n")
 
     lines.append("## Carmack KPI (current window)\n")
     if "error" in sc:
@@ -267,6 +271,11 @@ def main() -> None:
     p.add_argument("--out", default="", help="Write markdown report to this path")
     p.add_argument("--apply", action="store_true", help="Apply selected recommendations to tuneables.json")
     p.add_argument(
+        "--apply-boosts",
+        action="store_true",
+        help="Also apply auto-tuner boost changes (may touch many sources). Off by default.",
+    )
+    p.add_argument(
         "--mode",
         default="conservative",
         choices=["suggest", "conservative", "moderate", "aggressive"],
@@ -277,7 +286,7 @@ def main() -> None:
     out_path = Path(args.out) if args.out else None
     mode = str(args.mode or "conservative")
 
-    payload = run(apply=bool(args.apply), mode=mode, out_path=out_path)
+    payload = run(apply=bool(args.apply), apply_boosts=bool(args.apply_boosts), mode=mode, out_path=out_path)
 
     # Print a concise console summary.
     print(f"Generated: {payload.get('generated_at')}")
