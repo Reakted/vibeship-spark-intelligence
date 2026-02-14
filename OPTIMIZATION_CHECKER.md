@@ -472,3 +472,8 @@ Watch advice_followed rate + noise_burden; ensure no spam.
 - Day 3: 
 
 - Mark verified: [ ]
+
+#### Verification update: chg-20260214-192454-advisory-action-first-formatting-nex Day 0
+- Date (UTC): `2026-02-14`
+- Report: `C:/Users/USER/Desktop/vibeship-spark-intelligence/.optcheck/reports/2026-02-14_day0_chg-20260214-192454-advisory-action-first-formatting-nex.md`
+- Summary: sizes delta=+8362 bytes

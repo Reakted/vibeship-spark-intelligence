@@ -1074,14 +1074,35 @@ class ChipRuntime:
                 # Skip partial line
                 f.readline()
                 tail_data = f.read()
-            # Rewrite
-            tmp = chip_file.with_suffix('.jsonl.tmp')
+            # Rewrite (Windows-safe): write to a unique tmp then replace with retries.
+            tmp = chip_file.with_name(
+                chip_file.name + f".tmp.{os.getpid()}.{int(time.time() * 1000)}"
+            )
             with open(tmp, 'wb') as f:
                 f.write(tail_data)
-            tmp.replace(chip_file)
+
+            last_err: Exception | None = None
+            for _ in range(10):
+                try:
+                    tmp.replace(chip_file)
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+                    time.sleep(0.05)
+
+            if last_err is not None:
+                raise last_err
+
             log.info(f"Rotated {chip_file.name}: {size:,} -> {len(tail_data):,} bytes")
         except Exception as e:
             log.warning(f"Chip file rotation failed for {chip_file}: {e}")
+        finally:
+            try:
+                if 'tmp' in locals() and isinstance(tmp, Path) and tmp.exists():
+                    tmp.unlink()
+            except Exception:
+                pass
 
     def get_insights(self, chip_id: str = None, limit: int = 50) -> List[ChipInsight]:
         """Get recent insights, optionally filtered by chip."""
