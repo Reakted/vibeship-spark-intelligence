@@ -32,6 +32,7 @@ These optimizations were shipped as isolated commits so we can `git revert <sha>
 
 ### Phase-3 advisory intelligence (2026-02-14)
 16) `5c69b10` — Outcome predictor: lightweight risk scoring + advisory gate boost (flagged)
+17) `043e81b` — Tools: offline tune replay harness (safe suggest-by-default)
 
 Notes:
 - Prefer `git revert <sha>` (keeps history) instead of reset.
@@ -119,6 +120,17 @@ Look for:
 #### J) Macro mining (temporal tool-sequence abstractions)
 **Change:** `SPARK_MACROS_ENABLED=1` mines frequent successful tool n-grams and stores at most one macro insight per cycle.
 
+**What to look for:**
+- Over time, you should see macro-style insights appear in cognitive insights (META_LEARNING).
+
+**Checks:**
+- Inspect `~/.spark/cognitive_insights.json` for entries starting with `Macro (often works):`.
+- Make sure cognitive insights don't explode in count (bounded by min_count + the “one per cycle” cap).
+
+**Knobs:**
+- `SPARK_MACROS_ENABLED=1|0`
+- `SPARK_MACRO_MIN_COUNT=3` (default)
+
 ---
 
 ### Phase 2 memory upgrades (precision + size control)
@@ -148,6 +160,20 @@ Look for:
 #### L) Delta memory compaction (store updates as deltas when near-duplicate)
 **Change:** `SPARK_MEMORY_DELTAS=1` attempts to store only the “delta” when a new memory is very similar to a recent one (same scope/project/category).
 
+**What to look for:**
+- Repeated re-statements become short “Update (delta from …)” rows.
+- Retrieval stays useful (deltas still understandable).
+
+**Checks:**
+- Search for delta entries:
+  ```powershell
+  python -c "import sqlite3; from pathlib import Path; db=Path.home()/'.spark'/'memory_store.sqlite'; conn=sqlite3.connect(str(db)); rows=conn.execute(\"select memory_id, content from memories where content like 'Update (delta from %' order by created_at desc limit 5\").fetchall(); print(rows); conn.close()"
+  ```
+
+**Knobs:**
+- `SPARK_MEMORY_DELTAS=1|0`
+- `SPARK_MEMORY_DELTA_MIN_SIM=0.86` (default)
+
 ---
 
 ### Phase 3 advisory intelligence
@@ -172,32 +198,26 @@ Look for:
 
 ---
 
+#### N) Offline tune replay harness (suggest-by-default)
+**Change:** `scripts/tune_replay.py` generates a report combining KPI + tuning suggestions. It is safe by default and does **not** apply changes unless `--apply` is passed.
+
 **What to look for:**
-- Repeated re-statements become short “Update (delta from …)” rows.
-- Retrieval stays useful (deltas still understandable).
+- Running the script produces a markdown report you can skim in under a minute.
+- No tuneables changes unless explicitly requested.
 
 **Checks:**
-- Search for delta entries:
+- Generate report:
   ```powershell
-  python -c "import sqlite3, os; from pathlib import Path; db=Path.home()/'.spark'/'memory_store.sqlite'; conn=sqlite3.connect(str(db)); rows=conn.execute(\"select memory_id, content from memories where content like 'Update (delta from %' order by created_at desc limit 5\").fetchall(); print(rows); conn.close()"
+  python scripts/tune_replay.py --out reports\\tune_replay_latest.md
   ```
+- (Optional) apply recommendations (not default):
+  ```powershell
+  python scripts/tune_replay.py --apply --mode conservative
+  ```
+  This uses the built-in tuneable history snapshots for rollback.
 
 **Knobs:**
-- `SPARK_MEMORY_DELTAS=1|0`
-- `SPARK_MEMORY_DELTA_MIN_SIM=0.86` (default)
-
----
-
-**What to look for:**
-- Over time, you should see macro-style insights appear in cognitive insights (META_LEARNING).
-
-**Checks:**
-- Inspect `~/.spark/cognitive_insights.json` for entries starting with `Macro (often works):`.
-- Make sure cognitive insights don't explode in count (should be bounded by the min_count + “one per cycle” cap).
-
-**Knobs:**
-- `SPARK_MACROS_ENABLED=1|0`
-- `SPARK_MACRO_MIN_COUNT=3` (default)
+- CLI-only: `--apply`, `--mode {conservative|moderate|aggressive}`, `--out <path>`
 
 ---
 
