@@ -43,6 +43,10 @@ except Exception:
     FALLBACK_RATE_GUARD_WINDOW = 80
 MEMORY_SCOPE_DEFAULT = str(os.getenv("SPARK_MEMORY_SCOPE_DEFAULT", "session") or "session").strip() or "session"
 ACTIONABILITY_ENFORCE = os.getenv("SPARK_ADVISORY_REQUIRE_ACTION", "1") != "0"
+
+# Action-first formatting: move the actionable "Next check" command to the first line.
+ACTION_FIRST_ENABLED = os.getenv("SPARK_ADVISORY_ACTION_FIRST", "0") == "1"
+
 DELIVERY_STALE_SECONDS = float(os.getenv("SPARK_ADVISORY_STALE_S", "900"))
 ADVISORY_TEXT_REPEAT_COOLDOWN_S = float(
     os.getenv("SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S", "1800")
@@ -526,6 +530,37 @@ def _ensure_actionability(text: str, tool_name: str, task_plane: str) -> Dict[st
     return {"text": updated, "added": True, "command": command}
 
 
+def _action_first_format(text: str) -> str:
+    """Move the `Next check: ` command to the first line.
+
+    This keeps the same content but makes the action visible instantly, which
+    tends to improve follow-through.
+
+    If no `Next check: ...` is present, returns the input unchanged.
+    """
+    body = str(text or "").strip()
+    if not body:
+        return ""
+
+    # Already action-first.
+    if body.lower().startswith("next check:"):
+        return body
+
+    m = re.search(r"\bnext check:\s*`([^`]{3,})`\.?", body, flags=re.IGNORECASE)
+    if not m:
+        return body
+
+    cmd = str(m.group(1) or "").strip()
+    if not cmd:
+        return body
+
+    # Remove the inline clause and clean punctuation.
+    cleaned = re.sub(r"\s*\bnext check:\s*`[^`]{3,}`\.?\s*", " ", body, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    return f"Next check: `{cmd}`.\n{cleaned}".strip()
+
+
 def _derive_delivery_badge(
     events: List[Dict[str, Any]],
     *,
@@ -887,6 +922,8 @@ def on_pre_tool(
             # Emit the fallback deterministic text
             action_meta = _ensure_actionability(fallback_text, tool_name, task_plane)
             fallback_text = str(action_meta.get("text") or fallback_text)
+            if ACTION_FIRST_ENABLED:
+                fallback_text = _action_first_format(fallback_text)
             fallback_guard = _fallback_guard_allows()
             if not fallback_guard.get("allowed"):
                 save_state(state)
@@ -1015,6 +1052,8 @@ def on_pre_tool(
 
         action_meta = _ensure_actionability(synth_text, tool_name, task_plane)
         synth_text = str(action_meta.get("text") or synth_text)
+        if ACTION_FIRST_ENABLED:
+            synth_text = _action_first_format(synth_text)
         repeat_meta = _duplicate_repeat_state(state, synth_text)
         if repeat_meta["repeat"]:
             if packet_id:

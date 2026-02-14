@@ -441,3 +441,34 @@ Monitor for increased delivered advisories with stable noise burden; ensure no s
 - Day 3: 
 
 - Mark verified: [ ]
+
+### chg-20260214-192454-advisory-action-first-formatting-nex — Advisory: action-first formatting (Next check first line)
+
+- Status: **PLANNED**
+- Started: `2026-02-14T19:24:54Z`
+- Commit: ``
+- Baseline snapshot: ``
+- After snapshot: ``
+
+**Hypothesis:**
+Putting the actionable Next check command first increases real-time advisory follow-through without increasing noise.
+
+**Risk:**
+Low: formatting-only; no new advice content; flagged.
+
+**Rollback:**
+git revert <sha>
+
+**Validation Today:**
+Trigger advisories; confirm format shows Next check first line; check duplicate suppression still works; ensure no crashes.
+
+**Validation Next Days:**
+Watch advice_followed rate + noise_burden; ensure no spam.
+
+**Verification log:**
+- Day 0: 
+- Day 1: 
+- Day 2: 
+- Day 3: 
+
+- Mark verified: [ ]

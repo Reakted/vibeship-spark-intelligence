@@ -43,6 +43,9 @@ REM Advisory: cheap fallback hint when time budget is low (improves real-time de
 if "%SPARK_ADVISORY_LIVE_QUICK_FALLBACK%"=="" set SPARK_ADVISORY_LIVE_QUICK_FALLBACK=1
 if "%SPARK_ADVISORY_LIVE_QUICK_MIN_REMAINING_MS%"=="" set SPARK_ADVISORY_LIVE_QUICK_MIN_REMAINING_MS=900
 
+REM Advisory: action-first formatting (put Next check command on first line)
+if "%SPARK_ADVISORY_ACTION_FIRST%"=="" set SPARK_ADVISORY_ACTION_FIRST=1
+
 if "%SPARK_NO_MIND%"=="1" goto start_spark
 set MIND_PORT=%SPARK_MIND_PORT%
 if "%MIND_PORT%"=="" set MIND_PORT=8080
