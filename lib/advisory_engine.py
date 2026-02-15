@@ -48,7 +48,8 @@ ACTIONABILITY_ENFORCE = os.getenv("SPARK_ADVISORY_REQUIRE_ACTION", "1") != "0"
 ACTION_FIRST_ENABLED = os.getenv("SPARK_ADVISORY_ACTION_FIRST", "0") == "1"
 
 # Advisory speed lever: force programmatic synthesis (no AI/network) on the hot path.
-FORCE_PROGRAMMATIC_SYNTH = os.getenv("SPARK_ADVISORY_FORCE_PROGRAMMATIC_SYNTH", "0") == "1"
+# Default: ON (Carmack-style: deterministic + fast). Override via env or tuneable.
+FORCE_PROGRAMMATIC_SYNTH = os.getenv("SPARK_ADVISORY_FORCE_PROGRAMMATIC_SYNTH", "1") == "1"
 
 DELIVERY_STALE_SECONDS = float(os.getenv("SPARK_ADVISORY_STALE_S", "900"))
 ADVISORY_TEXT_REPEAT_COOLDOWN_S = float(

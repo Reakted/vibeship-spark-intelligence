@@ -71,7 +71,7 @@ python -m vibeship_optimizer change verify --change-id <chg-id> --apply --summar
 
 <!-- Append change records here via vibeship-optimizer. -->
 
-### chg-20260215-132034-advisory-speed-force-programmatic-sy — Advisory speed: force programmatic synth + packet index cache
+### chg-20260215-132034-advisory-speed-force-programmatic-sy - Advisory speed: force programmatic synth + packet index cache
 
 - Status: **SHIPPED**
 - Started: `2026-02-15T13:20:34Z`
@@ -97,6 +97,41 @@ git revert <sha>
 
 **Validation Next Days:**
 - Monitor advisory usefulness vs noise, and watch for any increased `no_emit` share.
+
+**Verification log:**
+- Day 0: 
+- Day 1: 
+- Day 2: 
+- Day 3: 
+
+- Mark verified: [ ]
+
+### chg-20260215-142935-step1-advisory-speed-default-force_p - Step1: advisory speed default (force_programmatic_synth default true)
+
+- Status: **SHIPPED**
+- Started: `2026-02-15T14:29:35Z`
+- Commit: ``
+- Baseline snapshot: `reports/optimizer/chg-20260215-142935-step1-advisory-speed-default-force_p_before_snapshot.json`
+- After snapshot: `reports/optimizer/chg-20260215-142935-step1-advisory-speed-default-force_p_after_snapshot.json`
+- Snapshot compare: `reports/optimizer/chg-20260215-142935-step1-advisory-speed-default-force_p_compare.md`
+- Advisory KPI: `reports/optimizer/chg-20260215-142935-step1-advisory-speed-default-force_p_advisory_delta.json`
+
+**Hypothesis:**
+- Advisory should be fast and deterministic by default. Network/LLM synthesis becomes an explicit opt-in for cases that can afford it.
+
+**Risk:**
+- Advisory text quality may regress for complex scenarios. Override with `SPARK_ADVISORY_FORCE_PROGRAMMATIC_SYNTH=0` or `advisory_engine.force_programmatic_synth=false`.
+
+**Rollback:**
+git revert <sha>
+
+**Validation Today:**
+- `python -m pytest -q tests/test_advisory_dual_path_router.py`
+- `scripts/advisory_controlled_delta.py` run saved (KPI JSON above)
+- `vibeship-optimizer compare` saved (snapshot compare above)
+
+**Validation Next Days:**
+- Watch advisory usefulness vs repetition/noise, and confirm no tail-latency regressions on real sessions.
 
 **Verification log:**
 - Day 0: 
