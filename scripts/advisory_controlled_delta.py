@@ -150,12 +150,15 @@ def run_workload(
     *,
     force_live: bool = False,
     reset_feedback_state: bool = True,
+    prompt_mode: str = "constant",
+    tool_input_mode: str = "synthetic",
 ) -> Dict[str, Any]:
     from lib import advisory_engine
     from lib import advisory_gate
     from lib import advisor as advisor_mod
     from lib import advisory_packet_store as packet_store
 
+    repo_root = Path(__file__).resolve().parents[1]
     spark_dir = Path.home() / ".spark"
     engine_log = spark_dir / "advisory_engine.jsonl"
     feedback_requests = spark_dir / "advice_feedback_requests.jsonl"
@@ -168,6 +171,7 @@ def run_workload(
             pass
 
     start_ts = time.time()
+    end_ts: float | None = None
     emitted_count = 0
     tools = ["Read", "Edit", "Task", "WebFetch", "Read", "Task", "Edit", "WebFetch"]
     orig_lookup_exact = packet_store.lookup_exact
@@ -181,12 +185,38 @@ def run_workload(
             tool_name = tools[i % len(tools)]
             session_id = f"{session_prefix}-{i % 6}"
             trace_id = f"{trace_prefix}-{i:04d}"
-            prompt = (
-                "Evaluate advisory quality under repeated tool execution. "
-                "Focus on precise, non-repetitive, actionable guidance with trace binding."
-            )
+
+            if tool_input_mode == "repo":
+                # Prefer real files so the advisor has a chance to match on concrete context.
+                candidates = [
+                    "AGENTS.md",
+                    "CLAUDE.md",
+                    "README.md",
+                    "docs/reports/2026-02-15_233443_prompt_run_10_2_6.md",
+                    "lib/advisor.py",
+                    "lib/advisory_engine.py",
+                    "scripts/advisory_controlled_delta.py",
+                ]
+                rel = candidates[i % len(candidates)]
+                file_path = str((repo_root / rel).resolve())
+            else:
+                file_path = f"synthetic/{tool_name.lower()}_{i}.txt"
+
+            if prompt_mode == "vary":
+                prompt = (
+                    "Evaluate advisory quality under repeated tool execution.\n"
+                    f"Round: {i}\n"
+                    f"Tool: {tool_name}\n"
+                    f"Target: {file_path}\n"
+                    "Requirements: be precise, non-repetitive, actionable, and bind advice to the trace."
+                )
+            else:
+                prompt = (
+                    "Evaluate advisory quality under repeated tool execution. "
+                    "Focus on precise, non-repetitive, actionable guidance with trace binding."
+                )
             advisory_engine.on_user_prompt(session_id, prompt)
-            tool_input = {"file_path": f"synthetic/{tool_name.lower()}_{i}.txt", "attempt": i}
+            tool_input = {"file_path": file_path, "attempt": i}
             text = advisory_engine.on_pre_tool(
                 session_id=session_id,
                 tool_name=tool_name,
@@ -205,6 +235,7 @@ def run_workload(
                 error=(None if success else "synthetic_failure"),
             )
     finally:
+        end_ts = time.time()
         if force_live:
             packet_store.lookup_exact = orig_lookup_exact  # type: ignore[assignment]
             packet_store.lookup_relaxed = orig_lookup_relaxed  # type: ignore[assignment]
@@ -218,10 +249,15 @@ def run_workload(
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "start_ts": start_ts,
+        "end_ts": end_ts,
         "rounds": rounds,
         "emitted_returns": emitted_count,
         "engine": _summarize_engine(engine_rows),
         "feedback_requests": _summarize_repeats(advice_rows),
+        "modes": {
+            "prompt_mode": str(prompt_mode),
+            "tool_input_mode": str(tool_input_mode),
+        },
         "config": {
             "advisory_engine": advisory_engine.get_engine_config(),
             "advisory_gate": advisory_gate.get_gate_config(),
@@ -241,6 +277,18 @@ def main() -> int:
     ap.add_argument("--out", default="", help="Optional output JSON path")
     ap.add_argument("--force-live", action="store_true", help="Bypass packet lookup to exercise live advisory path")
     ap.add_argument(
+        "--prompt-mode",
+        choices=("constant", "vary"),
+        default="constant",
+        help="constant: stable prompt for routing comparisons; vary: include tool/target/round to reduce dedupe.",
+    )
+    ap.add_argument(
+        "--tool-input-mode",
+        choices=("synthetic", "repo"),
+        default="synthetic",
+        help="synthetic: fake file paths; repo: rotate through real repo files to improve match odds.",
+    )
+    ap.add_argument(
         "--no-reset-feedback-state",
         action="store_true",
         help="Keep existing advice feedback state (default resets for clean comparisons)",
@@ -249,13 +297,16 @@ def main() -> int:
 
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     trace_prefix = f"delta-{args.label}-{ts}"
-    session_prefix = f"delta-{args.label}"
+    # Bench sessions bypass global/low-auth dedupe guards so controlled runs can measure emissions.
+    session_prefix = f"advisory-bench-{args.label}"
     summary = run_workload(
         rounds=max(1, int(args.rounds)),
         session_prefix=session_prefix,
         trace_prefix=trace_prefix,
         force_live=bool(args.force_live),
         reset_feedback_state=not bool(args.no_reset_feedback_state),
+        prompt_mode=str(args.prompt_mode),
+        tool_input_mode=str(args.tool_input_mode),
     )
     summary["label"] = str(args.label)
     summary["trace_prefix"] = trace_prefix
