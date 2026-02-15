@@ -212,3 +212,39 @@ git revert <sha>
 - Day 3: 
 
 - Mark verified: [ ]
+
+### chg-20260215-181949-step4-advisory-outcome-tags-actedblo - Step4: advisory outcome tags (acted/blocked/harmful/ignored)
+
+- Status: **SHIPPED**
+- Started: `2026-02-15T18:19:49Z`
+- Commit: `5c7a02b`
+- Baseline snapshot: `reports/optimizer/chg-20260215-181949-step4-advisory-outcome-tags-actedblo_before_snapshot.json`
+- After snapshot: `reports/optimizer/chg-20260215-181949-step4-advisory-outcome-tags-actedblo_after_snapshot.json`
+- Snapshot compare: `reports/optimizer/chg-20260215-181949-step4-advisory-outcome-tags-actedblo_compare.md`
+- Advisory KPI (live): `reports/optimizer/chg-20260215-181949-step4-advisory-outcome-tags-actedblo_advisory_delta.json`
+- Advisory KPI (cached): `reports/optimizer/chg-20260215-181949-step4-advisory-outcome-tags-actedblo_advisory_delta_cached.json`
+
+**Hypothesis:**
+- If we persist an explicit outcome tag per advisory packet (acted/blocked/harmful/ignored), we can do faster, simpler credit assignment than full self-evolution loops and reduce wasted advisory churn.
+
+**Risk:**
+- Counters can drift if `advice_id` matching is wrong, or if tools emit feedback without a corresponding packet.
+
+**Rollback:**
+git revert <sha>
+
+**Validation Today:**
+- `python -m pytest -q tests/test_advisory_dual_path_router.py`
+- `scripts/advisory_controlled_delta.py --rounds 80 --label speed --force-live`
+- `vibeship-optimizer compare` saved (snapshot compare above)
+
+**Validation Next Days:**
+- Monitor `~/.spark/advice_packets/*.json` for `acted_count/blocked_count/harmful_count/ignored_count` and `last_outcome`, and validate counts are being incremented in real tool flows.
+
+**Verification log:**
+- Day 0: 
+- Day 1: 
+- Day 2: 
+- Day 3: 
+
+- Mark verified: [ ]
