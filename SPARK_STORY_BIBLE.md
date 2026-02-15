@@ -514,4 +514,37 @@ Instead: "Built on one PC. Through real conversations. One insight at a time."
 
 ---
 
+## APPENDIX B: CANON BUILD LOG (Selected)
+
+This section is **Tier 3 canon**: true but operational; details may evolve.
+
+### 2026-02 — The Carmack Sprint (Lighter + Smarter, Without Breaking Things)
+
+A focused optimization sprint with a hard rule set:
+- one commit per optimization
+- flags for behavior changes
+- rollbackable via `git revert`
+- a living validation checklist (verify over days, not minutes)
+
+**Key upgrades that became canon:**
+- Advisory escalations became **less noisy, more trustworthy** via agreement gating (warnings require corroboration).
+- Under backlog pressure, the pipeline learned to **skip low-value work** to protect throughput.
+- Memory storage became **more precise and lighter** via patchified chunks + near-duplicate deltas.
+- Spark gained a world-model-lite “Outcome Predictor”: a tiny counter-based risk scorer that nudges caution when a tool/intent combo historically fails.
+
+**Meta-truth:** Spark didn’t just get faster; it learned a deeper law:
+> “Never claim improvement without proof.”
+
+### 2026-02 — The Optimization Checker (optcheck)
+
+A public-facing distillation of the Carmack Sprint into a reusable workflow:
+- snapshot → compare → monitor days → verify
+- review bundles + attestations to reduce hallucination risk
+- OpenClaw cron integration for daily autopilot ticks
+
+The checker exists because Spark’s story requires a discipline:
+- if learning is real, **validation must be real**.
+
+---
+
 *This is a living document. As Spark evolves, so does its story. Update this bible when new truths emerge - never fabricate. The most powerful stories are the real ones.*
