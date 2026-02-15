@@ -109,19 +109,35 @@ def record_feedback(
     followed: bool,
     insight_keys: Optional[List[str]] = None,
     sources: Optional[List[str]] = None,
+    status: Optional[str] = None,
+    outcome: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    packet_id: Optional[str] = None,
+    route: Optional[str] = None,
     notes: str = "",
     source: str = "cli",
 ) -> bool:
     """Record explicit feedback on advice helpfulness."""
     try:
         FEEDBACK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        st = str(status or "").strip().lower() if status else ""
+        if st and st not in {"acted", "blocked", "harmful", "ignored", "skipped"}:
+            st = ""
+        oc = str(outcome or "").strip().lower() if outcome else ""
+        if oc and oc not in {"good", "bad", "neutral"}:
+            oc = ""
         row = {
             "advice_ids": advice_ids[:20],
             "tool": tool,
             "helpful": helpful,
             "followed": followed,
+            "status": st or None,
+            "outcome": oc or None,
             "insight_keys": (insight_keys or [])[:20],
             "sources": (sources or [])[:20],
+            "trace_id": (str(trace_id)[:120] if trace_id else None),
+            "packet_id": (str(packet_id)[:120] if packet_id else None),
+            "route": (str(route)[:80] if route else None),
             "notes": notes[:200] if notes else "",
             "source": source,
             "created_at": time.time(),

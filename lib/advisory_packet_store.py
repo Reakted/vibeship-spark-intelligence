@@ -51,6 +51,10 @@ REQUIRED_PACKET_FIELDS = {
     "unhelpful_count",
     "noisy_count",
     "feedback_count",
+    "acted_count",
+    "blocked_count",
+    "harmful_count",
+    "ignored_count",
     "effectiveness_score",
 }
 REQUIRED_LINEAGE_FIELDS = {"sources", "memory_absent_declared"}
@@ -98,6 +102,10 @@ def _normalize_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
     out["unhelpful_count"] = max(0, _to_int(out.get("unhelpful_count", 0), 0))
     out["noisy_count"] = max(0, _to_int(out.get("noisy_count", 0), 0))
     out["feedback_count"] = max(0, _to_int(out.get("feedback_count", 0), 0))
+    out["acted_count"] = max(0, _to_int(out.get("acted_count", 0), 0))
+    out["blocked_count"] = max(0, _to_int(out.get("blocked_count", 0), 0))
+    out["harmful_count"] = max(0, _to_int(out.get("harmful_count", 0), 0))
+    out["ignored_count"] = max(0, _to_int(out.get("ignored_count", 0), 0))
     out["effectiveness_score"] = _compute_effectiveness_score(
         helpful_count=out["helpful_count"],
         unhelpful_count=out["unhelpful_count"],
@@ -286,6 +294,10 @@ def build_packet(
         "unhelpful_count": 0,
         "noisy_count": 0,
         "feedback_count": 0,
+        "acted_count": 0,
+        "blocked_count": 0,
+        "harmful_count": 0,
+        "ignored_count": 0,
         "effectiveness_score": 0.5,
     }
 
@@ -623,6 +635,116 @@ def record_packet_feedback(
         "effectiveness_score": float(packet.get("effectiveness_score", 0.5) or 0.5),
         "feedback_count": int(packet.get("feedback_count", 0) or 0),
     }
+
+
+def record_packet_outcome(
+    packet_id: str,
+    *,
+    status: str,
+    source: str = "implicit",
+    tool_name: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    notes: str = "",
+    # Optional: also update helpful/unhelpful counters using this outcome as a weak signal.
+    count_effectiveness: bool = True,
+) -> Dict[str, Any]:
+    """
+    Record an outcome tag for a packet.
+
+    Status is a small, operator-meaningful taxonomy:
+    - acted: advice was acted on and the step succeeded
+    - blocked: advice was acted on but the step failed/blocked
+    - harmful: advice was followed and led to a bad outcome (explicit tag)
+    - ignored: advice was shown but not acted on (explicit tag)
+    """
+    packet = get_packet(packet_id)
+    if not packet:
+        return {"ok": False, "reason": "packet_not_found", "packet_id": packet_id}
+
+    st = str(status or "").strip().lower()
+    if st not in {"acted", "blocked", "harmful", "ignored"}:
+        return {"ok": False, "reason": "invalid_status", "status": st, "packet_id": packet_id}
+
+    # Outcome counts are separate from explicit helpfulness feedback.
+    if st == "acted":
+        packet["acted_count"] = int(packet.get("acted_count", 0) or 0) + 1
+    elif st == "blocked":
+        packet["blocked_count"] = int(packet.get("blocked_count", 0) or 0) + 1
+    elif st == "harmful":
+        packet["harmful_count"] = int(packet.get("harmful_count", 0) or 0) + 1
+    elif st == "ignored":
+        packet["ignored_count"] = int(packet.get("ignored_count", 0) or 0) + 1
+
+    if count_effectiveness:
+        # Conservative mapping: treat acted as weak-positive, blocked/harmful as negative.
+        if st == "acted":
+            packet["helpful_count"] = int(packet.get("helpful_count", 0) or 0) + 1
+        elif st in {"blocked", "harmful"}:
+            packet["unhelpful_count"] = int(packet.get("unhelpful_count", 0) or 0) + 1
+
+    packet["last_outcome"] = {
+        "status": st,
+        "source": str(source or "")[:80],
+        "tool": str(tool_name or "")[:40] if tool_name else "",
+        "trace_id": str(trace_id or "")[:120] if trace_id else "",
+        "notes": str(notes or "")[:200] if notes else "",
+        "ts": _now(),
+    }
+    packet = _normalize_packet(packet)
+    save_packet(packet)
+    return {
+        "ok": True,
+        "packet_id": packet_id,
+        "status": st,
+        "effectiveness_score": float(packet.get("effectiveness_score", 0.5) or 0.5),
+        "acted_count": int(packet.get("acted_count", 0) or 0),
+        "blocked_count": int(packet.get("blocked_count", 0) or 0),
+        "harmful_count": int(packet.get("harmful_count", 0) or 0),
+        "ignored_count": int(packet.get("ignored_count", 0) or 0),
+    }
+
+
+def record_packet_outcome_for_advice(
+    advice_id: str,
+    *,
+    status: str,
+    source: str = "explicit",
+    tool_name: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    notes: str = "",
+    count_effectiveness: bool = True,
+) -> Dict[str, Any]:
+    """Find the newest packet that contains advice_id and record an outcome tag on it."""
+    advice = str(advice_id or "").strip()
+    if not advice:
+        return {"ok": False, "reason": "missing_advice_id"}
+
+    index = _load_index()
+    meta = index.get("packet_meta") or {}
+    ordered_ids = sorted(
+        meta.keys(),
+        key=lambda pid: float((meta.get(pid) or {}).get("updated_ts", 0.0)),
+        reverse=True,
+    )
+    for packet_id in ordered_ids:
+        packet = get_packet(packet_id)
+        if not packet:
+            continue
+        advice_rows = packet.get("advice_items") or []
+        for row in advice_rows:
+            if str((row or {}).get("advice_id") or "").strip() == advice:
+                result = record_packet_outcome(
+                    packet_id,
+                    status=status,
+                    source=source,
+                    tool_name=tool_name,
+                    trace_id=trace_id,
+                    notes=notes,
+                    count_effectiveness=count_effectiveness,
+                )
+                result["matched_advice_id"] = advice
+                return result
+    return {"ok": False, "reason": "packet_not_found_for_advice", "advice_id": advice}
 
 
 def record_packet_feedback_for_advice(

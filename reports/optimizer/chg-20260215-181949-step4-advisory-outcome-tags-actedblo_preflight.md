@@ -1,0 +1,460 @@
+# Optimization Preflight Report
+
+Generated: `2026-02-15T18:19:52Z`
+
+Worst level: **fail**
+
+## Git
+
+- branch: `main`
+- describe: `097e0c1-dirty`
+- dirty: `True` (9)
+
+## Findings
+
+- **FAIL** `REVIEW_ATTESTATION_MISSING` - Review attestation missing for change_id=chg-20260215-181949-step4-advisory-outcome-tags-actedblo.
+  - hint: Run: vibeship-optimizer review bundle ... then vibeship-optimizer review attest --tool codex --reasoning-mode xhigh ...
+- **WARN** `GIT_DIRTY` - Working tree is dirty (9 changed files).
+  - hint: Commit or stash before snapshotting so before/after is attributable.
+- **INFO** `HTTP_PROBES_EMPTY` - No http_probes configured.
+  - hint: Optional: add a /health endpoint probe for services.
+- **INFO** `BLOAT_DIR_PRESENT` - Directory present: node_modules (154743546 bytes).
+  - hint: Consider excluding from size_paths if it's not part of shipped artifact, or measure it separately.
+- **INFO** `BLOAT_DIR_PRESENT` - Directory present: build (418070 bytes).
+  - hint: Consider excluding from size_paths if it's not part of shipped artifact, or measure it separately.
+
+## Analyze (high level)
+
+- `.`: 740909547 bytes
+- `node_modules`: 154743546 bytes
+- `lib`: 5852629 bytes
+- `tests`: 2129279 bytes
+- `docs`: 1388271 bytes
+- `scripts`: 866307 bytes
+- `build`: 418070 bytes
+
+---
+
+Raw JSON:
+
+```json
+{
+  "schema": "vibeship_optimizer.preflight.v1",
+  "generated_at": "2026-02-15T18:19:52Z",
+  "project_root": "C:\\Users\\USER\\Desktop\\vibeship-spark-intelligence",
+  "worst_level": "fail",
+  "git": {
+    "is_git": true,
+    "git_root": "C:\\Users\\USER\\Desktop\\vibeship-spark-intelligence",
+    "branch": "main",
+    "commit": "097e0c160037711bea704169f9f5080e78904c93",
+    "describe": "097e0c1-dirty",
+    "dirty": true,
+    "dirty_count": 9,
+    "diff_stat": "CLAUDE.md               |   6 +++\n VIBESHIP_OPTIMIZER.md   |  31 ++++++++++++\n docs/DOCS_INDEX.md      |   3 ++\n hooks/observe.py        |   5 ++\n lib/eidos/guardrails.py | 131 ++++++++++++++++++++++++++++++++++++++++++++++++\n 5 files changed, 176 insertions(+)"
+  },
+  "config_path": "C:\\Users\\USER\\Desktop\\vibeship-spark-intelligence\\vibeship_optimizer.yml",
+  "findings": [
+    {
+      "level": "fail",
+      "code": "REVIEW_ATTESTATION_MISSING",
+      "message": "Review attestation missing for change_id=chg-20260215-181949-step4-advisory-outcome-tags-actedblo.",
+      "hint": "Run: vibeship-optimizer review bundle ... then vibeship-optimizer review attest --tool codex --reasoning-mode xhigh ..."
+    },
+    {
+      "level": "warn",
+      "code": "GIT_DIRTY",
+      "message": "Working tree is dirty (9 changed files).",
+      "hint": "Commit or stash before snapshotting so before/after is attributable."
+    },
+    {
+      "level": "info",
+      "code": "HTTP_PROBES_EMPTY",
+      "message": "No http_probes configured.",
+      "hint": "Optional: add a /health endpoint probe for services."
+    },
+    {
+      "level": "info",
+      "code": "BLOAT_DIR_PRESENT",
+      "message": "Directory present: node_modules (154743546 bytes).",
+      "hint": "Consider excluding from size_paths if it's not part of shipped artifact, or measure it separately."
+    },
+    {
+      "level": "info",
+      "code": "BLOAT_DIR_PRESENT",
+      "message": "Directory present: build (418070 bytes).",
+      "hint": "Consider excluding from size_paths if it's not part of shipped artifact, or measure it separately."
+    }
+  ],
+  "analysis": {
+    "schema": "vibeship_optimizer.analyze.v1",
+    "generated_at": "2026-02-15T18:19:49Z",
+    "project_root": "C:\\Users\\USER\\Desktop\\vibeship-spark-intelligence",
+    "languages_detected": [
+      "node",
+      "python"
+    ],
+    "intents": [],
+    "dir_sizes": [
+      {
+        "path": ".",
+        "bytes": 740909547
+      },
+      {
+        "path": "node_modules",
+        "bytes": 154743546
+      },
+      {
+        "path": "lib",
+        "bytes": 5852629
+      },
+      {
+        "path": "tests",
+        "bytes": 2129279
+      },
+      {
+        "path": "docs",
+        "bytes": 1388271
+      },
+      {
+        "path": "scripts",
+        "bytes": 866307
+      },
+      {
+        "path": "build",
+        "bytes": 418070
+      }
+    ],
+    "largest_files": [
+      {
+        "path": "tmp/agent-lightning/uv.lock",
+        "bytes": 12904496
+      },
+      {
+        "path": "reports/advisory_auto_score_20260213_165323.json",
+        "bytes": 3655466
+      },
+      {
+        "path": "visuals/out/funnel.mp4",
+        "bytes": 2934845
+      },
+      {
+        "path": "visuals/out/FunnelStill.mp4",
+        "bytes": 2934845
+      },
+      {
+        "path": "tmp/agent-lightning/docs/assets/readme-diff.svg",
+        "bytes": 1999368
+      },
+      {
+        "path": "tmp/agent-lightning/tests/assets/chinook.db",
+        "bytes": 913408
+      },
+      {
+        "path": "tmp/agent-lightning/docs/assets/store-api-visualized.svg",
+        "bytes": 837381
+      },
+      {
+        "path": "tmp/agent-lightning/docs/assets/agentops-waterfall-visualization.jpg",
+        "bytes": 548710
+      },
+      {
+        "path": "tmp/agent-lightning/docs/assets/readme-architecture.svg",
+        "bytes": 541689
+      },
+      {
+        "path": "tmp/agent-lightning/docker/grafana/dashboards/1860_rev42.json",
+        "bytes": 489629
+      },
+      {
+        "path": "tmp/agent-lightning/dashboard/package-lock.json",
+        "bytes": 392625
+      },
+      {
+        "path": "tmp/agent-lightning/examples/azure/assets/aoai_finetune.svg",
+        "bytes": 387967
+      },
+      {
+        "path": "tmp/local_model_compare_intel_speed_useful_r5_live12.json",
+        "bytes": 352188
+      },
+      {
+        "path": "tmp/agent-lightning/docs/assets/sql-agent-diff.png",
+        "bytes": 317493
+      },
+      {
+        "path": "_tmp/vibeship-optimizer-finalcheck-venv/Lib/site-packages/pip/_vendor/certifi/cacert.pem",
+        "bytes": 297255
+      },
+      {
+        "path": "tmp/agent-lightning/docs/assets/dashboard-page-rollouts.png",
+        "bytes": 281932
+      },
+      {
+        "path": "sandbox/spark_sandbox/home/.spark/chip_insights/bench_core.jsonl",
+        "bytes": 257328
+      },
+      {
+        "path": "_tmp/vibeship-optimizer-finalcheck-venv/Scripts/python.exe",
+        "bytes": 254800
+      },
+      {
+        "path": "_tmp/vibeship-optimizer-finalcheck-venv/Lib/site-packages/yaml/_yaml.cp313-win_amd64.pyd",
+        "bytes": 253952
+      },
+      {
+        "path": "tmp/agent-lightning/docs/assets/dashboard-page-traces.png",
+        "bytes": 253099
+      },
+      {
+        "path": "_tmp/vibeship-optimizer-finalcheck-venv/Scripts/pythonw.exe",
+        "bytes": 250336
+      },
+      {
+        "path": "benchmarks/out/advisory_realism_indirect_abcd_v2_cycle1_report.json",
+        "bytes": 242637
+      },
+      {
+        "path": "benchmarks/out/advisory_realism_indirect_abcd_v2_cycle2_report.json",
+        "bytes": 242087
+      },
+      {
+        "path": "benchmarks/out/advisory_realism_indirect_abcd_v2_cycle3_report.json",
+        "bytes": 242085
+      },
+      {
+        "path": "tmp/agent-lightning/docs/assets/sql-agent-val-reward-curve.png",
+        "bytes": 240347
+      }
+    ],
+    "questions": [
+      {
+        "id": "build.deps",
+        "text": "Do we have heavy or duplicate dependencies that can be removed or replaced with lighter ones?",
+        "tags": [
+          "build",
+          "deps",
+          "general"
+        ],
+        "intents": [
+          "build_time",
+          "cost",
+          "disk"
+        ]
+      },
+      {
+        "id": "build.incremental",
+        "text": "Are builds/tests incremental and cached (compiler cache, test selection, dependency caching)?",
+        "tags": [
+          "build",
+          "general"
+        ],
+        "intents": [
+          "build_time",
+          "developer_experience",
+          "test_time"
+        ]
+      },
+      {
+        "id": "disk.logs",
+        "text": "Are logs/JSONL/trace outputs bounded (rotation, sampling, caps) and are caps append-only?",
+        "tags": [
+          "disk",
+          "general",
+          "observability"
+        ],
+        "intents": [
+          "cost",
+          "disk",
+          "reliability"
+        ]
+      },
+      {
+        "id": "mem.leaks",
+        "text": "Do we have memory growth over hours/days (leaks, caches without TTL/LRU, unbounded queues)?",
+        "tags": [
+          "general",
+          "memory"
+        ],
+        "intents": [
+          "cost",
+          "memory",
+          "reliability"
+        ]
+      },
+      {
+        "id": "node.bundle",
+        "text": "Node: are we shipping minimal bundles (tree-shaking, code splitting) and avoiding huge transitive deps?",
+        "tags": [
+          "node"
+        ],
+        "intents": [
+          "disk",
+          "latency",
+          "startup_time"
+        ]
+      },
+      {
+        "id": "perf.allocations",
+        "text": "Are we creating large intermediate objects/strings that can be streamed/chunked?",
+        "tags": [
+          "general",
+          "memory",
+          "perf"
+        ],
+        "intents": [
+          "latency",
+          "memory"
+        ]
+      },
+      {
+        "id": "perf.concurrency",
+        "text": "Do we have lock contention or single-thread bottlenecks, and can we bound critical sections?",
+        "tags": [
+          "concurrency",
+          "general",
+          "perf"
+        ],
+        "intents": [
+          "latency",
+          "throughput"
+        ]
+      },
+      {
+        "id": "perf.hot_path",
+        "text": "What is the top hot-path (p95/p99) and do we have a profiler/trace proving it?",
+        "tags": [
+          "general",
+          "perf"
+        ],
+        "intents": [
+          "latency",
+          "throughput"
+        ]
+      },
+      {
+        "id": "perf.io",
+        "text": "Are we doing unnecessary disk/network I/O on the hot path (full-file reads, chatty calls, unbounded logs)?",
+        "tags": [
+          "general",
+          "io",
+          "perf"
+        ],
+        "intents": [
+          "disk",
+          "latency",
+          "throughput"
+        ]
+      },
+      {
+        "id": "py.import_time",
+        "text": "Python: have we measured import time and eliminated expensive import side-effects?",
+        "tags": [
+          "python"
+        ],
+        "intents": [
+          "startup_time"
+        ]
+      },
+      {
+        "id": "py.logging",
+        "text": "Python: are debug logs guarded and structured logging sampling/batching used where high volume?",
+        "tags": [
+          "python"
+        ],
+        "intents": [
+          "disk",
+          "latency"
+        ]
+      },
+      {
+        "id": "reliability.fallbacks",
+        "text": "Do we have safe fallbacks when optional subsystems fail (cache miss, telemetry failure, slow dependency)?",
+        "tags": [
+          "general",
+          "reliability"
+        ],
+        "intents": [
+          "reliability"
+        ]
+      },
+      {
+        "id": "reliability.timeouts",
+        "text": "Are external calls protected with timeouts, retries (bounded), and circuit breakers?",
+        "tags": [
+          "general",
+          "reliability"
+        ],
+        "intents": [
+          "latency",
+          "reliability"
+        ]
+      },
+      {
+        "id": "safety.flags",
+        "text": "Can the change be gated behind a flag/knob so it can be turned off without reverting?",
+        "tags": [
+          "general",
+          "safety"
+        ],
+        "intents": [
+          "reliability"
+        ]
+      },
+      {
+        "id": "safety.measure_before_after",
+        "text": "Do we have before/after snapshots for runtime, size, and health probes?",
+        "tags": [
+          "general",
+          "measurement"
+        ],
+        "intents": [
+          "cost",
+          "reliability"
+        ]
+      },
+      {
+        "id": "safety.one_change",
+        "text": "Are we doing one optimization per commit, with a clear rollback path (git revert)?",
+        "tags": [
+          "general",
+          "safety"
+        ],
+        "intents": [
+          "reliability"
+        ]
+      },
+      {
+        "id": "startup.imports",
+        "text": "What is contributing to startup time (imports/init, migrations, model loads, cache warmup)?",
+        "tags": [
+          "general",
+          "startup"
+        ],
+        "intents": [
+          "startup_time"
+        ]
+      },
+      {
+        "id": "startup.lazy",
+        "text": "Can we lazy-load non-critical subsystems so first response is fast?",
+        "tags": [
+          "general",
+          "startup"
+        ],
+        "intents": [
+          "latency",
+          "startup_time"
+        ]
+      }
+    ],
+    "python_unused_dep_hints": {
+      "dependency_count": 2,
+      "scanned_py_files": 1074,
+      "import_roots_count": 299,
+      "maybe_unused": [],
+      "note": "Heuristic only. False positives expected (optional deps, dynamic imports, plugins)."
+    }
+  }
+}
+```

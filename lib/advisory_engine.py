@@ -1330,7 +1330,7 @@ def on_post_tool(
             _record_implicit_feedback(state, tool_name, success, resolved_trace_id)
 
         try:
-            from .advisory_packet_store import record_packet_feedback
+            from .advisory_packet_store import record_packet_outcome
 
             last_packet_id = str(state.last_advisory_packet_id or "").strip()
             last_tool = str(state.last_advisory_tool or "").strip().lower()
@@ -1341,15 +1341,17 @@ def on_post_tool(
                 and last_tool == str(tool_name or "").strip().lower()
                 and age_s <= 900
             ):
-                record_packet_feedback(
+                record_packet_outcome(
                     last_packet_id,
-                    helpful=bool(success),
-                    noisy=False,
-                    followed=False,  # Don't assume advice was followed; only explicit feedback should set this
+                    status=("acted" if bool(success) else "blocked"),
+                    tool_name=str(tool_name or ""),
+                    trace_id=resolved_trace_id,
+                    notes=(str(error or "")[:200] if error else ""),
                     source="implicit_post_tool",
+                    count_effectiveness=True,
                 )
         except Exception as e:
-            log_debug("advisory_engine", "AE_PKT_FEEDBACK_POST_TOOL_FAILED", e)
+            log_debug("advisory_engine", "AE_PKT_OUTCOME_POST_TOOL_FAILED", e)
 
         if tool_name in {"Edit", "Write"}:
             try:
