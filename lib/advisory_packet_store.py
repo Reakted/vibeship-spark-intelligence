@@ -57,6 +57,7 @@ REQUIRED_LINEAGE_FIELDS = {"sources", "memory_absent_declared"}
 
 _INDEX_CACHE: Optional[Dict[str, Any]] = None
 _INDEX_CACHE_MTIME_NS: Optional[int] = None
+_ALIASED_EXACT_KEYS: set[str] = set()
 
 
 def _to_int(value: Any, default: int = 0) -> int:
@@ -198,6 +199,40 @@ def _save_index(index: Dict[str, Any]) -> None:
         _INDEX_CACHE_MTIME_NS = int(INDEX_FILE.stat().st_mtime_ns) if INDEX_FILE.exists() else None
     except Exception:
         _INDEX_CACHE_MTIME_NS = None
+
+
+def alias_exact_key(
+    *,
+    project_key: str,
+    session_context_key: str,
+    tool_name: str,
+    intent_family: str,
+    packet_id: str,
+) -> bool:
+    """
+    Promote a packet found via relaxed lookup into the exact index by creating an alias from the
+    current exact key to the existing packet_id. This increases future exact-hit rate without
+    duplicating packet files.
+    """
+    if not packet_id:
+        return False
+    project = _sanitize_token(project_key, "unknown_project")
+    session_ctx = _sanitize_token(session_context_key, "default")
+    tool = _sanitize_token(tool_name, "*")
+    intent = _sanitize_token(intent_family, "emergent_other")
+    exact_key = _make_exact_key(project, session_ctx, tool, intent)
+    if exact_key in _ALIASED_EXACT_KEYS:
+        return False
+    index = _load_index()
+    by_exact = index.get("by_exact") or {}
+    if by_exact.get(exact_key) == packet_id:
+        _ALIASED_EXACT_KEYS.add(exact_key)
+        return False
+    by_exact[exact_key] = packet_id
+    index["by_exact"] = by_exact
+    _save_index(index)
+    _ALIASED_EXACT_KEYS.add(exact_key)
+    return True
 
 
 def build_packet(
@@ -368,7 +403,12 @@ def lookup_exact(
     now_ts: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     index = _load_index()
-    exact_key = _make_exact_key(project_key, session_context_key, tool_name, intent_family)
+    # Mirror build_packet/save_packet sanitization so exact hits work even if caller passes raw values.
+    project = _sanitize_token(project_key, "unknown_project")
+    session_ctx = _sanitize_token(session_context_key, "default")
+    tool = _sanitize_token(tool_name, "*")
+    intent = _sanitize_token(intent_family, "emergent_other")
+    exact_key = _make_exact_key(project, session_ctx, tool, intent)
     packet_id = (index.get("by_exact") or {}).get(exact_key)
     packet = get_packet(str(packet_id or ""))
     if not packet:
@@ -390,10 +430,14 @@ def lookup_relaxed(
     meta = index.get("packet_meta") or {}
     now_value = float(now_ts if now_ts is not None else _now())
     candidates: List[Tuple[float, float, str]] = []
+    project = _sanitize_token(project_key, "unknown_project")
+    tool_name = _sanitize_token(tool_name, "") if tool_name else ""
+    intent_family = _sanitize_token(intent_family, "") if intent_family else ""
+    task_plane = _sanitize_token(task_plane, "") if task_plane else ""
 
     for packet_id, item in meta.items():
         row = item or {}
-        if row.get("project_key") != project_key:
+        if row.get("project_key") != project:
             continue
         if bool(row.get("invalidated")):
             continue

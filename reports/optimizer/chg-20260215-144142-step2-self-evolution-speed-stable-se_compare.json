@@ -1,0 +1,75 @@
+{
+  "schema": "vibeship_optimizer.compare.v1",
+  "before": {
+    "label": "chg-20260215-144142-step2-self-evolution-speed-stable-se-before",
+    "generated_at": "2026-02-15T14:41:46Z",
+    "git": {
+      "is_git": true,
+      "git_root": "C:\\Users\\USER\\Desktop\\vibeship-spark-intelligence",
+      "branch": "main",
+      "commit": "8c57587531bf875bdf9df6f8bea229fcb4b9b096",
+      "describe": "8c57587-dirty",
+      "dirty": true,
+      "dirty_count": 2,
+      "diff_stat": "VIBESHIP_OPTIMIZER.md | 31 +++++++++++++++++++++++++++++++\n 1 file changed, 31 insertions(+)"
+    }
+  },
+  "after": {
+    "label": "chg-20260215-144142-step2-self-evolution-speed-stable-se-after",
+    "generated_at": "2026-02-15T14:57:49Z",
+    "git": {
+      "is_git": true,
+      "git_root": "C:\\Users\\USER\\Desktop\\vibeship-spark-intelligence",
+      "branch": "main",
+      "commit": "8c57587531bf875bdf9df6f8bea229fcb4b9b096",
+      "describe": "8c57587-dirty",
+      "dirty": true,
+      "dirty_count": 9,
+      "diff_stat": "TUNEABLES.md                        |  1 +\n VIBESHIP_OPTIMIZER.md               | 31 +++++++++++++++++++++\n lib/advisory_engine.py              | 54 ++++++++++++++++++++++++++++++++++---\n lib/advisory_packet_store.py        | 48 +++++++++++++++++++++++++++++++--\n lib/advisory_prefetch_worker.py     | 12 +++++++--\n scripts/vibeship_optimizer_loop.ps1 |  6 +++++\n 6 files changed, 144 insertions(+), 8 deletions(-)"
+    }
+  },
+  "deltas": {
+    "sizes": {
+      "docs": {
+        "before_bytes": 1362394,
+        "after_bytes": 1362394,
+        "delta_bytes": 0
+      },
+      "lib": {
+        "before_bytes": 5830091,
+        "after_bytes": 5838258,
+        "delta_bytes": 8167
+      },
+      "scripts": {
+        "before_bytes": 865881,
+        "after_bytes": 866307,
+        "delta_bytes": 426
+      }
+    },
+    "timings": [
+      {
+        "name": "advisory_delta",
+        "before_mean_s": 29.7792,
+        "after_mean_s": 24.3534,
+        "delta_mean_s": -5.425799999999999,
+        "before_p95_s": 29.7792,
+        "after_p95_s": 24.3534,
+        "delta_p95_s": -5.425799999999999,
+        "before_last_rc": 0,
+        "after_last_rc": 0
+      },
+      {
+        "name": "pipeline_health",
+        "before_mean_s": 1.3078,
+        "after_mean_s": 1.297,
+        "delta_mean_s": -0.010800000000000143,
+        "before_p95_s": 1.3078,
+        "after_p95_s": 1.297,
+        "delta_p95_s": -0.010800000000000143,
+        "before_last_rc": 0,
+        "after_last_rc": 0
+      }
+    ],
+    "http": []
+  }
+}

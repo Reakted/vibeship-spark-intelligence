@@ -16,6 +16,9 @@ PROCESSED_MAX = 4000
 PREFETCH_MAX_JOBS = 3
 PREFETCH_MAX_TOOLS_PER_JOB = 3
 PREFETCH_MIN_PROBABILITY = 0.25
+PREFETCH_QUEUE_TAIL_ROWS = max(
+    100, int(os.getenv("SPARK_ADVISORY_PREFETCH_QUEUE_TAIL_ROWS", "2000") or 2000)
+)
 
 
 def _parse_bool(value: Any, default: bool) -> bool:
@@ -154,7 +157,11 @@ def _read_queue_rows() -> List[Dict[str, Any]]:
         return []
     out: List[Dict[str, Any]] = []
     try:
-        for line in queue_file.read_text(encoding="utf-8").splitlines():
+        lines = queue_file.read_text(encoding="utf-8").splitlines()
+        # Tail-read for scalability: inline prefetch should not grow linearly with queue size.
+        if len(lines) > PREFETCH_QUEUE_TAIL_ROWS:
+            lines = lines[-PREFETCH_QUEUE_TAIL_ROWS :]
+        for line in lines:
             row = line.strip()
             if not row:
                 continue
@@ -172,7 +179,8 @@ def _read_queue_rows() -> List[Dict[str, Any]]:
 def _pending_jobs(rows: List[Dict[str, Any]], processed_ids: List[str]) -> List[Dict[str, Any]]:
     done = {str(x) for x in (processed_ids or []) if str(x).strip()}
     out: List[Dict[str, Any]] = []
-    for row in rows:
+    # Newest-first so inline prefetch benefits the current session even if the queue is large.
+    for row in reversed(rows):
         job_id = str(row.get("job_id") or "").strip()
         if not job_id:
             continue

@@ -1162,6 +1162,7 @@ This is the active hot-path advisory stack used by hooks:
 | `SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S` | `1800` | Suppress re-emitting same advisory text during cooldown window. |
 | `SPARK_ADVISORY_REQUIRE_ACTION` | `1` | Enforce actionable next-check text when advisory is too generic. |
 | `SPARK_ADVISORY_FORCE_PROGRAMMATIC_SYNTH` | `1` | Force programmatic synthesis (no AI/network) on the pre-tool hot path. Tuneable `advisory_engine.force_programmatic_synth` (if set) overrides this. |
+| `SPARK_ADVISORY_SESSION_KEY_INCLUDE_RECENT_TOOLS` | `0` | Include recent tool sequence in packet exact-keying (higher specificity, lower cache hit rate). Tuneable `advisory_engine.session_key_include_recent_tools` (if set) overrides this. |
 | `SPARK_ADVISORY_PREFETCH_QUEUE` | `1` | Enables enqueueing background prefetch jobs from user prompts. |
 | `SPARK_ADVISORY_PACKET_FALLBACK_EMIT` | `0` | Enables packet no-emit deterministic fallback emission. Default `0` keeps fallback output opt-in. |
 | `SPARK_ADVISORY_FALLBACK_RATE_GUARD` | `1` | Enables rate guard for packet no-emit fallback emissions. |

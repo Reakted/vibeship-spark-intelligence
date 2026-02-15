@@ -88,10 +88,16 @@ if ($Phase -eq "finish") {
   & python scripts/advisory_controlled_delta.py --rounds $Rounds --label $ChangeId --force-live --out $deltaOut | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "advisory_controlled_delta failed" }
 
+  # Self-evolution KPI capture (packet reuse / exact hit rate) - allow packet store lookups.
+  $deltaCachedOut = "reports/optimizer/$ChangeId`_advisory_delta_cached.json"
+  & python scripts/advisory_controlled_delta.py --rounds $Rounds --label $ChangeId --out $deltaCachedOut | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "advisory_controlled_delta(cached) failed" }
+
   Write-Host ("change_id=" + $ChangeId)
   Write-Host ("after_snapshot=" + $afterSnap)
   Write-Host ("compare_md=" + $cmpMd)
   Write-Host ("advisory_delta=" + $deltaOut)
+  Write-Host ("advisory_delta_cached=" + $deltaCachedOut)
   exit 0
 }
 

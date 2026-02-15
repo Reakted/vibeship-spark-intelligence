@@ -51,6 +51,12 @@ ACTION_FIRST_ENABLED = os.getenv("SPARK_ADVISORY_ACTION_FIRST", "0") == "1"
 # Default: ON (Carmack-style: deterministic + fast). Override via env or tuneable.
 FORCE_PROGRAMMATIC_SYNTH = os.getenv("SPARK_ADVISORY_FORCE_PROGRAMMATIC_SYNTH", "1") == "1"
 
+# Self-evolution speed lever: stable exact-keying for packets. When enabled, the session key includes
+# the recent tool sequence (higher specificity, lower cache hit rate). Default: OFF.
+SESSION_KEY_INCLUDE_RECENT_TOOLS = (
+    os.getenv("SPARK_ADVISORY_SESSION_KEY_INCLUDE_RECENT_TOOLS", "0") == "1"
+)
+
 DELIVERY_STALE_SECONDS = float(os.getenv("SPARK_ADVISORY_STALE_S", "900"))
 ADVISORY_TEXT_REPEAT_COOLDOWN_S = float(
     os.getenv("SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S", "1800")
@@ -108,6 +114,7 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     global DELIVERY_STALE_SECONDS
     global ADVISORY_TEXT_REPEAT_COOLDOWN_S
     global FORCE_PROGRAMMATIC_SYNTH
+    global SESSION_KEY_INCLUDE_RECENT_TOOLS
 
     applied: List[str] = []
     warnings: List[str] = []
@@ -210,6 +217,13 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
         )
         applied.append("force_programmatic_synth")
 
+    if "session_key_include_recent_tools" in cfg:
+        SESSION_KEY_INCLUDE_RECENT_TOOLS = _parse_bool(
+            cfg.get("session_key_include_recent_tools"),
+            SESSION_KEY_INCLUDE_RECENT_TOOLS,
+        )
+        applied.append("session_key_include_recent_tools")
+
     if "delivery_stale_s" in cfg:
         try:
             DELIVERY_STALE_SECONDS = max(
@@ -247,6 +261,7 @@ def get_engine_config() -> Dict[str, Any]:
         "prefetch_inline_max_jobs": int(INLINE_PREFETCH_MAX_JOBS),
         "actionability_enforce": bool(ACTIONABILITY_ENFORCE),
         "force_programmatic_synth": bool(FORCE_PROGRAMMATIC_SYNTH),
+        "session_key_include_recent_tools": bool(SESSION_KEY_INCLUDE_RECENT_TOOLS),
         "delivery_stale_s": float(DELIVERY_STALE_SECONDS),
         "advisory_text_repeat_cooldown_s": float(ADVISORY_TEXT_REPEAT_COOLDOWN_S),
     }
@@ -285,11 +300,20 @@ def _session_context_key(state, tool_name: str) -> str:
     from .advisory_intent_taxonomy import build_session_context_key
     from .advisory_state import get_recent_tool_sequence
 
+    # Default: stable session key so prefetched packets and exact lookups hit reliably.
+    # Opt-in volatility via recent tool inclusion when you want higher specificity.
+    if not SESSION_KEY_INCLUDE_RECENT_TOOLS:
+        raw = f"{state.session_id}|{(state.intent_family or 'emergent_other').strip()}"
+        return hashlib.sha1(raw.encode("utf-8", errors="replace")).hexdigest()[:12]
+
+    recent_tools = get_recent_tool_sequence(state, n=5)
     return build_session_context_key(
-        task_phase=state.task_phase,
+        # Tool/phase are already represented elsewhere in the exact key; keep the session key focused on
+        # the volatile recency signal when this mode is enabled.
+        task_phase="any",
         intent_family=state.intent_family,
-        tool_name=tool_name,
-        recent_tools=get_recent_tool_sequence(state, n=5),
+        tool_name="*",
+        recent_tools=recent_tools,
     )
 
 
@@ -793,7 +817,9 @@ def on_pre_tool(
                 resolved_trace_id = None
 
         record_tool_call(state, tool_name, tool_input, success=None, trace_id=resolved_trace_id)
-        intent_info = _intent_context(state, tool_name)
+        # Use tool-agnostic intent for packet keying/prefetch alignment.
+        # (Carmack-style: stability > hyper-specificity on the hot path.)
+        intent_info = _intent_context(state, tool_name="*")
         project_key = _project_key()
         session_context_key = _session_context_key(state, tool_name)
         intent_family = state.intent_family or "emergent_other"
@@ -817,6 +843,26 @@ def on_pre_tool(
             )
             if packet:
                 route = "packet_relaxed"
+                # Self-evolution speed: if relaxed lookup found a packet that already matches this
+                # tool+intent, alias it into the exact index for this session_context_key so future
+                # lookups are O(1).
+                try:
+                    if (
+                        str(packet.get("project_key") or "") == project_key
+                        and str(packet.get("tool_name") or "") == tool_name
+                        and str(packet.get("intent_family") or "") == intent_family
+                    ):
+                        from .advisory_packet_store import alias_exact_key
+
+                        alias_exact_key(
+                            project_key=project_key,
+                            session_context_key=session_context_key,
+                            tool_name=tool_name,
+                            intent_family=intent_family,
+                            packet_id=str(packet.get("packet_id") or ""),
+                        )
+                except Exception:
+                    pass
 
         _mark("packet_lookup", t_lookup)
 

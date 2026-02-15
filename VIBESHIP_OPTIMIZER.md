@@ -140,3 +140,39 @@ git revert <sha>
 - Day 3: 
 
 - Mark verified: [ ]
+
+### chg-20260215-144142-step2-self-evolution-speed-stable-se - Step2: self-evolution speed (stable session_context_key)
+
+- Status: **SHIPPED**
+- Started: `2026-02-15T14:41:42Z`
+- Commit: ``
+- Baseline snapshot: `reports/optimizer/chg-20260215-144142-step2-self-evolution-speed-stable-se_before_snapshot.json`
+- After snapshot: `reports/optimizer/chg-20260215-144142-step2-self-evolution-speed-stable-se_after_snapshot.json`
+- Snapshot compare: `reports/optimizer/chg-20260215-144142-step2-self-evolution-speed-stable-se_compare.md`
+- Advisory KPI (live): `reports/optimizer/chg-20260215-144142-step2-self-evolution-speed-stable-se_advisory_delta.json`
+- Advisory KPI (cached): `reports/optimizer/chg-20260215-144142-step2-self-evolution-speed-stable-se_advisory_delta_cached.json`
+
+**Hypothesis:**
+- If inline prefetch processes the newest job first (and only scans a bounded tail of the queue), packet creation aligns with the current session and `packet_exact` hit rate rises quickly.
+
+**Risk:**
+- Tail-reading and newest-first prefetch can starve older queued jobs. This is intentional for interactive sessions but should be revisited if we ever need strict background processing.
+
+**Rollback:**
+git revert <sha>
+
+**Validation Today:**
+- `python -m pytest -q tests/test_advisory_dual_path_router.py`
+- `scripts/advisory_controlled_delta.py` runs saved (KPI JSONs above)
+- `vibeship-optimizer compare` saved (snapshot compare above)
+
+**Validation Next Days:**
+- Monitor packet exact-hit rate in real sessions and confirm inline prefetch does not increase hook latency tails.
+
+**Verification log:**
+- Day 0: 
+- Day 1: 
+- Day 2: 
+- Day 3: 
+
+- Mark verified: [ ]
