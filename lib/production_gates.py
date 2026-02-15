@@ -36,6 +36,8 @@ class LoopMetrics:
     strict_require_trace: bool = False
     strict_window_s: int = 0
     quality_rate: float = 0.0
+    quality_rate_samples: int = 0
+    quality_rate_filtered_pipeline_tests: int = 0
     distillations: int = 0
     queue_depth: int = 0
     advice_total: int = 0
@@ -59,6 +61,8 @@ class LoopThresholds:
     min_distillations: int = 5
     min_quality_rate: float = 0.30
     max_quality_rate: float = 0.60
+    # Meta-Ralph quality band is only meaningful after enough real (non-test) samples.
+    min_quality_samples: int = 50
     max_queue_depth: int = 2000
     max_chip_to_cognitive_ratio: float = 100.0
 
@@ -140,6 +144,10 @@ def _read_meta_metrics() -> Dict[str, Any]:
             "quality_rate": float(
                 stats.get("quality_rate", stats.get("pass_rate", 0.0)) or 0.0
             ),
+            "quality_rate_samples": int(stats.get("quality_rate_window_samples", 0) or 0),
+            "quality_rate_filtered_pipeline_tests": int(
+                stats.get("quality_rate_window_filtered_pipeline_tests", 0) or 0
+            ),
         }
     except Exception:
         return {}
@@ -218,6 +226,8 @@ def load_live_metrics() -> LoopMetrics:
     strict_require_trace = False
     strict_window_s = 0
     quality_rate = 0.0
+    quality_rate_samples = 0
+    quality_rate_filtered_pipeline_tests = 0
     distillations = 0
     queue_depth = 0
     advice_total = 0
@@ -243,6 +253,10 @@ def load_live_metrics() -> LoopMetrics:
         strict_require_trace = bool(meta.get("strict_require_trace", False))
         strict_window_s = int(meta.get("strict_window_s", 0) or 0)
         quality_rate = float(meta.get("quality_rate", 0.0) or 0.0)
+        quality_rate_samples = int(meta.get("quality_rate_samples", 0) or 0)
+        quality_rate_filtered_pipeline_tests = int(
+            meta.get("quality_rate_filtered_pipeline_tests", 0) or 0
+        )
 
     distillations = _read_distillation_count()
     queue_depth = _read_queue_depth()
@@ -287,6 +301,8 @@ def load_live_metrics() -> LoopMetrics:
         strict_require_trace=strict_require_trace,
         strict_window_s=strict_window_s,
         quality_rate=quality_rate,
+        quality_rate_samples=quality_rate_samples,
+        quality_rate_filtered_pipeline_tests=quality_rate_filtered_pipeline_tests,
         distillations=distillations,
         queue_depth=queue_depth,
         advice_total=advice_total,
@@ -413,10 +429,24 @@ def evaluate_gates(
     )
     _add(
         "meta_ralph_quality_band",
-        t.min_quality_rate <= metrics.quality_rate <= t.max_quality_rate,
-        round(metrics.quality_rate, 4),
-        f"{t.min_quality_rate:.2f}..{t.max_quality_rate:.2f}",
-        "Tune primitive filtering and quality thresholds to avoid over/under-filtering.",
+        (
+            metrics.quality_rate_samples < t.min_quality_samples
+            or (t.min_quality_rate <= metrics.quality_rate <= t.max_quality_rate)
+        ),
+        {
+            "quality_rate": round(metrics.quality_rate, 4),
+            "samples": int(metrics.quality_rate_samples),
+            "filtered_pipeline_tests": int(metrics.quality_rate_filtered_pipeline_tests),
+            "enforced": bool(metrics.quality_rate_samples >= t.min_quality_samples),
+        },
+        (
+            f"{t.min_quality_rate:.2f}..{t.max_quality_rate:.2f} "
+            f"(enforced after >= {t.min_quality_samples} samples)"
+        ),
+        (
+            "Collect more real (non-test) roasts to calibrate quality. "
+            "If enforced and out-of-band, tune primitive filtering and quality thresholds."
+        ),
     )
     _add(
         "chip_noise_ratio",
@@ -470,7 +500,9 @@ def format_gate_report(metrics: LoopMetrics, result: Dict[str, Any]) -> str:
         f"strict_mode=(trace={metrics.strict_require_trace}, window_s={metrics.strict_window_s})"
     )
     lines.append(
-        f"  quality_rate={metrics.quality_rate:.1%} distillations={metrics.distillations} "
+        f"  quality_rate={metrics.quality_rate:.1%} quality_samples={metrics.quality_rate_samples} "
+        f"filtered_pipeline_tests={metrics.quality_rate_filtered_pipeline_tests} "
+        f"distillations={metrics.distillations} "
         f"chip_ratio={metrics.chip_to_cognitive_ratio:.1f} queue_depth={metrics.queue_depth} "
         f"non_actionable={metrics.ignored_non_actionable}"
     )
