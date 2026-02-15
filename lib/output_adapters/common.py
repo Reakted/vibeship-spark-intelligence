@@ -43,7 +43,10 @@ def write_marked_section(
 
     if marker_start in existing and marker_end in existing:
         pattern = f"{re.escape(marker_start)}.*?{re.escape(marker_end)}"
-        updated = re.sub(pattern, block, existing, flags=re.DOTALL)
+        # IMPORTANT: Use a function replacement so backslashes in Windows paths
+        # (e.g., C:\Users\...) are treated literally. Otherwise re.sub will
+        # interpret them as escape sequences and can crash (bad escape \U).
+        updated = re.sub(pattern, lambda _m: block, existing, flags=re.DOTALL)
     else:
         if not existing and create_header:
             existing = create_header + "\n"
