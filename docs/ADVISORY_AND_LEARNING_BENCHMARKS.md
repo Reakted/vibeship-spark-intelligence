@@ -128,6 +128,41 @@ python scripts/advisory_self_review.py --window-hours 0.1 --json
    - Inspect `~/.spark/advisor/recent_advice.jsonl` for repeated `insight_key` with changing `advice_id`.
 3. Optional: add a small metric in `scripts/advisory_self_review.py` for “advice_id churn per insight_key” over window.
 
+Zoomed-out priorities for tomorrow:
+1. Validate the full loop stays healthy online (not just unit tests):
+   - `recent_advice.trace_coverage_pct` near 100% for tool-driven emissions
+   - `outcomes.trace_mismatch_count` stays 0 in short windows
+   - `engine.fallback_share_pct` stays low (no accidental gate regressions)
+2. Ensure advice spam is actually reduced in practice:
+   - confirm `global_dedupe_suppressed` appears when repeats are attempted
+   - confirm `recent_advice.repeated_texts` share trends down over a longer window (ex: 1-6 hours)
+3. Check outcome application is flowing back to cognitive reliability:
+   - verify `~/.spark/meta_ralph/outcome_tracking.json` records include `insight_key` and `source=cognitive` for cognitive items
+   - verify `~/.spark/cognitive_insights.json` reliability/validations are not fragmenting due to old random advice IDs
+4. Packet store health:
+   - confirm packets no longer emit legacy/random advice IDs when `insight_key` exists (migration in `_packet_to_advice`)
+   - optionally invalidate/delete a few stale packets if they keep resurfacing noisy content
+
+Morning run sequence (fast):
+```bash
+python scripts/status_local.py
+python scripts/advisory_self_review.py --window-hours 0.1 --json
+python -m pytest -q tests/test_advice_id_stability.py
+```
+
+If time tomorrow (evaluation, not just “seems fixed”):
+1. Run contracted realism:
+```bash
+python scripts/run_advisory_realism_contract.py
+```
+2. Run a quick advisory quality sweep:
+```bash
+python benchmarks/advisory_quality_ab.py --profiles baseline,balanced,strict --repeats 1
+```
+3. Add a churn metric to self-review output:
+   - “top insight_keys by unique advice_id count in window”
+   - “top insight_keys by global dedupe suppressions”
+
 Where to continue from:
 - Benchmarks + runbook: `docs/ADVISORY_AND_LEARNING_BENCHMARKS.md`
 - Stability regression test: `tests/test_advice_id_stability.py`
