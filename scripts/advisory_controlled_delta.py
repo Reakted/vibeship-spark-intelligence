@@ -13,16 +13,19 @@ def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
     if not path.exists():
         return []
     rows: List[Dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except Exception:
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
+    # Stream line-by-line to avoid large reads and to tolerate concurrent writers.
+    with path.open("r", encoding="utf-8", errors="ignore") as f:
+        it = f
+        for line in it:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
     return rows
 
 
@@ -50,6 +53,45 @@ def _collect_rows_since(path: Path, start_ts: float) -> List[Dict[str, Any]]:
     for row in _read_jsonl(path):
         ts = _row_ts(row)
         if ts >= start_ts:
+            out.append(row)
+    return out
+
+
+def _collect_engine_window(
+    path: Path,
+    *,
+    start_ts: float,
+    trace_prefix: str,
+    session_prefix: str,
+) -> List[Dict[str, Any]]:
+    out = []
+    for row in _read_jsonl(path):
+        ts = _row_ts(row)
+        if ts < start_ts:
+            continue
+        tid = str(row.get("trace_id") or "")
+        sid = str(row.get("session_id") or "")
+        # Include:
+        # - pre/post tool rows keyed by trace_id
+        # - prompt prefetch rows keyed by session_id
+        if (tid and tid.startswith(trace_prefix)) or (sid and sid.startswith(session_prefix)):
+            out.append(row)
+    return out
+
+
+def _collect_feedback_window(
+    path: Path,
+    *,
+    start_ts: float,
+    trace_prefix: str,
+) -> List[Dict[str, Any]]:
+    out = []
+    for row in _read_jsonl(path):
+        ts = _row_ts(row)
+        if ts < start_ts:
+            continue
+        tid = str(row.get("trace_id") or "")
+        if tid.startswith(trace_prefix):
             out.append(row)
     return out
 
@@ -243,8 +285,30 @@ def run_workload(
     # Small flush window for file writes.
     time.sleep(0.25)
 
-    engine_rows = _collect_rows_since(engine_log, start_ts)
-    advice_rows = _collect_rows_since(feedback_requests, start_ts)
+    engine_rows = _collect_engine_window(
+        engine_log,
+        start_ts=start_ts,
+        trace_prefix=trace_prefix,
+        session_prefix=session_prefix,
+    )
+    advice_rows = _collect_feedback_window(
+        feedback_requests,
+        start_ts=start_ts,
+        trace_prefix=trace_prefix,
+    )
+
+    engine_summary = _summarize_engine(engine_rows)
+    matched_trace_rows = sum(
+        1
+        for r in engine_rows
+        if str(r.get("trace_id") or "").startswith(trace_prefix)
+    )
+    engine_summary.update(
+        {
+            "expected_trace_rows": int(rounds),
+            "matched_trace_rows": int(matched_trace_rows),
+        }
+    )
 
     return {
         "generated_at": datetime.now(UTC).isoformat(),
@@ -252,7 +316,7 @@ def run_workload(
         "end_ts": end_ts,
         "rounds": rounds,
         "emitted_returns": emitted_count,
-        "engine": _summarize_engine(engine_rows),
+        "engine": engine_summary,
         "feedback_requests": _summarize_repeats(advice_rows),
         "modes": {
             "prompt_mode": str(prompt_mode),

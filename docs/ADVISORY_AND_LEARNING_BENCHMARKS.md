@@ -99,6 +99,18 @@ python scripts/advisory_self_review.py --window-hours 0.25 --json
   - `SPARK_ADVISORY_GLOBAL_DEDUPE_BY_TEXT=0|1` (default 1, suppress repeated advice even if `advice_id` churns)
   - `SPARK_ADVISORY_GLOBAL_DEDUPE_COOLDOWN_S=600` (default 10 minutes)
 
+### Advice ID Stability (Prevents Churn + Fragmented Outcomes)
+
+The advisory system relies on stable `advice_id` values to avoid spam and to correctly accumulate outcomes over time.
+
+- Current rule: for durable sources (e.g. cognitive, mind, bank, chips, eidos), `advice_id` is derived from `source:insight_key` when available.
+- Semantic/trigger retrieval routes are canonicalized back to the underlying store (`cognitive`) for ID purposes.
+
+Quick audit (how many distinct advice IDs exist for one stable insight key in recent deliveries):
+```bash
+python -c "import os,json,pathlib; from collections import Counter; p=pathlib.Path(os.path.expanduser('~/.spark/advisor/recent_advice.jsonl')); key='reasoning:always_read_a_file_before_edit_to_verify'; rows=[]; \nfor ln in p.read_text('utf-8', errors='ignore').splitlines()[-5000:]:\n r=json.loads(ln); iks=r.get('insight_keys') or []; aids=r.get('advice_ids') or []; \n for i,ik in enumerate(iks):\n  if ik==key: rows.append(aids[i] if i < len(aids) else None);\nctr=Counter([x for x in rows if x]); print('matches',len(rows),'unique_advice_ids',len(ctr)); print('top',ctr.most_common(5))"
+```
+
 Notes:
 - `recent_advice.trace_coverage_pct` can be lower if you call the advisor directly outside the observed tool loop (no `trace_id` available).
 
