@@ -12,6 +12,28 @@ This document is intentionally pragmatic:
 
 ---
 
+## 0) 2026-02-15: What We Shipped (Aligned To Your Priority Order)
+
+Priority order you set: advisory speed > self-evolution speed > latency-tail.
+
+All three were executed as separate `vibeship-optimizer` changes with reports under `reports/optimizer/`
+(see `VIBESHIP_OPTIMIZER.md` for the canonical log).
+
+Evidence (from `scripts/advisory_controlled_delta.py` JSON outputs):
+
+| Step | Goal | Measurement mode | p50 (ms) | p95 (ms) | p99 (ms) | n | Notes |
+|------|------|------------------|----------|----------|----------|---|------|
+| 1 | advisory speed default | force-live | 398.3 | 428.9 | 737.2 | 13 | default now avoids network/LLM synthesis on hot path |
+| 2 | self-evolution speed | cached | 73.2 | 83.1 | 83.1 | 5 | packet reuse goes `packet_exact` quickly when not force-live |
+| 3 | latency-tail | force-live | 377.4 | 413.2 | 720.6 | 13 | reduces unnecessary agentic escalation in auto mode |
+
+What changed, in Carmack terms:
+- Step 1: deterministic, fast defaults (critical path stays inside budget).
+- Step 2: prefetch work is aligned to "what the user is doing now" (newest-first + bounded scan).
+- Step 3: escalation is rarer, more deliberate (cuts tail amplification from "try harder" fanout).
+
+---
+
 ## 1) Current Spark Intelligence Flow (What We Are Actually Doing)
 
 Spark already has the core building blocks most AGI roadmaps talk about, but expressed as an applied "production agent memory + advisory" system rather than a trained end-to-end policy.
@@ -128,9 +150,12 @@ This doc is not trying to be exhaustive biography. It is trying to be traceable 
 Keen / Carmack / Sutton:
 - TechCrunch (2019): Carmack steps down at Oculus to pursue AGI: https://techcrunch.com/2019/11/13/john-carmack-steps-down-at-oculus-to-pursue-ai-passion-project-before-i-get-too-old/
 - TechCrunch (2022): Carmack's AGI startup Keen raises $20M: https://techcrunch.com/2022/08/19/john-carmack-agi-keen-raises-20-million-from-sequoia-nat-friedman-and-others/
+- Lex Fridman Podcast (2023): John Carmack interview (public discussion touching AI/AGI/engineering): https://lexfridman.com/john-carmack/
 - AMII (2024/2025): Sutton update referencing 2023 partnership with Carmack/Keen: https://www.amii.ca/updates-insights/rich-sutton-turing
 - AMII (2025): Carmack talk (Upper Bound 2025) on Keen research directions: https://www.amii.ca/videos/keen-technologies-research-directions-john-carmack-upper-bound-2025
+- GlobeNewswire / AMII (2024/2025): Sutton Turing Award announcement quoting Carmack (agency + temporal mechanisms emphasis): https://www.globenewswire.com/news-release/2025/03/05/3038076/0/en/Computer-scientist-Richard-Sutton-wins-2024-AM-Turing-Award.html
 - The Register (2023): reporting on Sutton joining Keen + Carmack timeline: https://www.theregister.com/2023/09/26/john_carmack_agi/
+- Wikipedia (biographical sanity check): https://en.wikipedia.org/wiki/John_Carmack
 
 Alberta Plan:
 - Sutton, Bowling, Pilarski (2022): "The Alberta Plan for AI Research" (arXiv): https://arxiv.org/abs/2208.11173
@@ -142,6 +167,7 @@ World models / planning:
 
 Predictive representation:
 - Assran et al (2023): I-JEPA (arXiv): https://arxiv.org/abs/2301.08243
+- LeCun (2022): "A Path Towards Autonomous Machine Intelligence" (arXiv): https://arxiv.org/abs/2205.01943
 
 Active inference:
 - Friston (2010): Free Energy Principle review (Nat Rev Neurosci): https://www.nature.com/articles/nrn2787

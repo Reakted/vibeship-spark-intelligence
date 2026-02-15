@@ -86,6 +86,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `EVOLUTION_CHIPS_RESEARCH.md`
 - `path-to-AGI/index.md` (living glossary/reports/experiments corpus)
 - `docs/research/CARMACK_AND_AGI_ENGINEERING_ALIGNMENT.md`: Carmack/Sutton/AGI-engineering research mapped onto Spark's critical path (optimize with less, stability/scalability checklist)
+- `docs/research/AGI_SCIENTIST_MATRIX.md`: "who/what/how-it-maps/what-to-steal" matrix for AGI-adjacent scientists, translated into Spark surfaces and Carmack-style implementation constraints
 
 ## Archived and Historical
 
