@@ -277,8 +277,38 @@ class SparkResearcher:
                 self._log(f"    [DRY RUN] Query: {query}")
                 continue
 
+            def _tweet_id_to_utc_ts(tweet_id: str | int) -> float | None:
+                """Decode Twitter snowflake ID -> UTC timestamp (seconds)."""
+                try:
+                    tid = int(str(tweet_id).strip())
+                    if tid <= 0:
+                        return None
+                    # Twitter snowflake: (ms since epoch) << 22 + ...
+                    # https://developer.twitter.com/en/docs/twitter-ids
+                    ms = (tid >> 22) + 1288834974657
+                    return ms / 1000.0
+                except Exception:
+                    return None
+
+            def _safe_since_id(raw: str | None) -> str | None:
+                """search_recent_tweets only supports the last ~7 days; drop stale since_ids."""
+                if not raw:
+                    return None
+                ts = _tweet_id_to_utc_ts(raw)
+                if not ts:
+                    return None
+                # Guard window: 7 days (plus a little buffer)
+                if ts < time.time() - (7.25 * 24 * 3600):
+                    return None
+                return str(raw)
+
             try:
-                since_id = self.state.get("last_since_ids", {}).get(name)
+                raw_since = self.state.get("last_since_ids", {}).get(name)
+                since_id = _safe_since_id(raw_since)
+                # If we dropped it, also clear it in state so we don't keep failing.
+                if raw_since and not since_id:
+                    self.state.setdefault("last_since_ids", {}).pop(name, None)
+
                 result = self.client.search_recent_tweets(
                     query=query,
                     max_results=min(self.MAX_RESULTS, 100),
@@ -296,10 +326,35 @@ class SparkResearcher:
                 self._log(f"    Server error, skipping {name}")
                 continue
             except tweepy.errors.BadRequest as e:
-                # min_faves might not be supported on our tier - fallback
-                err_msg = str(e)[:120]
-                if "min_faves" in err_msg.lower() or "operator" in err_msg.lower():
-                    self._log(f"    min_faves not supported, retrying without")
+                # Common BadRequest causes we can self-heal:
+                # - min_faves/operator unsupported
+                # - since_id outside the recent-search window
+                err_full = str(e)
+                err_msg = err_full[:160]
+
+                if "since_id" in err_full.lower():
+                    # Drop the stored since_id and retry once without it.
+                    self._log("    Bad request mentions since_id; clearing cursor and retrying")
+                    try:
+                        self.state.setdefault("last_since_ids", {}).pop(name, None)
+                    except Exception:
+                        pass
+                    try:
+                        result = self.client.search_recent_tweets(
+                            query=query,
+                            max_results=min(self.MAX_RESULTS, 100),
+                            since_id=None,
+                            sort_order="relevancy",
+                            tweet_fields=["public_metrics", "created_at", "author_id", "conversation_id"],
+                            user_fields=["username", "name", "public_metrics", "description"],
+                            expansions=["author_id"],
+                        )
+                    except Exception as e2:
+                        self._log(f"    Retry without since_id failed: {type(e2).__name__}")
+                        continue
+
+                elif "min_faves" in err_msg.lower() or "operator" in err_msg.lower():
+                    self._log("    min_faves not supported, retrying without")
                     query = topic["query"] + " -is:retweet lang:en"
                     try:
                         result = self.client.search_recent_tweets(
@@ -314,6 +369,7 @@ class SparkResearcher:
                     except Exception as e2:
                         self._log(f"    Fallback also failed: {type(e2).__name__}")
                         continue
+
                 else:
                     self._log(f"    Bad request: {err_msg}")
                     continue
