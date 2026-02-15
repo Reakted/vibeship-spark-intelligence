@@ -97,6 +97,9 @@ DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
         "agentic_rate_limit": 0.10,
         "agentic_rate_window": 50,
         "fast_path_budget_ms": 250,
+        # Latency-tail guard: if primary semantic retrieval already exceeded budget, do not add
+        # additional agentic facet queries (unless high-risk terms are present).
+        "deny_escalation_when_over_budget": True,
         "prefilter_enabled": True,
         "prefilter_max_insights": 300,
         "lexical_weight": 0.25,
@@ -109,6 +112,7 @@ DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
         "complexity_threshold": 3,  # used only by extended gate
         "min_results_no_escalation": 3,
         "min_top_score_no_escalation": 0.68,
+        "escalate_on_weak_primary": False,
         "escalate_on_high_risk": True,
         "escalate_on_trigger": False,  # ignored by minimal gate
     },
@@ -123,6 +127,7 @@ DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
         "agentic_rate_limit": 0.20,
         "agentic_rate_window": 80,
         "fast_path_budget_ms": 250,
+        "deny_escalation_when_over_budget": True,
         "prefilter_enabled": True,
         "prefilter_max_insights": 500,
         "lexical_weight": 0.30,
@@ -135,6 +140,7 @@ DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
         "complexity_threshold": 2,  # used only by extended gate
         "min_results_no_escalation": 4,
         "min_top_score_no_escalation": 0.72,
+        "escalate_on_weak_primary": False,
         "escalate_on_high_risk": True,
         "escalate_on_trigger": False,
     },
@@ -149,6 +155,7 @@ DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
         "agentic_rate_limit": 1.0,
         "agentic_rate_window": 80,
         "fast_path_budget_ms": 350,
+        "deny_escalation_when_over_budget": False,
         "prefilter_enabled": True,
         "prefilter_max_insights": 800,
         "lexical_weight": 0.35,
@@ -161,6 +168,7 @@ DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
         "complexity_threshold": 1,
         "min_results_no_escalation": 5,
         "min_top_score_no_escalation": 0.78,
+        "escalate_on_weak_primary": True,
         "escalate_on_high_risk": True,
         "escalate_on_trigger": True,
     },
@@ -874,6 +882,7 @@ class SparkAdvisor:
                         "agentic_rate_limit",
                         "agentic_rate_window",
                         "fast_path_budget_ms",
+                        "deny_escalation_when_over_budget",
                         "prefilter_enabled",
                         "prefilter_max_insights",
                         "lexical_weight",
@@ -883,6 +892,7 @@ class SparkAdvisor:
                         "complexity_threshold",
                         "min_results_no_escalation",
                         "min_top_score_no_escalation",
+                        "escalate_on_weak_primary",
                         "escalate_on_high_risk",
                         "escalate_on_trigger",
                     ):
@@ -938,6 +948,9 @@ class SparkAdvisor:
         policy["agentic_rate_limit"] = max(0.0, min(1.0, float(rate_raw)))
         policy["agentic_rate_window"] = max(10, int(policy.get("agentic_rate_window", 80) or 80))
         policy["fast_path_budget_ms"] = max(50, int(policy.get("fast_path_budget_ms", 250) or 250))
+        policy["deny_escalation_when_over_budget"] = bool(
+            policy.get("deny_escalation_when_over_budget", True)
+        )
         policy["prefilter_enabled"] = bool(policy.get("prefilter_enabled", True))
         prefilter_raw = policy.get("prefilter_max_insights", 500)
         if prefilter_raw is None:
@@ -952,6 +965,7 @@ class SparkAdvisor:
         policy["min_top_score_no_escalation"] = max(
             0.0, min(1.0, float(policy.get("min_top_score_no_escalation", 0.7) or 0.7))
         )
+        policy["escalate_on_weak_primary"] = bool(policy.get("escalate_on_weak_primary", True))
         policy["escalate_on_high_risk"] = bool(policy.get("escalate_on_high_risk", True))
         policy["escalate_on_trigger"] = bool(policy.get("escalate_on_trigger", True))
         policy["complexity_hints"] = list(DEFAULT_COMPLEXITY_HINTS)
@@ -1349,12 +1363,13 @@ class SparkAdvisor:
             if bool(policy.get("escalate_on_high_risk", True)) and high_risk:
                 should_escalate = True
                 escalate_reasons.append("high_risk_terms")
-            if primary_count < int(policy.get("min_results_no_escalation", 3) or 3):
-                should_escalate = True
-                escalate_reasons.append("weak_primary_count")
-            if primary_top_score < float(policy.get("min_top_score_no_escalation", 0.7) or 0.7):
-                should_escalate = True
-                escalate_reasons.append("weak_primary_score")
+            if bool(policy.get("escalate_on_weak_primary", True)):
+                if primary_count < int(policy.get("min_results_no_escalation", 3) or 3):
+                    should_escalate = True
+                    escalate_reasons.append("weak_primary_count")
+                if primary_top_score < float(policy.get("min_top_score_no_escalation", 0.7) or 0.7):
+                    should_escalate = True
+                    escalate_reasons.append("weak_primary_score")
             if not primary_results:
                 should_escalate = True
                 escalate_reasons.append("empty_primary")
@@ -1370,6 +1385,18 @@ class SparkAdvisor:
             if not self._allow_agentic_escalation(rate_limit=agentic_rate_limit, window=agentic_rate_window):
                 should_escalate = False
                 escalate_reasons.append("agentic_rate_cap")
+
+        # Latency-tail guard: if the primary semantic retrieval already exceeded the fast-path budget,
+        # do not add agentic facet queries unless this is a high-risk query.
+        if (
+            should_escalate
+            and mode == "auto"
+            and primary_over_budget
+            and bool(policy.get("deny_escalation_when_over_budget", True))
+            and not high_risk
+        ):
+            should_escalate = False
+            escalate_reasons.append("deny_over_budget")
 
         facet_queries: List[str] = []
         facet_queries_executed: List[str] = []

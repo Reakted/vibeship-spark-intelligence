@@ -176,3 +176,39 @@ git revert <sha>
 - Day 3: 
 
 - Mark verified: [ ]
+
+### chg-20260215-150244-step3-latency-tail-deny-agentic-esca - Step3: latency tail (deny agentic escalation when over budget)
+
+- Status: **SHIPPED**
+- Started: `2026-02-15T15:02:44Z`
+- Commit: ``
+- Baseline snapshot: `reports/optimizer/chg-20260215-150244-step3-latency-tail-deny-agentic-esca_before_snapshot.json`
+- After snapshot: `reports/optimizer/chg-20260215-150244-step3-latency-tail-deny-agentic-esca_after_snapshot.json`
+- Snapshot compare: `reports/optimizer/chg-20260215-150244-step3-latency-tail-deny-agentic-esca_compare.md`
+- Advisory KPI (live): `reports/optimizer/chg-20260215-150244-step3-latency-tail-deny-agentic-esca_advisory_delta.json`
+- Advisory KPI (cached): `reports/optimizer/chg-20260215-150244-step3-latency-tail-deny-agentic-esca_advisory_delta_cached.json`
+
+**Hypothesis:**
+- Reduce p95/p99 tail by cutting agentic escalation in auto mode when the semantic fast path is already weak/slow.
+
+**Risk:**
+- Retrieval quality may regress for borderline queries that benefited from agentic facet queries.
+
+**Rollback:**
+git revert <sha>
+
+**Validation Today:**
+- `python -m pytest -q tests/test_advisory_dual_path_router.py`
+- `scripts/advisory_controlled_delta.py` runs saved (KPI JSONs above)
+- `vibeship-optimizer compare` saved (snapshot compare above)
+
+**Validation Next Days:**
+- Monitor `~/.spark/advisor/retrieval_router.jsonl` for reduced `semantic-agentic` share and validate quality on hard queries.
+
+**Verification log:**
+- Day 0: 
+- Day 1: 
+- Day 2: 
+- Day 3: 
+
+- Mark verified: [ ]
