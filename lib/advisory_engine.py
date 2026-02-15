@@ -508,19 +508,43 @@ def _packet_to_advice(packet: Dict[str, Any]) -> List[Any]:
 
     advice_rows = packet.get("advice_items") or []
     out: List[Any] = []
+    stable_key_sources = {
+        "cognitive",
+        "bank",
+        "mind",
+        "chip",
+        "skill",
+        "niche",
+        "convo",
+        "eidos",
+        "engagement",
+    }
     for row in advice_rows[:8]:
         if not isinstance(row, dict):
             continue
         text = str(row.get("text") or "").strip()
         if not text:
             continue
+        source = str(row.get("source") or "packet")
+        canonical_source = source.strip().lower()
+        if canonical_source.startswith("semantic") or canonical_source == "trigger":
+            canonical_source = "cognitive"
+
+        insight_key_raw = row.get("insight_key")
+        insight_key = str(insight_key_raw or "").strip()
+        advice_id = str(
+            row.get("advice_id") or f"{packet.get('packet_id', 'pkt')}_item_{len(out)}"
+        )
+        # Migrate legacy/random packet advice_ids to stable IDs when we have a durable key.
+        if insight_key_raw and insight_key and canonical_source in stable_key_sources:
+            advice_id = f"{canonical_source}:{insight_key}"
         out.append(
             Advice(
-                advice_id=str(row.get("advice_id") or f"{packet.get('packet_id', 'pkt')}_item_{len(out)}"),
-                insight_key=str(row.get("insight_key") or packet.get("packet_id") or ""),
+                advice_id=advice_id,
+                insight_key=insight_key or str(packet.get("packet_id") or ""),
                 text=text,
                 confidence=float(row.get("confidence") or 0.6),
-                source=str(row.get("source") or "packet"),
+                source=source,
                 context_match=float(row.get("context_match") or 0.8),
                 reason=str(row.get("reason") or ""),
             )

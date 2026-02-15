@@ -87,14 +87,26 @@ def test_on_pre_tool_global_dedupe_filters_emitted(monkeypatch, tmp_path):
 
     monkeypatch.setattr(advisory_state, "STATE_DIR", tmp_path / "state")
 
-    # Force live path (no packets).
+    # Avoid writing packets into the real ~/.spark folder.
     import lib.advisory_packet_store as packet_store
 
+    monkeypatch.setattr(packet_store, "PACKET_DIR", tmp_path / "packets")
+    monkeypatch.setattr(packet_store, "INDEX_FILE", (tmp_path / "packets" / "index.json"))
+    monkeypatch.setattr(
+        packet_store, "PREFETCH_QUEUE_FILE", (tmp_path / "packets" / "prefetch_queue.jsonl")
+    )
+
+    # Avoid writing advisor logs into the real ~/.spark folder.
+    import lib.advisor as advisor_mod
+
+    monkeypatch.setattr(advisor_mod, "ADVISOR_DIR", tmp_path / "advisor")
+    monkeypatch.setattr(advisor_mod, "RECENT_ADVICE_LOG", (tmp_path / "advisor" / "recent_advice.jsonl"))
+
+    # Force live path (no packets).
     monkeypatch.setattr(packet_store, "lookup_exact", lambda **kwargs: None)
     monkeypatch.setattr(packet_store, "lookup_relaxed", lambda **kwargs: None)
 
     # Deterministic advice retrieval: two items, one of which should be globally suppressed.
-    import lib.advisor as advisor_mod
     from lib.advisor import Advice
 
     def fake_advise_on_tool(*args, **kwargs):
@@ -193,11 +205,20 @@ def test_on_pre_tool_global_dedupe_filters_by_text_sig(monkeypatch, tmp_path):
 
     import lib.advisory_packet_store as packet_store
 
+    monkeypatch.setattr(packet_store, "PACKET_DIR", tmp_path / "packets2")
+    monkeypatch.setattr(packet_store, "INDEX_FILE", (tmp_path / "packets2" / "index.json"))
+    monkeypatch.setattr(
+        packet_store, "PREFETCH_QUEUE_FILE", (tmp_path / "packets2" / "prefetch_queue.jsonl")
+    )
+
     monkeypatch.setattr(packet_store, "lookup_exact", lambda **kwargs: None)
     monkeypatch.setattr(packet_store, "lookup_relaxed", lambda **kwargs: None)
 
     import lib.advisor as advisor_mod
     from lib.advisor import Advice
+
+    monkeypatch.setattr(advisor_mod, "ADVISOR_DIR", tmp_path / "advisor2")
+    monkeypatch.setattr(advisor_mod, "RECENT_ADVICE_LOG", (tmp_path / "advisor2" / "recent_advice.jsonl"))
 
     def fake_advise_on_tool(*args, **kwargs):
         return [
