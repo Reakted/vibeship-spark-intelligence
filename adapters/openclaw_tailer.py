@@ -34,6 +34,10 @@ STATE_DIR = Path.home() / ".spark" / "adapters"
 MAX_TOOL_RESULT_CHARS = 4000
 
 DEFAULT_REPORT_DIR = Path.home() / ".openclaw" / "workspace" / "spark_reports"
+DEFAULT_HOOK_EVENTS_FILE = Path(
+    os.environ.get("SPARK_OPENCLAW_HOOK_EVENTS_FILE")
+    or (Path.home() / ".spark" / "openclaw_hook_events.jsonl")
+)
 
 # Optional integration heartbeat (off by default)
 HEARTBEAT_ENABLED = os.environ.get("SPARK_OPENCLAW_HEARTBEAT", "").strip().lower() not in ("", "0", "false", "no")
@@ -413,6 +417,182 @@ def _scan_reports(report_dir: Path, sparkd_url: str, token: str = None, verbose:
     return count
 
 
+def _history_tool_stats(history_messages) -> dict:
+    """Best-effort tool context summary from llm_input history rows."""
+    if not isinstance(history_messages, list):
+        return {}
+    tool_messages = 0
+    tool_blocks = 0
+    for msg in history_messages:
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "").lower()
+        if role in ("tool", "toolresult"):
+            tool_messages += 1
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    block_type = str(block.get("type") or "").lower()
+                    if block_type in ("toolcall", "toolresult"):
+                        tool_blocks += 1
+    return {
+        "history_tool_message_count": int(tool_messages),
+        "history_tool_block_count": int(tool_blocks),
+    }
+
+
+def _parse_hook_event_row(row: dict):
+    """Map hook spool row -> SparkEventV1 (or None when unsupported)."""
+    if not isinstance(row, dict):
+        return None
+
+    hook = str(row.get("hook") or row.get("event") or "").strip().lower()
+    if hook not in ("llm_input", "llm_output"):
+        return None
+
+    ts = _parse_ts(row.get("ts") or row.get("timestamp"))
+    session_id = str(
+        row.get("session_id")
+        or row.get("sessionId")
+        or row.get("session_key")
+        or row.get("sessionKey")
+        or "openclaw_hook"
+    )
+    trace_seed = str(
+        row.get("trace_id")
+        or row.get("traceId")
+        or row.get("run_id")
+        or row.get("runId")
+        or json.dumps(row, sort_keys=True)
+    )
+
+    payload = {
+        "type": "openclaw_hook",
+        "hook": hook,
+        "schema_version": int(row.get("schema_version") or 1),
+        "run_id": row.get("run_id") or row.get("runId"),
+        "session_key": row.get("session_key") or row.get("sessionKey"),
+        "agent_id": row.get("agent_id") or row.get("agentId"),
+        "provider": row.get("provider"),
+        "model": row.get("model"),
+    }
+
+    if hook == "llm_input":
+        prompt = row.get("prompt")
+        system_prompt = row.get("system_prompt") or row.get("systemPrompt")
+        history = row.get("history_messages") or row.get("historyMessages")
+
+        payload["prompt_chars"] = int(
+            row.get("prompt_chars")
+            or (len(prompt) if isinstance(prompt, str) else 0)
+        )
+        payload["system_prompt_chars"] = int(
+            row.get("system_prompt_chars")
+            or (len(system_prompt) if isinstance(system_prompt, str) else 0)
+        )
+        payload["history_count"] = int(
+            row.get("history_count")
+            or (len(history) if isinstance(history, list) else 0)
+        )
+        payload["images_count"] = int(row.get("images_count") or row.get("imagesCount") or 0)
+        payload.update(_history_tool_stats(history))
+
+    if hook == "llm_output":
+        assistant_texts = row.get("assistant_texts") or row.get("assistantTexts")
+        output_count = len(assistant_texts) if isinstance(assistant_texts, list) else 0
+        output_chars = 0
+        if isinstance(assistant_texts, list):
+            output_chars = sum(len(x) for x in assistant_texts if isinstance(x, str))
+
+        usage = row.get("usage")
+        payload["output_count"] = int(row.get("output_count") or output_count)
+        payload["output_chars"] = int(row.get("output_chars") or output_chars)
+        if isinstance(usage, dict):
+            payload["usage"] = {
+                "input": usage.get("input"),
+                "output": usage.get("output"),
+                "cacheRead": usage.get("cacheRead"),
+                "cacheWrite": usage.get("cacheWrite"),
+                "total": usage.get("total"),
+            }
+
+    payload = {k: v for k, v in payload.items() if v not in (None, "")}
+    return _event(
+        trace_id=_hash(trace_seed),
+        session_id=session_id,
+        source="openclaw",
+        kind="system",
+        ts=ts,
+        payload=payload,
+    )
+
+
+def _scan_hook_events(
+    hook_file: Path,
+    state,
+    sparkd_url: str,
+    *,
+    token: str = None,
+    max_per_tick: int = 50,
+    backfill: bool = False,
+    verbose: bool = False,
+):
+    """Scan hook spool JSONL file and ingest mapped events."""
+    if not hook_file.exists():
+        return 0
+
+    try:
+        lines = hook_file.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return 0
+
+    file_key = f"hook::{hook_file}"
+    if state.is_new_file(file_key):
+        initial_offset = 0 if backfill else len(lines)
+        state.register_file(file_key, initial_offset)
+        if verbose:
+            print(
+                f"[openclaw_tailer] hook spool registered: {hook_file} "
+                f"(offset={initial_offset})",
+                flush=True,
+            )
+        return 0
+
+    off = state.get_offset(file_key)
+    new_lines = lines[off:]
+    if not new_lines:
+        return 0
+
+    batch_size = max(1, int(max_per_tick))
+    batch = new_lines[:batch_size]
+    sent = 0
+    for line in batch:
+        try:
+            row = json.loads(line)
+        except Exception:
+            sent += 1
+            continue
+
+        evt = _parse_hook_event_row(row)
+        if evt is None:
+            sent += 1
+            continue
+
+        try:
+            _post_json(sparkd_url.rstrip("/") + "/ingest", evt, token=token)
+        except Exception as e:
+            if verbose:
+                print(f"[openclaw_tailer] hook POST error: {e}", flush=True)
+            break
+        sent += 1
+
+    state.set_offset(file_key, off + sent)
+    if sent and verbose:
+        print(f"[openclaw_tailer] hook events sent {sent}", flush=True)
+    return sent
+
+
 # ---------------------------------------------------------------------------
 # Multi-session state manager
 # ---------------------------------------------------------------------------
@@ -475,12 +655,19 @@ def main():
                      help="Disable subagent tailing")
     ap.add_argument("--report-dir", type=str, default=None,
                      help="Directory to watch for self-report JSON files")
+    ap.add_argument(
+        "--hook-events-file",
+        type=str,
+        default=str(DEFAULT_HOOK_EVENTS_FILE),
+        help="JSONL spool for OpenClaw llm_input/llm_output plugin events",
+    )
     args = ap.parse_args()
 
     include_subagents = args.include_subagents and not args.no_subagents
     token = args.token or os.environ.get("SPARKD_TOKEN")
 
     report_dir = Path(args.report_dir) if args.report_dir else DEFAULT_REPORT_DIR
+    hook_events_file = Path(args.hook_events_file) if args.hook_events_file else DEFAULT_HOOK_EVENTS_FILE
 
     agent_dir = Path.home() / ".openclaw" / "agents" / args.agent / "sessions"
     if not agent_dir.exists():
@@ -628,6 +815,16 @@ def main():
                 if args.verbose and sent:
                     remaining = max(0, len(new_lines) - sent)
                     print(f"[openclaw_tailer] [{session_key}] sent {sent}, remaining {remaining}", flush=True)
+
+            _scan_hook_events(
+                hook_events_file,
+                state,
+                sparkd_url,
+                token=token,
+                max_per_tick=args.max_per_tick,
+                backfill=args.backfill,
+                verbose=args.verbose,
+            )
 
             state.save()
 
