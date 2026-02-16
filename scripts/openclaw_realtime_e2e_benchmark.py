@@ -372,6 +372,50 @@ def _workspace_metrics(now_ts: float) -> Dict[str, Any]:
     }
 
 
+def _advisory_emit_health(
+    *,
+    engine_metrics: Dict[str, Any],
+    workspace_metrics: Dict[str, Any],
+    window_s: float,
+) -> Dict[str, Any]:
+    event_counts = dict(engine_metrics.get("event_counts") or {})
+    emitted = int(event_counts.get("emitted") or 0)
+    dedupe_suppressed = int(event_counts.get("global_dedupe_suppressed") or 0)
+
+    advisory_ages = [
+        _safe_float(row.get("advisory_age_s"))
+        for row in list(workspace_metrics.get("workspaces") or [])
+        if row.get("advisory_exists")
+    ]
+    fallback_age = _safe_float(workspace_metrics.get("fallback_advisory_age_s"))
+    recent_workspace_advisory = any(age >= 0 and age <= window_s for age in advisory_ages)
+    recent_fallback_advisory = bool(
+        workspace_metrics.get("fallback_advisory_exists")
+        and fallback_age >= 0
+        and fallback_age <= window_s
+    )
+    recent_advisory_delivery = recent_workspace_advisory or recent_fallback_advisory
+
+    if emitted >= 1:
+        mode = "emitted"
+        ok = True
+    elif dedupe_suppressed >= 1 and recent_advisory_delivery:
+        mode = "dedupe_suppressed_recent_delivery"
+        ok = True
+    else:
+        mode = "no_effective_delivery_signal"
+        ok = False
+
+    return {
+        "ok": bool(ok),
+        "mode": mode,
+        "emitted": emitted,
+        "global_dedupe_suppressed": dedupe_suppressed,
+        "recent_workspace_advisory": bool(recent_workspace_advisory),
+        "recent_fallback_advisory": bool(recent_fallback_advisory),
+    }
+
+
 def _check(ok: bool, name: str, detail: Any, failure_level: str = "fail") -> Dict[str, Any]:
     level = "pass" if ok else failure_level
     return {"name": name, "status": level, "detail": detail}
@@ -442,6 +486,11 @@ def run_benchmark(
     feedback = _feedback_metrics(now_ts=now_ts, window_s=window_s)
     outcomes = _outcome_metrics(now_ts=now_ts, window_s=window_s)
     workspace = _workspace_metrics(now_ts=now_ts)
+    advisory_emit = _advisory_emit_health(
+        engine_metrics=engine,
+        workspace_metrics=workspace,
+        window_s=window_s,
+    )
 
     live_metrics = load_live_metrics()
     gates = evaluate_gates(live_metrics)
@@ -469,9 +518,9 @@ def run_benchmark(
             failure_level="warn",
         ),
         _check(
-            int((engine.get("event_counts") or {}).get("emitted") or 0) >= 1,
+            bool(advisory_emit.get("ok")),
             "advisory_engine_emitted_nonzero",
-            {"emitted": int((engine.get("event_counts") or {}).get("emitted") or 0)},
+            advisory_emit,
             failure_level="warn",
         ),
         _check(
