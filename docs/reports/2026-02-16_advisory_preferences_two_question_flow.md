@@ -66,6 +66,28 @@ File: `scripts/advisory_setup.py`
 - Show current:
   - `python scripts/advisory_setup.py --show`
 
+### 5) Native Spark CLI wrapper
+
+File: `spark/cli.py`
+
+- `spark advisory`
+  - Runs guided 2-question setup.
+- `spark advisory show`
+  - Shows current preferences.
+- `spark advisory set --memory-mode standard --guidance-style balanced`
+  - Direct set mode.
+- `spark advisory on`
+  - Enables advisory (default memory profile: `standard`).
+- `spark advisory off`
+  - Disables replay advisory.
+
+Default-on behavior:
+
+- `spark advisory set` with no flags now applies:
+  - `memory_mode=standard`
+  - `guidance_style=balanced`
+- This ensures the baseline advisory mode is enabled by default.
+
 ## Why this design
 
 - Two questions are enough for most users:

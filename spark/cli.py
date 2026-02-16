@@ -17,6 +17,7 @@ Usage:
     python -m spark.cli write      # Write learnings to markdown
     python -m spark.cli health     # Health check
     python -m spark.cli memory     # Memory capture suggestions
+    python -m spark.cli advisory   # Guided advisory setup (2 questions)
     python -m spark.cli outcome    # Record explicit outcome check-in
     python -m spark.cli advice-feedback  # Record explicit advice helpfulness
     python -m spark.cli eval       # Evaluate predictions vs outcomes
@@ -89,6 +90,11 @@ from lib.memory_banks import store_memory, sync_insights_to_banks, get_bank_stat
 from lib.memory_store import purge_telemetry_memories
 from lib.eidos.store import purge_telemetry_distillations
 from lib.advisor import record_advice_feedback
+from lib.advisory_preferences import (
+    apply_preferences as apply_advisory_preferences,
+    get_current_preferences as get_current_advisory_preferences,
+    setup_questions as get_advisory_setup_questions,
+)
 from lib.outcome_log import append_outcome, make_outcome_id, auto_link_outcomes, get_linkable_candidates
 from lib.memory_capture import (
     process_recent_memory_events,
@@ -1831,6 +1837,128 @@ def cmd_eidos(args):
 """)
 
 
+def _pick_advisory_option(question: dict, current_value: str) -> str:
+    options = question.get("options") or []
+    if not options:
+        return str(current_value or "")
+
+    current = str(current_value or "").strip().lower()
+    default_idx = 1
+    for idx, opt in enumerate(options, start=1):
+        value = str(opt.get("value") or "").strip().lower()
+        if value == current:
+            default_idx = idx
+            break
+
+    print()
+    print(question.get("question") or "Choose an option:")
+    for idx, opt in enumerate(options, start=1):
+        label = str(opt.get("label") or opt.get("value") or f"Option {idx}")
+        description = str(opt.get("description") or "").strip()
+        marker = " (current)" if idx == default_idx else ""
+        print(f"  {idx}. {label}{marker}")
+        if description:
+            print(f"     {description}")
+
+    if not sys.stdin.isatty():
+        return str(options[default_idx - 1].get("value") or current_value)
+
+    while True:
+        raw = input(f"Select [default {default_idx}]: ").strip()
+        if not raw:
+            return str(options[default_idx - 1].get("value") or current_value)
+        if raw.isdigit():
+            choice = int(raw)
+            if 1 <= choice <= len(options):
+                return str(options[choice - 1].get("value") or current_value)
+        print("Invalid selection. Enter the option number.")
+
+
+def _print_advisory_preferences(preferences: dict) -> None:
+    effective = preferences.get("effective") if isinstance(preferences.get("effective"), dict) else {}
+    memory_mode = str(preferences.get("memory_mode") or "standard")
+    guidance_style = str(preferences.get("guidance_style") or "balanced")
+    advisory_on = bool(effective.get("replay_enabled", memory_mode != "off"))
+
+    print("[SPARK] Advisory Preferences")
+    print(f"  advisory_on: {'yes' if advisory_on else 'no'}")
+    print(f"  memory_mode: {memory_mode}")
+    print(f"  guidance_style: {guidance_style}")
+    if "max_items" in effective:
+        print(f"  max_items: {effective.get('max_items')}")
+    if "min_rank_score" in effective:
+        print(f"  min_rank_score: {effective.get('min_rank_score')}")
+
+
+def cmd_advisory(args):
+    """Configure advisory preferences (memory replay + guidance style)."""
+    advisory_cmd = str(getattr(args, "advisory_cmd", "") or "setup").strip().lower()
+
+    if advisory_cmd == "show":
+        current = get_current_advisory_preferences()
+        if getattr(args, "json", False):
+            print(json.dumps(current, indent=2))
+            return
+        _print_advisory_preferences(current)
+        return
+
+    source = str(getattr(args, "source", "") or f"spark_cli_{advisory_cmd}")
+    if advisory_cmd == "setup":
+        current = get_current_advisory_preferences()
+        setup = get_advisory_setup_questions(current=current)
+        questions = setup.get("questions") if isinstance(setup, dict) else []
+        memory_mode = current.get("memory_mode", "standard")
+        guidance_style = current.get("guidance_style", "balanced")
+        if isinstance(questions, list) and questions:
+            memory_mode = _pick_advisory_option(questions[0], str(memory_mode))
+            if len(questions) > 1:
+                guidance_style = _pick_advisory_option(questions[1], str(guidance_style))
+        result = apply_advisory_preferences(
+            memory_mode=memory_mode,
+            guidance_style=guidance_style,
+            source=source,
+        )
+        _print_advisory_preferences(result)
+        return
+
+    if advisory_cmd == "set":
+        memory_mode = getattr(args, "memory_mode", None)
+        guidance_style = getattr(args, "guidance_style", None)
+        # User-friendly default: "set" with no args means turn advisory on with baseline defaults.
+        if memory_mode is None and guidance_style is None:
+            memory_mode = "standard"
+            guidance_style = "balanced"
+        result = apply_advisory_preferences(
+            memory_mode=memory_mode,
+            guidance_style=guidance_style,
+            source=source,
+        )
+        _print_advisory_preferences(result)
+        return
+
+    if advisory_cmd == "on":
+        memory_mode = str(getattr(args, "memory_mode", None) or "standard")
+        guidance_style = getattr(args, "guidance_style", None)
+        result = apply_advisory_preferences(
+            memory_mode=memory_mode,
+            guidance_style=guidance_style,
+            source=source,
+        )
+        _print_advisory_preferences(result)
+        return
+
+    if advisory_cmd == "off":
+        result = apply_advisory_preferences(
+            memory_mode="off",
+            guidance_style=getattr(args, "guidance_style", None),
+            source=source,
+        )
+        _print_advisory_preferences(result)
+        return
+
+    print("Use: spark advisory [setup|show|set|on|off]")
+
+
 def cmd_memory(args):
     """Configure/view Clawdbot semantic memory (embeddings provider)."""
     from lib.clawdbot_memory_setup import (
@@ -2348,6 +2476,8 @@ Examples:
   spark learnings --limit 20
   spark capture --list
   spark capture --accept <id>
+  spark advisory
+  spark advisory on
 """
     )
     
@@ -2460,6 +2590,50 @@ Examples:
     opps_dismiss = opps_sub.add_parser("dismiss", help="Dismiss an opportunity to reduce repeats")
     opps_dismiss.add_argument("id", help="opportunity_id (full or prefix)")
     opps_dismiss.add_argument("--note", "-n", default="", help="Optional note")
+
+    # advisory - user-facing advisory configuration
+    advisory_parser = subparsers.add_parser(
+        "advisory",
+        help="Configure advisory memory/guidance preferences",
+    )
+    advisory_sub = advisory_parser.add_subparsers(dest="advisory_cmd")
+
+    advisory_setup = advisory_sub.add_parser("setup", help="Run guided 2-question setup")
+    advisory_setup.add_argument("--source", default="spark_cli_setup", help="Source label for metadata")
+
+    advisory_show = advisory_sub.add_parser("show", help="Show current advisory preferences")
+    advisory_show.add_argument("--json", action="store_true", help="Emit JSON output")
+
+    advisory_set = advisory_sub.add_parser("set", help="Set advisory preferences directly")
+    advisory_set.add_argument("--memory-mode", choices=["off", "standard", "replay"], help="Memory replay mode")
+    advisory_set.add_argument(
+        "--guidance-style",
+        choices=["concise", "balanced", "coach"],
+        help="Advisory guidance style",
+    )
+    advisory_set.add_argument("--source", default="spark_cli_set", help="Source label for metadata")
+
+    advisory_on = advisory_sub.add_parser("on", help="Enable advisory defaults")
+    advisory_on.add_argument(
+        "--memory-mode",
+        choices=["standard", "replay"],
+        default="standard",
+        help="On mode profile (default: standard)",
+    )
+    advisory_on.add_argument(
+        "--guidance-style",
+        choices=["concise", "balanced", "coach"],
+        help="Advisory guidance style",
+    )
+    advisory_on.add_argument("--source", default="spark_cli_on", help="Source label for metadata")
+
+    advisory_off = advisory_sub.add_parser("off", help="Disable replay advisory")
+    advisory_off.add_argument(
+        "--guidance-style",
+        choices=["concise", "balanced", "coach"],
+        help="Optional style to persist while disabled",
+    )
+    advisory_off.add_argument("--source", default="spark_cli_off", help="Source label for metadata")
 
     # outcome
     outcome_parser = subparsers.add_parser("outcome", help="Record explicit outcome check-in")
@@ -2750,6 +2924,7 @@ Examples:
         "health": cmd_health,
         "events": cmd_events,
         "opportunities": cmd_opportunities,
+        "advisory": cmd_advisory,
         "outcome": cmd_outcome,
         "advice-feedback": cmd_advice_feedback,
         "outcome-link": cmd_outcome_link,
