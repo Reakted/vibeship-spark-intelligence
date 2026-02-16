@@ -50,6 +50,22 @@ ACTION_FIRST_ENABLED = os.getenv("SPARK_ADVISORY_ACTION_FIRST", "0") == "1"
 # Advisory speed lever: force programmatic synthesis (no AI/network) on the hot path.
 # Default: ON (Carmack-style: deterministic + fast). Override via env or tuneable.
 FORCE_PROGRAMMATIC_SYNTH = os.getenv("SPARK_ADVISORY_FORCE_PROGRAMMATIC_SYNTH", "1") == "1"
+# Mixed policy: allow AI synthesis selectively even when programmatic forcing is enabled.
+SELECTIVE_AI_SYNTH_ENABLED = os.getenv("SPARK_ADVISORY_SELECTIVE_AI_SYNTH", "0") == "1"
+SELECTIVE_AI_MIN_REMAINING_MS = float(
+    os.getenv("SPARK_ADVISORY_SELECTIVE_AI_MIN_REMAINING_MS", "1800")
+)
+SELECTIVE_AI_MIN_AUTHORITY = str(
+    os.getenv("SPARK_ADVISORY_SELECTIVE_AI_MIN_AUTHORITY", "warning") or "warning"
+).strip().lower()
+
+_AUTHORITY_RANK = {
+    "silent": 0,
+    "whisper": 1,
+    "note": 2,
+    "warning": 3,
+    "block": 4,
+}
 
 # Self-evolution speed lever: stable exact-keying for packets. When enabled, the session key includes
 # the recent tool sequence (higher specificity, lower cache hit rate). Default: OFF.
@@ -340,6 +356,9 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     global DELIVERY_STALE_SECONDS
     global ADVISORY_TEXT_REPEAT_COOLDOWN_S
     global FORCE_PROGRAMMATIC_SYNTH
+    global SELECTIVE_AI_SYNTH_ENABLED
+    global SELECTIVE_AI_MIN_REMAINING_MS
+    global SELECTIVE_AI_MIN_AUTHORITY
     global SESSION_KEY_INCLUDE_RECENT_TOOLS
 
     applied: List[str] = []
@@ -443,6 +462,31 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
         )
         applied.append("force_programmatic_synth")
 
+    if "selective_ai_synth_enabled" in cfg:
+        SELECTIVE_AI_SYNTH_ENABLED = _parse_bool(
+            cfg.get("selective_ai_synth_enabled"),
+            SELECTIVE_AI_SYNTH_ENABLED,
+        )
+        applied.append("selective_ai_synth_enabled")
+
+    if "selective_ai_min_remaining_ms" in cfg:
+        try:
+            SELECTIVE_AI_MIN_REMAINING_MS = max(
+                100.0,
+                min(8000.0, float(cfg.get("selective_ai_min_remaining_ms") or SELECTIVE_AI_MIN_REMAINING_MS)),
+            )
+            applied.append("selective_ai_min_remaining_ms")
+        except Exception:
+            warnings.append("invalid_selective_ai_min_remaining_ms")
+
+    if "selective_ai_min_authority" in cfg:
+        auth = str(cfg.get("selective_ai_min_authority") or "").strip().lower()
+        if auth in _AUTHORITY_RANK:
+            SELECTIVE_AI_MIN_AUTHORITY = auth
+            applied.append("selective_ai_min_authority")
+        else:
+            warnings.append("invalid_selective_ai_min_authority")
+
     if "session_key_include_recent_tools" in cfg:
         SESSION_KEY_INCLUDE_RECENT_TOOLS = _parse_bool(
             cfg.get("session_key_include_recent_tools"),
@@ -487,6 +531,9 @@ def get_engine_config() -> Dict[str, Any]:
         "prefetch_inline_max_jobs": int(INLINE_PREFETCH_MAX_JOBS),
         "actionability_enforce": bool(ACTIONABILITY_ENFORCE),
         "force_programmatic_synth": bool(FORCE_PROGRAMMATIC_SYNTH),
+        "selective_ai_synth_enabled": bool(SELECTIVE_AI_SYNTH_ENABLED),
+        "selective_ai_min_remaining_ms": float(SELECTIVE_AI_MIN_REMAINING_MS),
+        "selective_ai_min_authority": str(SELECTIVE_AI_MIN_AUTHORITY),
         "session_key_include_recent_tools": bool(SESSION_KEY_INCLUDE_RECENT_TOOLS),
         "delivery_stale_s": float(DELIVERY_STALE_SECONDS),
         "advisory_text_repeat_cooldown_s": float(ADVISORY_TEXT_REPEAT_COOLDOWN_S),
@@ -685,6 +732,26 @@ def _baseline_text(intent_family: str) -> str:
     return defaults.get(intent_family, defaults["emergent_other"])
 
 
+def _fallback_synth_text_from_emitted(
+    emitted_advice: List[Any],
+    *,
+    intent_family: str,
+    max_chars: int = 320,
+) -> str:
+    """Derive deterministic synthesis text when LLM/programmatic synth is empty."""
+    for item in list(emitted_advice or [])[:3]:
+        text = str(getattr(item, "text", "") or "").strip()
+        if not text:
+            continue
+        compact = re.sub(r"\s+", " ", text).strip()
+        if not compact:
+            continue
+        if len(compact) > max(60, int(max_chars)):
+            compact = compact[: max(60, int(max_chars)) - 3].rstrip() + "..."
+        return compact
+    return _baseline_text(intent_family).strip()
+
+
 def _text_fingerprint(text: str) -> str:
     cleaned = re.sub(r"\s+", " ", str(text or "").strip().lower())
     if not cleaned:
@@ -842,6 +909,44 @@ def _advice_source_counts(advice_items: Optional[List[Any]]) -> Dict[str, int]:
             continue
         counts[source] = counts.get(source, 0) + 1
     return counts
+
+
+def _authority_rank(authority: str) -> int:
+    return int(_AUTHORITY_RANK.get(str(authority or "").strip().lower(), -1))
+
+
+def _should_use_selective_ai_synth(*, gate_result: Any, remaining_ms: float) -> bool:
+    if not FORCE_PROGRAMMATIC_SYNTH:
+        return False
+    if not SELECTIVE_AI_SYNTH_ENABLED:
+        return False
+    if float(remaining_ms) < float(SELECTIVE_AI_MIN_REMAINING_MS):
+        return False
+    emitted = list(getattr(gate_result, "emitted", []) or [])
+    if not emitted:
+        return False
+    top_authority = str(getattr(emitted[0], "authority", "") or "").strip().lower()
+    min_auth = str(SELECTIVE_AI_MIN_AUTHORITY or "warning").strip().lower()
+    return _authority_rank(top_authority) >= _authority_rank(min_auth)
+
+
+def _gate_suppression_metadata(gate_result: Any) -> Dict[str, Any]:
+    suppressed = list(getattr(gate_result, "suppressed", []) or [])
+    if not suppressed:
+        return {}
+    reason_counts: Dict[str, int] = {}
+    for decision in suppressed:
+        reason = str(getattr(decision, "reason", "") or "").strip() or "unspecified"
+        reason_counts[reason] = int(reason_counts.get(reason, 0) + 1)
+    ranked = sorted(reason_counts.items(), key=lambda kv: kv[1], reverse=True)
+    return {
+        "gate_reason": str(ranked[0][0]),
+        "suppressed_count": int(len(suppressed)),
+        "suppressed_reasons": [
+            {"reason": str(reason), "count": int(count)}
+            for reason, count in ranked[:8]
+        ],
+    }
 
 
 _NON_MEMORY_ADVICE_SOURCES = {"quick", "baseline", "prefetch"}
@@ -1086,6 +1191,7 @@ def on_pre_tool(
     task_plane = "build_delivery"
     advice_source_counts: Dict[str, int] = {}
     emitted_advice_source_counts: Dict[str, int] = {}
+    synth_policy = "none"
 
     def _mark(stage: str, t0: float) -> None:
         try:
@@ -1288,6 +1394,7 @@ def on_pre_tool(
                         route = f"{route}_fallback"
 
             if not fallback_text:
+                suppression_meta = _gate_suppression_metadata(gate_result)
                 save_state(state)
                 _log_engine_event(
                     "no_emit",
@@ -1307,6 +1414,7 @@ def on_pre_tool(
                         "fallback_candidate_blocked": bool(route and route.startswith("packet") and not PACKET_FALLBACK_EMIT_ENABLED),
                         "error_kind": "policy",
                         "error_code": "AE_GATE_SUPPRESSED",
+                        **suppression_meta,
                     },
                 )
                 return None
@@ -1574,14 +1682,25 @@ def on_pre_tool(
         synth_text = ""
         if packet and str(packet.get("advisory_text") or "").strip():
             synth_text = str(packet.get("advisory_text") or "").strip()
+            synth_policy = "packet_cached"
         elif FORCE_PROGRAMMATIC_SYNTH:
-            synth_text = synthesize(
-                emitted_advice,
-                phase=gate_result.phase,
-                user_intent=state.user_intent,
-                tool_name=tool_name,
-                force_mode="programmatic",
-            )
+            if _should_use_selective_ai_synth(gate_result=gate_result, remaining_ms=remaining_ms):
+                synth_text = synthesize(
+                    emitted_advice,
+                    phase=gate_result.phase,
+                    user_intent=state.user_intent,
+                    tool_name=tool_name,
+                )
+                synth_policy = "selective_ai_auto"
+            else:
+                synth_text = synthesize(
+                    emitted_advice,
+                    phase=gate_result.phase,
+                    user_intent=state.user_intent,
+                    tool_name=tool_name,
+                    force_mode="programmatic",
+                )
+                synth_policy = "programmatic_forced"
         elif remaining_ms > 500:
             synth_text = synthesize(
                 emitted_advice,
@@ -1589,6 +1708,7 @@ def on_pre_tool(
                 user_intent=state.user_intent,
                 tool_name=tool_name,
             )
+            synth_policy = "auto"
         else:
             synth_text = synthesize(
                 emitted_advice,
@@ -1597,6 +1717,14 @@ def on_pre_tool(
                 tool_name=tool_name,
                 force_mode="programmatic",
             )
+            synth_policy = "programmatic_budget_fallback"
+        synth_fallback_used = False
+        if not str(synth_text or "").strip():
+            synth_text = _fallback_synth_text_from_emitted(
+                emitted_advice,
+                intent_family=intent_family,
+            )
+            synth_fallback_used = bool(str(synth_text or "").strip())
         _mark("synth", t_synth)
 
         action_meta = _ensure_actionability(synth_text, tool_name, task_plane)
@@ -1831,6 +1959,8 @@ def on_pre_tool(
                 "actionability_command": action_meta.get("command"),
                 "effective_actionability_added": bool(effective_action_meta.get("added")),
                 "effective_actionability_command": effective_action_meta.get("command"),
+                "synth_fallback_used": bool(synth_fallback_used),
+                "synth_policy": str(synth_policy),
             },
         )
         return effective_text if emitted else None

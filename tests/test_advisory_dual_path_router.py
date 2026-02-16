@@ -76,6 +76,30 @@ def _suppress_all_gate(advice_items, state, tool_name, tool_input=None):
     )
 
 
+def _allow_warning_gate(advice_items, state, tool_name, tool_input=None):
+    decisions = []
+    emitted = []
+    for idx, item in enumerate(advice_items[:1]):
+        aid = getattr(item, "advice_id", f"aid_{idx}")
+        d = GateDecision(
+            advice_id=aid,
+            authority="warning",
+            emit=True,
+            reason="test_warning",
+            adjusted_score=0.95,
+            original_score=0.95,
+        )
+        decisions.append(d)
+        emitted.append(d)
+    return GateResult(
+        decisions=decisions,
+        emitted=emitted,
+        suppressed=[],
+        phase="implementation",
+        total_retrieved=len(advice_items),
+    )
+
+
 def test_pre_tool_uses_packet_path_when_available(monkeypatch, tmp_path):
     _patch_state_and_store(monkeypatch, tmp_path)
 
@@ -189,6 +213,54 @@ def test_pre_tool_live_path_propagates_include_mind_policy(monkeypatch, tmp_path
     assert capture["include_mind"] is False
 
 
+def test_pre_tool_live_path_uses_fallback_when_synth_empty(monkeypatch, tmp_path):
+    _patch_state_and_store(monkeypatch, tmp_path)
+
+    monkeypatch.setattr("lib.advisory_gate.evaluate", _allow_all_gate)
+    monkeypatch.setattr(
+        "lib.advisory_memory_fusion.build_memory_bundle",
+        lambda **kwargs: {
+            "memory_absent_declared": False,
+            "sources": {"cognitive": {"count": 1}},
+        },
+    )
+    monkeypatch.setattr(
+        "lib.advisor.advise_on_tool",
+        lambda *a, **k: [
+            Advice(
+                advice_id="live-empty-a1",
+                insight_key="k-empty-1",
+                text="Fallback from emitted advice text.",
+                confidence=0.81,
+                source="cognitive",
+                context_match=0.82,
+                reason="test",
+            )
+        ],
+    )
+    monkeypatch.setattr("lib.advisory_synthesizer.synthesize", lambda *a, **k: "")
+
+    capture = {"synth_text": None}
+
+    def _fake_emit(gate_result, synthesized_text, advice_items=None):
+        capture["synth_text"] = synthesized_text
+        return bool(str(synthesized_text or "").strip())
+
+    monkeypatch.setattr("lib.advisory_emitter.emit_advisory", _fake_emit)
+
+    text = engine.on_pre_tool("s2d", "Read", {"file_path": "y.py"})
+    assert text is not None
+    assert "Fallback from emitted advice text." in text
+    assert capture["synth_text"] is not None
+    assert "Fallback from emitted advice text." in str(capture["synth_text"])
+
+    lines = engine.ENGINE_LOG.read_text(encoding="utf-8").splitlines()
+    assert lines
+    row = json.loads(lines[-1])
+    assert row["event"] == "emitted"
+    assert row.get("synth_fallback_used") is True
+
+
 def test_pre_tool_resolves_missing_trace_id_for_engine_and_feedback(monkeypatch, tmp_path):
     _patch_state_and_store(monkeypatch, tmp_path)
 
@@ -294,6 +366,8 @@ def test_pre_tool_packet_no_emit_does_not_fallback_when_disabled(monkeypatch, tm
     row = json.loads(lines[-1])
     assert row["event"] == "no_emit"
     assert row.get("fallback_candidate_blocked") is True
+    assert row.get("gate_reason") == "test_suppressed"
+    assert row.get("suppressed_count") == 1
 
 
 def test_pre_tool_packet_fallback_blocked_by_rate_guard(monkeypatch, tmp_path):
@@ -347,3 +421,101 @@ def test_pre_tool_packet_fallback_blocked_by_rate_guard(monkeypatch, tmp_path):
     assert row["event"] == "no_emit"
     assert row.get("error_code") == "AE_FALLBACK_RATE_LIMIT"
     assert row.get("fallback_guard_blocked") is True
+
+
+def test_pre_tool_selective_ai_uses_auto_mode_for_warning(monkeypatch, tmp_path):
+    _patch_state_and_store(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(engine, "FORCE_PROGRAMMATIC_SYNTH", True)
+    monkeypatch.setattr(engine, "SELECTIVE_AI_SYNTH_ENABLED", True)
+    monkeypatch.setattr(engine, "SELECTIVE_AI_MIN_REMAINING_MS", 0.0)
+    monkeypatch.setattr(engine, "SELECTIVE_AI_MIN_AUTHORITY", "warning")
+
+    monkeypatch.setattr("lib.advisory_gate.evaluate", _allow_warning_gate)
+    monkeypatch.setattr(
+        "lib.advisory_memory_fusion.build_memory_bundle",
+        lambda **kwargs: {
+            "memory_absent_declared": False,
+            "sources": {"cognitive": {"count": 1}},
+        },
+    )
+    monkeypatch.setattr(
+        "lib.advisor.advise_on_tool",
+        lambda *a, **k: [
+            Advice(
+                advice_id="live-w1",
+                insight_key="kw1",
+                text="Warning-level guidance.",
+                confidence=0.92,
+                source="advisor",
+                context_match=0.9,
+                reason="test",
+            )
+        ],
+    )
+    capture = {"force_mode": "unset"}
+
+    def _fake_synth(*_args, **kwargs):
+        capture["force_mode"] = kwargs.get("force_mode")
+        return "Selective AI path."
+
+    monkeypatch.setattr("lib.advisory_synthesizer.synthesize", _fake_synth)
+    monkeypatch.setattr("lib.advisory_emitter.emit_advisory", lambda *a, **k: True)
+
+    text = engine.on_pre_tool("s6", "Edit", {"file_path": "x.py"})
+    assert text is not None
+    assert capture["force_mode"] is None
+
+    lines = engine.ENGINE_LOG.read_text(encoding="utf-8").splitlines()
+    row = json.loads(lines[-1])
+    assert row.get("event") == "emitted"
+    assert row.get("synth_policy") == "selective_ai_auto"
+
+
+def test_pre_tool_selective_ai_keeps_programmatic_for_note(monkeypatch, tmp_path):
+    _patch_state_and_store(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(engine, "FORCE_PROGRAMMATIC_SYNTH", True)
+    monkeypatch.setattr(engine, "SELECTIVE_AI_SYNTH_ENABLED", True)
+    monkeypatch.setattr(engine, "SELECTIVE_AI_MIN_REMAINING_MS", 0.0)
+    monkeypatch.setattr(engine, "SELECTIVE_AI_MIN_AUTHORITY", "warning")
+
+    monkeypatch.setattr("lib.advisory_gate.evaluate", _allow_all_gate)
+    monkeypatch.setattr(
+        "lib.advisory_memory_fusion.build_memory_bundle",
+        lambda **kwargs: {
+            "memory_absent_declared": False,
+            "sources": {"cognitive": {"count": 1}},
+        },
+    )
+    monkeypatch.setattr(
+        "lib.advisor.advise_on_tool",
+        lambda *a, **k: [
+            Advice(
+                advice_id="live-n1",
+                insight_key="kn1",
+                text="Note-level guidance.",
+                confidence=0.82,
+                source="advisor",
+                context_match=0.82,
+                reason="test",
+            )
+        ],
+    )
+    capture = {"force_mode": "unset"}
+
+    def _fake_synth(*_args, **kwargs):
+        capture["force_mode"] = kwargs.get("force_mode")
+        return "Programmatic path."
+
+    monkeypatch.setattr("lib.advisory_synthesizer.synthesize", _fake_synth)
+    monkeypatch.setattr("lib.advisory_emitter.emit_advisory", lambda *a, **k: True)
+
+    text = engine.on_pre_tool("s7", "Read", {"file_path": "y.py"})
+    assert text is not None
+    assert capture["force_mode"] == "programmatic"
+
+    lines = engine.ENGINE_LOG.read_text(encoding="utf-8").splitlines()
+    row = json.loads(lines[-1])
+    assert row.get("event") == "emitted"
+    assert row.get("synth_policy") == "programmatic_forced"
