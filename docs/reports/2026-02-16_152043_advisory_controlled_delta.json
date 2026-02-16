@@ -1,0 +1,84 @@
+{
+  "generated_at": "2026-02-16T11:21:26.841732+00:00",
+  "start_ts": 1771240843.7537518,
+  "end_ts": 1771240886.5201066,
+  "rounds": 30,
+  "emitted_returns": 3,
+  "engine": {
+    "rows": 60,
+    "trace_rows": 60,
+    "trace_coverage_pct": 100.0,
+    "events": {
+      "user_prompt_prefetch": 30,
+      "emitted": 3,
+      "no_emit": 12,
+      "no_advice": 15
+    },
+    "routes": {
+      "live": 30
+    },
+    "fallback_share_pct": 0.0,
+    "latency": {
+      "n": 3,
+      "p50_ms": 9509.2,
+      "p90_ms": 11844.7,
+      "p95_ms": 11844.7,
+      "p99_ms": 11844.7,
+      "max_ms": 11844.7
+    }
+  },
+  "feedback_requests": {
+    "rows": 1,
+    "trace_rows": 1,
+    "trace_coverage_pct": 100.0,
+    "item_total": 1,
+    "top_repeats": [
+      {
+        "text": "Always Read a file before Edit to verify current content",
+        "count": 1
+      }
+    ],
+    "top_repeat_share_pct": 100.0,
+    "unique_ratio_pct": 100.0
+  },
+  "modes": {
+    "prompt_mode": "vary",
+    "tool_input_mode": "repo"
+  },
+  "config": {
+    "advisory_engine": {
+      "enabled": true,
+      "max_ms": 3500.0,
+      "include_mind": true,
+      "prefetch_queue_enabled": true,
+      "prefetch_inline_enabled": true,
+      "packet_fallback_emit_enabled": false,
+      "fallback_rate_guard_enabled": true,
+      "fallback_rate_max_ratio": 0.55,
+      "fallback_rate_window": 80,
+      "prefetch_inline_max_jobs": 1,
+      "actionability_enforce": true,
+      "force_programmatic_synth": false,
+      "session_key_include_recent_tools": false,
+      "delivery_stale_s": 900.0,
+      "advisory_text_repeat_cooldown_s": 9000.0
+    },
+    "advisory_gate": {
+      "max_emit_per_call": 1,
+      "tool_cooldown_s": 150,
+      "advice_repeat_cooldown_s": 5400,
+      "emit_whispers": true,
+      "warning_threshold": 0.8,
+      "note_threshold": 0.5,
+      "whisper_threshold": 0.35
+    },
+    "advisor": {
+      "max_items": 8,
+      "min_rank_score": 0.55
+    }
+  },
+  "force_live": true,
+  "label": "cognitive_focus",
+  "trace_prefix": "delta-cognitive_focus-20260216_112043",
+  "session_prefix": "advisory-bench-cognitive_focus"
+}
