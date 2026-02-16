@@ -79,6 +79,15 @@ _TRANSCRIPT_ARTIFACT_PATTERNS = (
     re.compile(r"^\s*#\s*spark\s", re.I),
 )
 RECENT_OUTCOMES_MAX = 5000
+REPLAY_ADVISORY_ENABLED = os.environ.get("SPARK_ADVISORY_REPLAY_ENABLED", "1") != "0"
+REPLAY_MIN_STRICT_SAMPLES = int(os.environ.get("SPARK_ADVISORY_REPLAY_MIN_STRICT", "4") or 4)
+REPLAY_MIN_IMPROVEMENT_DELTA = float(
+    os.environ.get("SPARK_ADVISORY_REPLAY_MIN_DELTA", "0.20") or 0.20
+)
+REPLAY_MAX_RECORDS = int(os.environ.get("SPARK_ADVISORY_REPLAY_MAX_RECORDS", "3500") or 3500)
+REPLAY_MAX_AGE_S = int(os.environ.get("SPARK_ADVISORY_REPLAY_MAX_AGE_S", str(21 * 86400)) or (21 * 86400))
+REPLAY_STRICT_WINDOW_S = int(os.environ.get("SPARK_ADVISORY_REPLAY_STRICT_WINDOW_S", "1200") or 1200)
+REPLAY_MIN_CONTEXT_MATCH = float(os.environ.get("SPARK_ADVISORY_REPLAY_MIN_CONTEXT", "0.12") or 0.12)
 
 # Thresholds (Improvement #8: Advisor Integration tuneables)
 # Defaults — overridden by ~/.spark/tuneables.json → "advisor" section at module load.
@@ -1334,6 +1343,15 @@ class SparkAdvisor:
         # 11. Get niche intelligence advice
         advice_list.extend(self._get_niche_advice(tool_name, context))
 
+        # 12. Replay counterfactual advisory (past outcome-backed alternatives)
+        advice_list.extend(
+            self._get_replay_counterfactual_advice(
+                tool_name=tool_name,
+                context_raw=context_raw,
+                existing_advice=advice_list,
+            )
+        )
+
         # Global domain guard: do not let X-social specific learnings leak
         # into non-social tasks from non-semantic sources (chip/mind/cognitive/etc.).
         advice_list = self._filter_cross_domain_advice(advice_list, context)
@@ -2541,6 +2559,257 @@ class SparkAdvisor:
         overlap = len(insight_words & current_words)
         return min(1.0, overlap / max(len(insight_words), 1) + 0.3)
 
+    def _replay_extract_tool(self, record: Any) -> str:
+        """Best-effort tool extraction for replay counterfactuals."""
+        learning_id = str(getattr(record, "learning_id", "") or "").strip()
+        if learning_id.lower().startswith("tool:"):
+            return learning_id[5:].strip().lower()
+
+        evidence = str(getattr(record, "outcome_evidence", "") or "").strip()
+        if evidence:
+            for token in evidence.split():
+                if token.startswith("tool="):
+                    return token.split("=", 1)[1].strip().lower()
+
+        content = str(getattr(record, "learning_content", "") or "").strip()
+        if content.lower().startswith("tool:"):
+            return content[5:].strip().lower()
+        return ""
+
+    def _replay_outcome_ts(self, record: Any) -> Optional[float]:
+        ts = _parse_iso_ts(getattr(record, "outcome_at", None))
+        if ts is not None:
+            return ts
+        return _parse_iso_ts(getattr(record, "retrieved_at", None))
+
+    def _is_replay_strict(self, record: Any) -> bool:
+        retrieve_trace = str(getattr(record, "trace_id", "") or "").strip()
+        outcome_trace = str(getattr(record, "outcome_trace_id", "") or "").strip()
+        if not (retrieve_trace and outcome_trace and retrieve_trace == outcome_trace):
+            return False
+
+        latency = getattr(record, "outcome_latency_s", None)
+        try:
+            latency_s = float(latency)
+        except Exception:
+            started = _parse_iso_ts(getattr(record, "retrieved_at", None))
+            ended = _parse_iso_ts(getattr(record, "outcome_at", None))
+            if started is None or ended is None:
+                return False
+            latency_s = float(ended - started)
+        if latency_s < 0:
+            return False
+        return latency_s <= max(0, int(REPLAY_STRICT_WINDOW_S))
+
+    def _replay_preview_text(self, text: str, limit: int = 96) -> str:
+        body = re.sub(r"^\[[^\]]+\]\s*", "", str(text or "").strip())
+        body = re.sub(r"\s+", " ", body)
+        if len(body) <= limit:
+            return body
+        return body[: max(20, limit - 3)].rstrip() + "..."
+
+    def _get_replay_counterfactual_advice(
+        self,
+        *,
+        tool_name: str,
+        context_raw: str,
+        existing_advice: List[Advice],
+    ) -> List[Advice]:
+        """Generate one replay advisory backed by strict historical outcomes."""
+        if not REPLAY_ADVISORY_ENABLED:
+            return []
+
+        tool = str(tool_name or "").strip().lower()
+        if not tool:
+            return []
+
+        try:
+            from .meta_ralph import get_meta_ralph
+
+            ralph = get_meta_ralph()
+            records = list((getattr(ralph, "outcome_records", {}) or {}).values())
+        except Exception:
+            return []
+        if not records:
+            return []
+
+        now = time.time()
+        window = records[-max(1, int(REPLAY_MAX_RECORDS)) :]
+        buckets: Dict[str, Dict[str, Any]] = {}
+
+        for rec in window:
+            if not bool(getattr(rec, "acted_on", False)):
+                continue
+            outcome = str(getattr(rec, "outcome", "") or "").strip().lower()
+            if outcome not in {"good", "bad"}:
+                continue
+            if self._replay_extract_tool(rec) != tool:
+                continue
+
+            outcome_ts = self._replay_outcome_ts(rec)
+            if outcome_ts is not None and (now - outcome_ts) > max(0, int(REPLAY_MAX_AGE_S)):
+                continue
+
+            insight_key = str(getattr(rec, "insight_key", "") or "").strip()
+            learning_id = str(getattr(rec, "learning_id", "") or "").strip()
+            bucket_key = insight_key or learning_id
+            if not bucket_key:
+                continue
+
+            content = str(getattr(rec, "learning_content", "") or "").strip()
+            if self._is_low_signal_struggle_text(content):
+                continue
+            if self._is_transcript_artifact(content):
+                continue
+
+            row = buckets.setdefault(
+                bucket_key,
+                {
+                    "key": bucket_key,
+                    "insight_key": insight_key,
+                    "text": "",
+                    "good": 0,
+                    "bad": 0,
+                    "strict_good": 0,
+                    "strict_bad": 0,
+                    "strict_total": 0,
+                    "context_match": 0.0,
+                    "last_ts": 0.0,
+                },
+            )
+            if outcome == "good":
+                row["good"] += 1
+            else:
+                row["bad"] += 1
+
+            strict_ok = self._is_replay_strict(rec)
+            if strict_ok:
+                row["strict_total"] += 1
+                if outcome == "good":
+                    row["strict_good"] += 1
+                else:
+                    row["strict_bad"] += 1
+
+            if content:
+                row["context_match"] = max(
+                    float(row.get("context_match") or 0.0),
+                    self._calculate_context_match(content, context_raw),
+                )
+                if not row.get("text"):
+                    row["text"] = content
+
+            if outcome_ts is not None and outcome_ts > float(row.get("last_ts") or 0.0):
+                row["last_ts"] = outcome_ts
+
+        min_strict = max(1, int(REPLAY_MIN_STRICT_SAMPLES))
+        candidates = [r for r in buckets.values() if int(r.get("strict_total") or 0) >= min_strict]
+        if len(candidates) < 2:
+            return []
+
+        def _strict_rate(row: Dict[str, Any]) -> float:
+            total = max(int(row.get("strict_total") or 0), 1)
+            return float(row.get("strict_good") or 0) / total
+
+        candidates.sort(
+            key=lambda r: (
+                _strict_rate(r),
+                int(r.get("strict_total") or 0),
+                float(r.get("context_match") or 0.0),
+                float(r.get("last_ts") or 0.0),
+            ),
+            reverse=True,
+        )
+        best = candidates[0]
+
+        baseline = None
+        for adv in existing_advice:
+            key = str(getattr(adv, "insight_key", "") or "").strip()
+            if key and key in buckets:
+                row = buckets[key]
+                if int(row.get("strict_total") or 0) >= min_strict:
+                    baseline = row
+                    break
+
+        if baseline is None:
+            alternatives = [r for r in candidates if r.get("key") != best.get("key")]
+            if not alternatives:
+                return []
+            baseline = min(
+                alternatives,
+                key=lambda r: (
+                    _strict_rate(r),
+                    int(r.get("strict_total") or 0),
+                    -float(r.get("context_match") or 0.0),
+                ),
+            )
+
+        if baseline.get("key") == best.get("key"):
+            return []
+
+        best_rate = _strict_rate(best)
+        base_rate = _strict_rate(baseline)
+        delta = best_rate - base_rate
+        if delta < float(REPLAY_MIN_IMPROVEMENT_DELTA):
+            return []
+
+        if (
+            float(best.get("context_match") or 0.0) < float(REPLAY_MIN_CONTEXT_MATCH)
+            and float(baseline.get("context_match") or 0.0) < float(REPLAY_MIN_CONTEXT_MATCH)
+        ):
+            return []
+
+        best_n = int(best.get("strict_total") or 0)
+        base_n = int(baseline.get("strict_total") or 0)
+        best_preview = self._replay_preview_text(str(best.get("text") or best.get("key") or "alternative"))
+        base_preview = self._replay_preview_text(str(baseline.get("text") or baseline.get("key") or "current pattern"))
+
+        last_ts = float(best.get("last_ts") or 0.0)
+        if last_ts > 0:
+            try:
+                last_seen = datetime.fromtimestamp(last_ts).strftime("%Y-%m-%d")
+            except Exception:
+                last_seen = "recently"
+        else:
+            last_seen = "recently"
+
+        confidence = min(
+            0.95,
+            max(
+                0.62,
+                0.45
+                + (best_rate * 0.30)
+                + (min(best_n, 12) / 80.0)
+                + (min(max(delta, 0.0), 0.4) * 0.40),
+            ),
+        )
+        context_match = max(0.55, float(best.get("context_match") or 0.0))
+        alt_key = str(best.get("key") or "")
+        base_key = str(baseline.get("key") or "")
+        replay_key = f"replay:{tool}:{hashlib.md5((base_key + '->' + alt_key).encode()).hexdigest()[:12]}"
+
+        text = (
+            f"[Replay] Similar {tool_name} pattern: '{base_preview}' worked {base_rate:.0%} "
+            f"({base_n} strict cases). Alternative '{best_preview}' worked {best_rate:.0%} "
+            f"({best_n}). Try the alternative?"
+        )
+        reason = f"Strict outcome replay; last seen {last_seen}; delta +{delta:.0%}."
+
+        return [
+            Advice(
+                advice_id=self._generate_advice_id(
+                    f"{tool}:{base_key}->{alt_key}",
+                    insight_key=replay_key,
+                    source="replay",
+                ),
+                insight_key=replay_key,
+                text=text,
+                confidence=confidence,
+                source="replay",
+                context_match=context_match,
+                reason=reason,
+            )
+        ]
+
     def _is_metadata_pattern(self, text: str) -> bool:
         """Detect metadata patterns that aren't actionable advice.
 
@@ -2690,6 +2959,7 @@ class SparkAdvisor:
         "semantic-agentic": 1.12,  # Agentic retrieval over semantic shortlist
         "trigger": 1.2,         # Explicit trigger rules
         "opportunity": 1.18,    # Socratic opportunity prompts
+        "replay": 1.22,         # Strict outcome-backed counterfactual replay
     }
 
     def _rank_score(self, a: Advice) -> float:
