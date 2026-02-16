@@ -19,6 +19,7 @@ You are an expert at whatever task is given. Before responding, take a moment to
 
 - `docs/DOCS_INDEX.md`: canonical documentation map (start here for active docs)
 - `docs/ADVISORY_AND_LEARNING_BENCHMARKS.md`: the 10 benchmarks for "advise correctly + use learnings at the right times", plus the real-time runbook
+- `docs/reports/2026-02-16_advisory_preferences_two_question_flow.md`: shipped 2-question advisory setup flow (API + CLI + runtime hot-reload)
 
 ## DEPTH v3.1.1 Training System (2026-02-10)
 
