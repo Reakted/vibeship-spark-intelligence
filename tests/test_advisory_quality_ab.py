@@ -276,3 +276,40 @@ def test_apply_restore_profile_overrides_legacy_retrieval_policy_still_supported
     mod._restore_advisor_profile(advisor_mod, snap)
     assert advisor.retrieval_policy.get("semantic_context_min") == before.get("semantic_context_min")
     assert advisor.retrieval_policy.get("semantic_lexical_min") == before.get("semantic_lexical_min")
+
+
+def test_run_benchmark_threads_suppress_emit_flag(monkeypatch, tmp_path):
+    mod = _load_module()
+    cases = [mod.AdvisoryCase(case_id="c1", tool="Read", prompt="inspect")]
+    monkeypatch.setattr(mod, "load_cases", lambda _path: cases)
+
+    seen = []
+
+    def _fake_run_profile(
+        *,
+        profile_name,
+        profile_cfg,
+        cases,
+        repeats,
+        force_live,
+        suppress_emit_output=True,
+    ):
+        seen.append(bool(suppress_emit_output))
+        return {
+            "profile": profile_name,
+            "config": profile_cfg,
+            "summary": {"score": 0.5, "emit_accuracy": 1.0, "no_emit_rate": 0.0},
+            "cases": [],
+        }
+
+    monkeypatch.setattr(mod, "run_profile", _fake_run_profile)
+    report = mod.run_benchmark(
+        cases_path=tmp_path / "cases.json",
+        profiles={"baseline": {}},
+        profile_names=["baseline"],
+        repeats=1,
+        force_live=True,
+        suppress_emit_output=True,
+    )
+    assert seen == [True]
+    assert report.get("suppress_emit_output") is True

@@ -136,6 +136,7 @@ def sweep_profiles(
     cases_path: Path,
     repeats: int,
     force_live: bool,
+    suppress_emit_output: bool,
     candidates: Sequence[Dict[str, Any]],
     weights: SweepWeights,
 ) -> Dict[str, Any]:
@@ -155,6 +156,7 @@ def sweep_profiles(
             cases=cases,
             repeats=repeats,
             force_live=force_live,
+            suppress_emit_output=suppress_emit_output,
         )
         summary = dict(run.get("summary") or {})
         summary["objective_score"] = objective_score(summary, weights)
@@ -181,6 +183,7 @@ def sweep_profiles(
         "case_count": len(cases),
         "repeats": int(repeats),
         "force_live": bool(force_live),
+        "suppress_emit_output": bool(suppress_emit_output),
         "weights": {
             "score_weight": weights.score_weight,
             "no_emit_penalty": weights.no_emit_penalty,
@@ -243,6 +246,12 @@ def main() -> int:
     )
     ap.add_argument("--repeats", type=int, default=1, help="Repetitions per case")
     ap.add_argument("--force-live", action="store_true", help="Force live advisory path")
+    ap.add_argument(
+        "--suppress-emit-output",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Suppress advisory stdout emission noise during benchmark runs",
+    )
     ap.add_argument("--max-candidates", type=int, default=12, help="Max candidate profiles to evaluate")
     ap.add_argument("--cooldown-grid", default="1800,3600,7200,10800", help="advisory_text_repeat_cooldown_s grid")
     ap.add_argument("--tool-cooldown-grid", default="90,120,180", help="tool_cooldown_s grid")
@@ -265,6 +274,7 @@ def main() -> int:
         cases_path=Path(args.cases),
         repeats=max(1, int(args.repeats)),
         force_live=bool(args.force_live),
+        suppress_emit_output=bool(args.suppress_emit_output),
         candidates=selected,
         weights=SweepWeights(),
     )

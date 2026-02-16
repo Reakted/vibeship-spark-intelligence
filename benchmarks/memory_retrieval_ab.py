@@ -92,6 +92,15 @@ METADATA_TELEMETRY_HINTS = (
     "user_prompt_signal",
     "source: spark_advisory",
 )
+DEFAULT_RETRIEVAL_KNOBS = {
+    "candidate_k": 20,
+    "lexical_weight": 0.35,
+    "intent_coverage_weight": 0.0,
+    "support_boost_weight": 0.0,
+    "reliability_weight": 0.0,
+    "semantic_intent_min": 0.0,
+}
+_RUNTIME_ADVISOR = None
 
 
 @dataclass
@@ -390,6 +399,96 @@ def load_cases(path: Path) -> List[EvalCase]:
             )
         )
     return cases
+
+
+def _get_runtime_advisor():
+    global _RUNTIME_ADVISOR
+    if _RUNTIME_ADVISOR is None:
+        from lib.advisor import SparkAdvisor
+
+        _RUNTIME_ADVISOR = SparkAdvisor()
+    return _RUNTIME_ADVISOR
+
+
+def runtime_policy_overrides_for_case(
+    case: EvalCase,
+    *,
+    tool_name: str = "Bash",
+) -> Dict[str, Any]:
+    """Resolve runtime retrieval knobs for a benchmark case from advisor policy."""
+    try:
+        advisor = _get_runtime_advisor()
+        policy = advisor._effective_retrieval_policy(tool_name=tool_name, context=case.query)
+        semantic_limit = max(4, int(policy.get("semantic_limit", 8) or 8))
+        return {
+            "candidate_k": max(20, semantic_limit * 4),
+            "lexical_weight": float(policy.get("lexical_weight", DEFAULT_RETRIEVAL_KNOBS["lexical_weight"]) or 0.0),
+            "intent_coverage_weight": float(
+                policy.get("intent_coverage_weight", DEFAULT_RETRIEVAL_KNOBS["intent_coverage_weight"]) or 0.0
+            ),
+            "support_boost_weight": float(
+                policy.get("support_boost_weight", DEFAULT_RETRIEVAL_KNOBS["support_boost_weight"]) or 0.0
+            ),
+            "reliability_weight": float(
+                policy.get("reliability_weight", DEFAULT_RETRIEVAL_KNOBS["reliability_weight"]) or 0.0
+            ),
+            "semantic_intent_min": float(
+                policy.get("semantic_intent_min", DEFAULT_RETRIEVAL_KNOBS["semantic_intent_min"]) or 0.0
+            ),
+            "runtime_active_domain": str(policy.get("active_domain") or "general"),
+            "runtime_profile_domain": str(policy.get("profile_domain") or "default"),
+        }
+    except Exception:
+        return {}
+
+
+def resolve_case_knobs(
+    *,
+    case: EvalCase,
+    use_runtime_policy: bool,
+    tool_name: str,
+    candidate_k: Optional[int],
+    lexical_weight: Optional[float],
+    intent_coverage_weight: Optional[float],
+    support_boost_weight: Optional[float],
+    reliability_weight: Optional[float],
+    semantic_intent_min: Optional[float],
+) -> Dict[str, Any]:
+    knobs = dict(DEFAULT_RETRIEVAL_KNOBS)
+    if use_runtime_policy:
+        runtime = runtime_policy_overrides_for_case(case=case, tool_name=tool_name)
+        knobs.update({k: v for k, v in runtime.items() if k in knobs})
+        if "runtime_active_domain" in runtime:
+            knobs["runtime_active_domain"] = runtime["runtime_active_domain"]
+        if "runtime_profile_domain" in runtime:
+            knobs["runtime_profile_domain"] = runtime["runtime_profile_domain"]
+
+    if candidate_k is not None:
+        knobs["candidate_k"] = max(1, int(candidate_k))
+    if lexical_weight is not None:
+        knobs["lexical_weight"] = float(lexical_weight)
+    if intent_coverage_weight is not None:
+        knobs["intent_coverage_weight"] = float(intent_coverage_weight)
+    if support_boost_weight is not None:
+        knobs["support_boost_weight"] = float(support_boost_weight)
+    if reliability_weight is not None:
+        knobs["reliability_weight"] = float(reliability_weight)
+    if semantic_intent_min is not None:
+        knobs["semantic_intent_min"] = float(semantic_intent_min)
+
+    knobs["candidate_k"] = max(1, int(knobs.get("candidate_k", DEFAULT_RETRIEVAL_KNOBS["candidate_k"])))
+    knobs["lexical_weight"] = float(knobs.get("lexical_weight", DEFAULT_RETRIEVAL_KNOBS["lexical_weight"]))
+    knobs["intent_coverage_weight"] = float(
+        knobs.get("intent_coverage_weight", DEFAULT_RETRIEVAL_KNOBS["intent_coverage_weight"])
+    )
+    knobs["support_boost_weight"] = float(
+        knobs.get("support_boost_weight", DEFAULT_RETRIEVAL_KNOBS["support_boost_weight"])
+    )
+    knobs["reliability_weight"] = float(knobs.get("reliability_weight", DEFAULT_RETRIEVAL_KNOBS["reliability_weight"]))
+    knobs["semantic_intent_min"] = float(
+        knobs.get("semantic_intent_min", DEFAULT_RETRIEVAL_KNOBS["semantic_intent_min"])
+    )
+    return knobs
 
 
 def is_item_hit(case: EvalCase, item: RetrievedItem) -> bool:
@@ -829,12 +928,28 @@ def main() -> int:
         help=f"Comma-separated systems ({', '.join(SUPPORTED_SYSTEMS)})",
     )
     parser.add_argument("--top-k", type=int, default=5, help="Top-K results for scoring")
-    parser.add_argument("--candidate-k", type=int, default=20, help="Candidate pool per system")
-    parser.add_argument("--lexical-weight", type=float, default=0.35, help="Lexical rerank weight")
-    parser.add_argument("--intent-coverage-weight", type=float, default=0.0, help="Intent coverage rerank weight")
-    parser.add_argument("--support-boost-weight", type=float, default=0.0, help="Cross-query support rerank weight")
-    parser.add_argument("--reliability-weight", type=float, default=0.0, help="Insight reliability rerank weight")
-    parser.add_argument("--semantic-intent-min", type=float, default=0.0, help="Minimum semantic/intent threshold for non-trigger rows")
+    parser.add_argument("--candidate-k", type=int, default=None, help="Candidate pool per system")
+    parser.add_argument("--lexical-weight", type=float, default=None, help="Lexical rerank weight")
+    parser.add_argument("--intent-coverage-weight", type=float, default=None, help="Intent coverage rerank weight")
+    parser.add_argument("--support-boost-weight", type=float, default=None, help="Cross-query support rerank weight")
+    parser.add_argument("--reliability-weight", type=float, default=None, help="Insight reliability rerank weight")
+    parser.add_argument(
+        "--semantic-intent-min",
+        type=float,
+        default=None,
+        help="Minimum semantic/intent threshold for non-trigger rows",
+    )
+    parser.add_argument(
+        "--use-runtime-policy",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Mirror live advisor retrieval policy/domain profiles while benchmarking",
+    )
+    parser.add_argument(
+        "--runtime-tool-name",
+        default="Bash",
+        help="Tool name used when resolving runtime retrieval policy per case",
+    )
     parser.add_argument(
         "--disable-strict-filter",
         action="store_true",
@@ -912,10 +1027,31 @@ def main() -> int:
     case_results: List[Dict[str, Any]] = []
 
     for case in cases:
+        knobs = resolve_case_knobs(
+            case=case,
+            use_runtime_policy=bool(args.use_runtime_policy),
+            tool_name=str(args.runtime_tool_name or "Bash"),
+            candidate_k=args.candidate_k,
+            lexical_weight=args.lexical_weight,
+            intent_coverage_weight=args.intent_coverage_weight,
+            support_boost_weight=args.support_boost_weight,
+            reliability_weight=args.reliability_weight,
+            semantic_intent_min=args.semantic_intent_min,
+        )
         per_case: Dict[str, Any] = {
             "case_id": case.case_id,
             "query": case.query,
             "labeled": case.has_labels,
+            "resolved_knobs": {
+                "candidate_k": int(knobs["candidate_k"]),
+                "lexical_weight": float(knobs["lexical_weight"]),
+                "intent_coverage_weight": float(knobs["intent_coverage_weight"]),
+                "support_boost_weight": float(knobs["support_boost_weight"]),
+                "reliability_weight": float(knobs["reliability_weight"]),
+                "semantic_intent_min": float(knobs["semantic_intent_min"]),
+                "runtime_active_domain": str(knobs.get("runtime_active_domain") or ""),
+                "runtime_profile_domain": str(knobs.get("runtime_profile_domain") or ""),
+            },
             "runs": {},
         }
         for system in systems:
@@ -926,12 +1062,12 @@ def main() -> int:
                 insights=insights,
                 noise_filter=noise_filter,
                 top_k=max(1, int(args.top_k)),
-                candidate_k=max(1, int(args.candidate_k)),
-                lexical_weight=float(args.lexical_weight),
-                intent_coverage_weight=float(args.intent_coverage_weight),
-                support_boost_weight=float(args.support_boost_weight),
-                reliability_weight=float(args.reliability_weight),
-                semantic_intent_min=float(args.semantic_intent_min),
+                candidate_k=int(knobs["candidate_k"]),
+                lexical_weight=float(knobs["lexical_weight"]),
+                intent_coverage_weight=float(knobs["intent_coverage_weight"]),
+                support_boost_weight=float(knobs["support_boost_weight"]),
+                reliability_weight=float(knobs["reliability_weight"]),
+                semantic_intent_min=float(knobs["semantic_intent_min"]),
                 strict_filter=not bool(args.disable_strict_filter),
             )
             by_system[system].append(row)
@@ -947,12 +1083,14 @@ def main() -> int:
             "cases_file": str(cases_path),
             "systems": systems,
             "top_k": int(args.top_k),
-            "candidate_k": int(args.candidate_k),
-            "lexical_weight": float(args.lexical_weight),
-            "intent_coverage_weight": float(args.intent_coverage_weight),
-            "support_boost_weight": float(args.support_boost_weight),
-            "reliability_weight": float(args.reliability_weight),
-            "semantic_intent_min": float(args.semantic_intent_min),
+            "use_runtime_policy": bool(args.use_runtime_policy),
+            "runtime_tool_name": str(args.runtime_tool_name or "Bash"),
+            "candidate_k_cli": args.candidate_k,
+            "lexical_weight_cli": args.lexical_weight,
+            "intent_coverage_weight_cli": args.intent_coverage_weight,
+            "support_boost_weight_cli": args.support_boost_weight,
+            "reliability_weight_cli": args.reliability_weight,
+            "semantic_intent_min_cli": args.semantic_intent_min,
             "strict_filter": not bool(args.disable_strict_filter),
             "min_similarity": retriever.config.get("min_similarity"),
             "min_fusion_score": retriever.config.get("min_fusion_score"),

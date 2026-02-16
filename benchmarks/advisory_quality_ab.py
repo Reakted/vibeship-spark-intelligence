@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import statistics
 import sys
 import time
@@ -392,8 +393,10 @@ def run_profile(
     cases: List[AdvisoryCase],
     repeats: int,
     force_live: bool,
+    suppress_emit_output: bool = True,
 ) -> Dict[str, Any]:
     from lib import advisory_engine
+    from lib import advisory_emitter
     from lib import advisory_gate
     from lib import advisory_packet_store
     from lib import advisor as advisor_mod
@@ -406,8 +409,14 @@ def run_profile(
     advisor_snapshot = _apply_advisor_profile(advisor_mod, {})
     lookup_exact = advisory_packet_store.lookup_exact
     lookup_relaxed = advisory_packet_store.lookup_relaxed
+    emit_enabled_snapshot = bool(getattr(advisory_emitter, "EMIT_ENABLED", True))
+    emit_env_snapshot = os.environ.get("SPARK_ADVISORY_EMIT")
 
     try:
+        if suppress_emit_output:
+            os.environ["SPARK_ADVISORY_EMIT"] = "0"
+            advisory_emitter.EMIT_ENABLED = False
+
         advisory_engine.apply_engine_config(profile_cfg.get("advisory_engine") or {})
         advisory_gate.apply_gate_config(profile_cfg.get("advisory_gate") or {})
         retrieval_cfg = profile_cfg.get("retrieval") or {}
@@ -526,6 +535,11 @@ def run_profile(
             "cases": [asdict(r) for r in results],
         }
     finally:
+        advisory_emitter.EMIT_ENABLED = emit_enabled_snapshot
+        if emit_env_snapshot is None:
+            os.environ.pop("SPARK_ADVISORY_EMIT", None)
+        else:
+            os.environ["SPARK_ADVISORY_EMIT"] = emit_env_snapshot
         advisory_engine.apply_engine_config(engine_snapshot)
         advisory_gate.apply_gate_config(gate_snapshot)
         _restore_advisor_profile(advisor_mod, advisor_snapshot)
@@ -682,6 +696,7 @@ def run_benchmark(
     profile_names: Sequence[str],
     repeats: int,
     force_live: bool,
+    suppress_emit_output: bool,
 ) -> Dict[str, Any]:
     cases = load_cases(cases_path)
     selected = [name for name in profile_names if name in profiles]
@@ -697,6 +712,7 @@ def run_benchmark(
                 cases=cases,
                 repeats=repeats,
                 force_live=force_live,
+                suppress_emit_output=suppress_emit_output,
             )
         )
 
@@ -707,6 +723,7 @@ def run_benchmark(
         "case_count": len(cases),
         "repeats": int(repeats),
         "force_live": bool(force_live),
+        "suppress_emit_output": bool(suppress_emit_output),
         "profiles": {name: profiles.get(name) for name in selected},
         "profile_runs": profile_runs,
         "ranked_profiles": ranked,
@@ -742,6 +759,12 @@ def main() -> int:
         default="advisory_quality_ab",
         help="Output file prefix under benchmarks/out",
     )
+    ap.add_argument(
+        "--suppress-emit-output",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Suppress advisory stdout emission noise during benchmark runs",
+    )
     args = ap.parse_args()
 
     profiles = dict(DEFAULT_PROFILE_PRESETS)
@@ -766,6 +789,7 @@ def main() -> int:
         profile_names=names,
         repeats=max(1, int(args.repeats)),
         force_live=bool(args.force_live),
+        suppress_emit_output=bool(args.suppress_emit_output),
     )
 
     out_dir = Path("benchmarks") / "out"

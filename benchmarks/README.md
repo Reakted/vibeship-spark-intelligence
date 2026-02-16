@@ -57,6 +57,9 @@ Compare retrieval systems on the same query set:
 python benchmarks/memory_retrieval_ab.py --cases benchmarks/data/memory_retrieval_eval_seed.json
 ```
 
+By default this now mirrors live runtime retrieval policy/domain profiles.
+Use `--no-use-runtime-policy` for purely static knob runs.
+
 Strict labeled run:
 
 ```bash
@@ -93,6 +96,8 @@ python benchmarks/memory_retrieval_domain_matrix.py \
   --min-cases-per-domain 2
 ```
 
+This also uses runtime policy by default; add `--no-use-runtime-policy` to disable.
+
 Domain-matrix outputs:
 - `benchmarks/out/memory_retrieval_domain_matrix_report.json`
 - `benchmarks/out/memory_retrieval_domain_matrix_report.md`
@@ -109,6 +114,9 @@ python benchmarks/advisory_quality_ab.py \
   --force-live \
   --out-prefix advisory_quality_ab
 ```
+
+Advisory stdout emission noise is suppressed by default in benchmark mode.
+Use `--no-suppress-emit-output` if you explicitly want emitted advisory text.
 
 This writes:
 - `benchmarks/out/advisory_quality_ab_report.json`
@@ -145,6 +153,8 @@ python benchmarks/advisory_profile_sweeper.py \
   --max-candidates 12 \
   --out-prefix advisory_profile_sweeper
 ```
+
+Sweeper also suppresses advisory stdout by default (toggle with `--no-suppress-emit-output`).
 
 Outputs:
 - `benchmarks/out/advisory_profile_sweeper_report.json`

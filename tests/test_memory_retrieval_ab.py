@@ -203,3 +203,72 @@ def test_retrieve_hybrid_support_boost_rewards_cross_query_consistency():
     )
     assert out
     assert out[0].insight_key == "shared"
+
+
+def test_resolve_case_knobs_uses_runtime_policy_when_enabled(monkeypatch):
+    mod = _load_module()
+    case = mod.EvalCase(case_id="c", query="memory retrieval stale index")
+
+    monkeypatch.setattr(
+        mod,
+        "runtime_policy_overrides_for_case",
+        lambda case, tool_name="Bash": {
+            "candidate_k": 44,
+            "lexical_weight": 0.4,
+            "intent_coverage_weight": 0.1,
+            "support_boost_weight": 0.1,
+            "reliability_weight": 0.05,
+            "semantic_intent_min": 0.03,
+            "runtime_active_domain": "memory",
+            "runtime_profile_domain": "memory",
+        },
+    )
+
+    knobs = mod.resolve_case_knobs(
+        case=case,
+        use_runtime_policy=True,
+        tool_name="Bash",
+        candidate_k=None,
+        lexical_weight=None,
+        intent_coverage_weight=None,
+        support_boost_weight=None,
+        reliability_weight=None,
+        semantic_intent_min=None,
+    )
+    assert knobs["candidate_k"] == 44
+    assert knobs["lexical_weight"] == 0.4
+    assert knobs["runtime_active_domain"] == "memory"
+
+
+def test_resolve_case_knobs_cli_overrides_runtime(monkeypatch):
+    mod = _load_module()
+    case = mod.EvalCase(case_id="c2", query="coding traceback")
+
+    monkeypatch.setattr(
+        mod,
+        "runtime_policy_overrides_for_case",
+        lambda case, tool_name="Bash": {
+            "candidate_k": 44,
+            "lexical_weight": 0.4,
+            "intent_coverage_weight": 0.1,
+            "support_boost_weight": 0.1,
+            "reliability_weight": 0.05,
+            "semantic_intent_min": 0.03,
+        },
+    )
+
+    knobs = mod.resolve_case_knobs(
+        case=case,
+        use_runtime_policy=True,
+        tool_name="Bash",
+        candidate_k=33,
+        lexical_weight=0.25,
+        intent_coverage_weight=0.2,
+        support_boost_weight=0.0,
+        reliability_weight=0.0,
+        semantic_intent_min=0.01,
+    )
+    assert knobs["candidate_k"] == 33
+    assert knobs["lexical_weight"] == 0.25
+    assert knobs["intent_coverage_weight"] == 0.2
+    assert knobs["semantic_intent_min"] == 0.01

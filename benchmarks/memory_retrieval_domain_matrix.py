@@ -335,12 +335,23 @@ def main() -> int:
         help=f"Comma-separated systems ({', '.join(mra.SUPPORTED_SYSTEMS)})",
     )
     parser.add_argument("--top-k", type=int, default=5)
-    parser.add_argument("--candidate-k", type=int, default=20)
-    parser.add_argument("--lexical-weight", type=float, default=0.35)
-    parser.add_argument("--intent-coverage-weight", type=float, default=0.0)
-    parser.add_argument("--support-boost-weight", type=float, default=0.0)
-    parser.add_argument("--reliability-weight", type=float, default=0.0)
-    parser.add_argument("--semantic-intent-min", type=float, default=0.0)
+    parser.add_argument("--candidate-k", type=int, default=None)
+    parser.add_argument("--lexical-weight", type=float, default=None)
+    parser.add_argument("--intent-coverage-weight", type=float, default=None)
+    parser.add_argument("--support-boost-weight", type=float, default=None)
+    parser.add_argument("--reliability-weight", type=float, default=None)
+    parser.add_argument("--semantic-intent-min", type=float, default=None)
+    parser.add_argument(
+        "--use-runtime-policy",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Mirror live advisor retrieval policy/domain profiles while benchmarking",
+    )
+    parser.add_argument(
+        "--runtime-tool-name",
+        default="Bash",
+        help="Tool name used when resolving runtime retrieval policy per case",
+    )
     parser.add_argument("--disable-strict-filter", action="store_true")
     parser.add_argument("--min-similarity", type=float, default=None)
     parser.add_argument("--min-fusion-score", type=float, default=None)
@@ -393,6 +404,17 @@ def main() -> int:
         cases = grouped[domain]
         by_system: Dict[str, List[Dict[str, Any]]] = {system: [] for system in systems}
         for case in cases:
+            knobs = mra.resolve_case_knobs(
+                case=case,
+                use_runtime_policy=bool(args.use_runtime_policy),
+                tool_name=str(args.runtime_tool_name or "Bash"),
+                candidate_k=args.candidate_k,
+                lexical_weight=args.lexical_weight,
+                intent_coverage_weight=args.intent_coverage_weight,
+                support_boost_weight=args.support_boost_weight,
+                reliability_weight=args.reliability_weight,
+                semantic_intent_min=args.semantic_intent_min,
+            )
             for system in systems:
                 by_system[system].append(
                     mra.run_system_for_case(
@@ -402,12 +424,12 @@ def main() -> int:
                         insights=insights,
                         noise_filter=noise_filter,
                         top_k=max(1, int(args.top_k)),
-                        candidate_k=max(1, int(args.candidate_k)),
-                        lexical_weight=float(args.lexical_weight),
-                        intent_coverage_weight=float(args.intent_coverage_weight),
-                        support_boost_weight=float(args.support_boost_weight),
-                        reliability_weight=float(args.reliability_weight),
-                        semantic_intent_min=float(args.semantic_intent_min),
+                        candidate_k=int(knobs["candidate_k"]),
+                        lexical_weight=float(knobs["lexical_weight"]),
+                        intent_coverage_weight=float(knobs["intent_coverage_weight"]),
+                        support_boost_weight=float(knobs["support_boost_weight"]),
+                        reliability_weight=float(knobs["reliability_weight"]),
+                        semantic_intent_min=float(knobs["semantic_intent_min"]),
                         strict_filter=not bool(args.disable_strict_filter),
                     )
                 )
@@ -457,12 +479,14 @@ def main() -> int:
         "domain_count": len(domain_reports),
         "case_count": int(sum(int(row.get("case_count") or 0) for row in domain_reports)),
         "top_k": int(args.top_k),
-        "candidate_k": int(args.candidate_k),
-        "lexical_weight": float(args.lexical_weight),
-        "intent_coverage_weight": float(args.intent_coverage_weight),
-        "support_boost_weight": float(args.support_boost_weight),
-        "reliability_weight": float(args.reliability_weight),
-        "semantic_intent_min": float(args.semantic_intent_min),
+        "use_runtime_policy": bool(args.use_runtime_policy),
+        "runtime_tool_name": str(args.runtime_tool_name or "Bash"),
+        "candidate_k_cli": args.candidate_k,
+        "lexical_weight_cli": args.lexical_weight,
+        "intent_coverage_weight_cli": args.intent_coverage_weight,
+        "support_boost_weight_cli": args.support_boost_weight,
+        "reliability_weight_cli": args.reliability_weight,
+        "semantic_intent_min_cli": args.semantic_intent_min,
         "strict_filter": not bool(args.disable_strict_filter),
         "min_similarity": retriever.config.get("min_similarity"),
         "min_fusion_score": retriever.config.get("min_fusion_score"),

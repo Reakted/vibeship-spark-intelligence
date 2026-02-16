@@ -57,3 +57,44 @@ def test_objective_score_penalizes_no_emit_and_repeat():
         w,
     )
     assert a > b
+
+
+def test_sweep_profiles_threads_suppress_emit_flag(monkeypatch, tmp_path):
+    mod = _load_module()
+    seen = []
+
+    monkeypatch.setattr(mod.aq, "load_cases", lambda _path: ["case"])
+
+    def _fake_run_profile(
+        *,
+        profile_name,
+        profile_cfg,
+        cases,
+        repeats,
+        force_live,
+        suppress_emit_output=True,
+    ):
+        seen.append(bool(suppress_emit_output))
+        return {
+            "profile": profile_name,
+            "config": profile_cfg,
+            "summary": {
+                "score": 0.7,
+                "no_emit_rate": 0.0,
+                "repetition_penalty_rate": 0.0,
+                "actionability_rate": 1.0,
+                "trace_bound_rate": 1.0,
+            },
+        }
+
+    monkeypatch.setattr(mod.aq, "run_profile", _fake_run_profile)
+    out = mod.sweep_profiles(
+        cases_path=tmp_path / "cases.json",
+        repeats=1,
+        force_live=True,
+        suppress_emit_output=True,
+        candidates=[{"name": "c1", "advisory_engine": {}, "advisory_gate": {}, "advisor": {}}],
+        weights=mod.SweepWeights(),
+    )
+    assert seen == [True]
+    assert out.get("suppress_emit_output") is True
