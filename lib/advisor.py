@@ -1872,6 +1872,13 @@ class SparkAdvisor:
             except Exception:
                 pass  # Don't break advice flow if tracking fails
 
+        # Safety filter: remove any advice containing harmful patterns
+        try:
+            from .promoter import is_unsafe_insight
+            advice_list = [a for a in advice_list if not is_unsafe_insight(a.text)]
+        except Exception:
+            pass  # Don't break advice flow if safety check fails
+
         # Cache for reuse
         self._cache_advice(cache_key, advice_list)
 

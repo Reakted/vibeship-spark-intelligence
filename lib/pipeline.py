@@ -545,57 +545,73 @@ def store_deep_learnings(
 ) -> int:
     """Store extracted learnings in the cognitive system.
 
+    All insights pass through MetaRalph quality gate before storage.
     Returns the count of insights actually stored.
     """
     stored = 0
 
     try:
         from lib.cognitive_learner import get_cognitive_learner, CognitiveCategory
+        from lib.meta_ralph import get_meta_ralph, RoastVerdict
         learner = get_cognitive_learner()
+        ralph = get_meta_ralph()
+
+        def _gate_and_store(insight_text: str, category, context: str, confidence: float, source: str = "pipeline") -> bool:
+            """Run insight through MetaRalph quality gate, then store if it passes."""
+            roast_result = ralph.roast(insight_text, source=source)
+            if roast_result.verdict == RoastVerdict.QUALITY:
+                # Use refined version if MetaRalph improved it
+                final_text = roast_result.refined_version or insight_text
+                return bool(learner.add_insight(
+                    category=category,
+                    insight=final_text,
+                    context=context,
+                    confidence=confidence,
+                ))
+            return False
 
         # Tool effectiveness insights
         for insight_data in tool_effectiveness.get("insights", []):
-            result = learner.add_insight(
-                category=CognitiveCategory.SELF_AWARENESS,
-                insight=insight_data["insight"],
-                context=f"tool_effectiveness:{insight_data['tool']}",
-                confidence=0.7,
-            )
-            if result:
+            if _gate_and_store(
+                insight_data["insight"],
+                CognitiveCategory.SELF_AWARENESS,
+                f"tool_effectiveness:{insight_data['tool']}",
+                0.7,
+                source="pipeline_tool_effectiveness",
+            ):
                 stored += 1
 
         # Error pattern insights
         for pattern in error_patterns.get("error_patterns", []):
-            result = learner.add_insight(
-                category=CognitiveCategory.SELF_AWARENESS,
-                insight=pattern["insight"],
-                context=f"error_pattern:{pattern['tool']}",
-                confidence=0.75,
-            )
-            if result:
+            if _gate_and_store(
+                pattern["insight"],
+                CognitiveCategory.SELF_AWARENESS,
+                f"error_pattern:{pattern['tool']}",
+                0.75,
+                source="pipeline_error_pattern",
+            ):
                 stored += 1
 
         # Workflow anti-pattern insights
         for insight_data in session_workflows.get("workflow_insights", []):
             if insight_data["type"] == "risky_edit":
-                # This is a known pattern, boost it
-                result = learner.add_insight(
-                    category=CognitiveCategory.REASONING,
-                    insight="Always Read a file before Edit to verify current content",
-                    context=f"workflow_antipattern:{insight_data.get('session_id', '')}",
-                    confidence=0.8,
-                )
+                if _gate_and_store(
+                    "Always Read a file before Edit to verify current content",
+                    CognitiveCategory.REASONING,
+                    f"workflow_antipattern:{insight_data.get('session_id', '')}",
+                    0.8,
+                    source="pipeline_workflow",
+                ):
+                    stored += 1
             elif insight_data["type"] == "struggling":
-                result = learner.add_insight(
-                    category=CognitiveCategory.META_LEARNING,
-                    insight=insight_data["insight"],
-                    context=f"workflow_struggle:{insight_data.get('session_id', '')}",
-                    confidence=0.65,
-                )
-            else:
-                result = None
-            if result:
-                stored += 1
+                if _gate_and_store(
+                    insight_data["insight"],
+                    CognitiveCategory.META_LEARNING,
+                    f"workflow_struggle:{insight_data.get('session_id', '')}",
+                    0.65,
+                    source="pipeline_workflow",
+                ):
+                    stored += 1
 
         # Workflow macros (temporal abstractions over successful tool sequences)
         macros = session_workflows.get("macros") or []
@@ -610,15 +626,13 @@ def store_deep_learnings(
                         f"Macro (often works): {seq}. "
                         f"Use this sequence when appropriate to reduce thrash."
                     )
-                    result = learner.add_insight(
-                        category=CognitiveCategory.META_LEARNING,
-                        insight=text,
-                        context=f"workflow_macro:{seq} count={cnt}",
-                        confidence=0.6,
-                        record_exposure=False,
+                    if _gate_and_store(
+                        text,
+                        CognitiveCategory.META_LEARNING,
+                        f"workflow_macro:{seq} count={cnt}",
+                        0.6,
                         source="pipeline_macro",
-                    )
-                    if result:
+                    ):
                         stored += 1
 
     except Exception as e:

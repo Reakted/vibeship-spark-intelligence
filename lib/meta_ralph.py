@@ -157,11 +157,12 @@ class QualityScore:
     reasoning: int = 0          # 0-2: No "why" / Implied "why" / Explicit "because"
     specificity: int = 0        # 0-2: Generic / Domain-specific / Context-specific
     outcome_linked: int = 0     # 0-2: No outcome / Implied outcome / Validated outcome
+    ethics: int = 1             # 0-2: Harmful/exploitative / Neutral / Positive-sum
 
     @property
     def total(self) -> int:
-        """Total score out of 10."""
-        return self.actionability + self.novelty + self.reasoning + self.specificity + self.outcome_linked
+        """Total score out of 12."""
+        return self.actionability + self.novelty + self.reasoning + self.specificity + self.outcome_linked + self.ethics
 
     @property
     def verdict(self) -> RoastVerdict:
@@ -185,6 +186,7 @@ class QualityScore:
             "reasoning": self.reasoning,
             "specificity": self.specificity,
             "outcome_linked": self.outcome_linked,
+            "ethics": self.ethics,
             "total": self.total,
             "verdict": self.verdict.value
         }
@@ -893,6 +895,19 @@ class MetaRalph:
             if score.novelty < 1:
                 score.novelty = 1
 
+        # ETHICS: Does this promote positive-sum outcomes?
+        # Default is 1 (neutral). Reward positive-sum patterns, penalize harmful ones.
+        from .promoter import is_unsafe_insight
+        if is_unsafe_insight(learning):
+            score.ethics = 0  # Harmful patterns detected
+        elif any(phrase in learning_lower for phrase in [
+            "guardrail", "safety", "responsible", "transparent",
+            "collaborate", "positive-sum", "ethical", "fair",
+            "user trust", "privacy", "consent", "inclusive",
+            "help avoid", "prevent harm", "protect user",
+        ]):
+            score.ethics = 2  # Explicitly positive-sum
+
         return score
 
     def _generate_roast_questions(self, learning: str, score: QualityScore) -> Tuple[List[str], List[str]]:
@@ -924,6 +939,10 @@ class MetaRalph:
             questions.append("What outcome does this lead to?")
             if score.outcome_linked == 0:
                 issues.append("Not linked to any outcome")
+
+        if score.ethics == 0:
+            questions.append("Does this learning promote harmful or exploitative behavior?")
+            issues.append("Contains potentially harmful patterns — blocked by safety filter")
 
         return questions, issues
 

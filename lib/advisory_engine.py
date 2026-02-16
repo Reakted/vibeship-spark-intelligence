@@ -51,12 +51,13 @@ ACTION_FIRST_ENABLED = os.getenv("SPARK_ADVISORY_ACTION_FIRST", "0") == "1"
 # Default: ON (Carmack-style: deterministic + fast). Override via env or tuneable.
 FORCE_PROGRAMMATIC_SYNTH = os.getenv("SPARK_ADVISORY_FORCE_PROGRAMMATIC_SYNTH", "1") == "1"
 # Mixed policy: allow AI synthesis selectively even when programmatic forcing is enabled.
-SELECTIVE_AI_SYNTH_ENABLED = os.getenv("SPARK_ADVISORY_SELECTIVE_AI_SYNTH", "0") == "1"
+# Default: ON — selective AI synthesis for high-authority advice improves delivery quality.
+SELECTIVE_AI_SYNTH_ENABLED = os.getenv("SPARK_ADVISORY_SELECTIVE_AI_SYNTH", "1") == "1"
 SELECTIVE_AI_MIN_REMAINING_MS = float(
     os.getenv("SPARK_ADVISORY_SELECTIVE_AI_MIN_REMAINING_MS", "1800")
 )
 SELECTIVE_AI_MIN_AUTHORITY = str(
-    os.getenv("SPARK_ADVISORY_SELECTIVE_AI_MIN_AUTHORITY", "warning") or "warning"
+    os.getenv("SPARK_ADVISORY_SELECTIVE_AI_MIN_AUTHORITY", "note") or "note"
 ).strip().lower()
 
 _AUTHORITY_RANK = {
@@ -1680,11 +1681,16 @@ def on_pre_tool(
 
         t_synth = time.time() * 1000.0
         synth_text = ""
+        selective_ai_eligible = False
         if packet and str(packet.get("advisory_text") or "").strip():
             synth_text = str(packet.get("advisory_text") or "").strip()
             synth_policy = "packet_cached"
         elif FORCE_PROGRAMMATIC_SYNTH:
-            if _should_use_selective_ai_synth(gate_result=gate_result, remaining_ms=remaining_ms):
+            selective_ai_eligible = _should_use_selective_ai_synth(
+                gate_result=gate_result,
+                remaining_ms=remaining_ms,
+            )
+            if selective_ai_eligible:
                 synth_text = synthesize(
                     emitted_advice,
                     phase=gate_result.phase,
@@ -1961,8 +1967,26 @@ def on_pre_tool(
                 "effective_actionability_command": effective_action_meta.get("command"),
                 "synth_fallback_used": bool(synth_fallback_used),
                 "synth_policy": str(synth_policy),
+                "selective_ai_eligible": bool(selective_ai_eligible),
+                "selective_ai_min_authority": str(SELECTIVE_AI_MIN_AUTHORITY),
+                "selective_ai_min_remaining_ms": float(SELECTIVE_AI_MIN_REMAINING_MS),
+                "remaining_ms_before_synth": round(float(remaining_ms), 2),
+                "emitted_authorities": [
+                    str(getattr(decision, "authority", "") or "").strip().lower()
+                    for decision in list(getattr(gate_result, "emitted", []) or [])[:4]
+                ],
             },
         )
+        # Safety gate: block unsafe content before delivery
+        if emitted and effective_text:
+            try:
+                from .promoter import is_unsafe_insight
+                if is_unsafe_insight(effective_text):
+                    log_debug("advisory_engine", f"SAFETY_BLOCK: unsafe content blocked for {tool_name}", None)
+                    return None
+            except Exception:
+                pass  # If safety check fails, allow delivery (fail-open for now)
+
         return effective_text if emitted else None
 
     except Exception as e:
