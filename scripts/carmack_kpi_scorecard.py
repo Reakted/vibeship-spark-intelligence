@@ -53,9 +53,16 @@ def _render_text(score: Dict[str, Any]) -> str:
     metrics = score.get("metrics") or {}
     gaur = metrics.get("gaur") or {}
     rows.append(
-        "GAUR | "
+        "GAUR (schema_v2) | "
         f"{_fmt_ratio(gaur.get('current'))} | {_fmt_ratio(gaur.get('previous'))} | "
         f"{_fmt_delta(gaur.get('delta'))} | {gaur.get('trend', 'unknown')}"
+    )
+
+    gaur_all = metrics.get("gaur_all") or {}
+    rows.append(
+        "GAUR (all) | "
+        f"{_fmt_ratio(gaur_all.get('current'))} | {_fmt_ratio(gaur_all.get('previous'))} | "
+        f"{_fmt_delta(gaur_all.get('delta'))} | {gaur_all.get('trend', 'unknown')}"
     )
 
     fb = metrics.get("fallback_burden") or {}
@@ -79,12 +86,29 @@ def _render_text(score: Dict[str, Any]) -> str:
         f"{_fmt_delta(cr.get('delta'))} | {cr.get('trend', 'unknown')}"
     )
 
+    fsv2 = metrics.get("feedback_schema_v2_ratio") or {}
+    rows.append(
+        "Feedback schema_v2 ratio | "
+        f"{_fmt_ratio(fsv2.get('current'))} | {_fmt_ratio(fsv2.get('previous'))} | "
+        f"{_fmt_delta(fsv2.get('delta'))} | {fsv2.get('trend', 'unknown')}"
+    )
+
     current = score.get("current") or {}
     rows.append("")
     rows.append(
         "Current window raw: "
         f"events={current.get('total_events', 0)}, delivered_calls={current.get('delivered', 0)}, "
-        f"emitted_items={current.get('emitted_advice_items', 0)}, good_used={current.get('good_advice_used', 0)}"
+        f"emitted_items={current.get('emitted_advice_items', 0)}, "
+        f"emitted_items_schema_v2={current.get('emitted_advice_items_schema_v2', 0)}, "
+        f"good_used={current.get('good_advice_used', 0)}, "
+        f"good_used_schema_v2={current.get('good_advice_used_schema_v2', 0)}"
+    )
+    rows.append(
+        "Feedback rows: "
+        f"total={current.get('feedback_rows_total', 0)}, "
+        f"schema_v2={current.get('feedback_rows_schema_v2', 0)}, "
+        f"legacy={current.get('feedback_rows_legacy', 0)}, "
+        f"quality_gate_ready={bool(current.get('quality_gate_ready', False))}"
     )
     core = score.get("core") or {}
     rows.append(

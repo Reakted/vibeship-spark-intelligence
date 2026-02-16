@@ -29,7 +29,7 @@ def test_window_metrics_computes_aligned_gaur_and_burdens():
         {"ts": 5000.0, "event": "emitted"},  # out-of-window
     ]
     feedback = [
-        {"created_at": 1600.0, "advice_ids": ["a", "b", "c"]},
+        {"created_at": 1600.0, "advice_ids": ["a", "b", "c"], "schema_version": 2},
         {"created_at": 5000.0, "advice_ids": ["d"]},  # out-of-window
     ]
     outcomes = {
@@ -72,8 +72,8 @@ def test_build_scorecard_reads_files_and_computes_core_reliability(tmp_path, mon
     _write_jsonl(
         feedback,
         [
-            {"created_at": 1950.0, "advice_ids": ["a", "b"]},
-            {"created_at": 1300.0, "advice_ids": ["c"]},
+            {"created_at": 1950.0, "advice_ids": ["a", "b"], "schema_version": 2},
+            {"created_at": 1300.0, "advice_ids": ["c"], "schema_version": 2},
         ],
     )
     _write_json(
@@ -112,7 +112,41 @@ def test_build_scorecard_reads_files_and_computes_core_reliability(tmp_path, mon
     assert score["current"]["emitted_advice_items"] == 2
     assert score["current"]["good_advice_used"] == 1
     assert round(score["metrics"]["gaur"]["current"], 4) == 0.5
+    assert round(score["metrics"]["feedback_schema_v2_ratio"]["current"], 4) == 1.0
     assert round(score["core"]["core_reliability"], 4) == 0.75
+
+
+def test_build_scorecard_gates_quality_gaur_on_schema_v2(tmp_path, monkeypatch):
+    advisory = tmp_path / "advisory.jsonl"
+    feedback = tmp_path / "feedback.jsonl"
+    effectiveness = tmp_path / "effectiveness.json"
+    sync = tmp_path / "sync.json"
+    chip = tmp_path / "chip.json"
+
+    _write_jsonl(advisory, [{"ts": 1900.0, "event": "emitted"}])
+    _write_jsonl(feedback, [{"created_at": 1950.0, "advice_ids": ["a"]}])  # legacy row (no schema_version)
+    _write_json(
+        effectiveness,
+        {"recent_outcomes": {"a": {"ts": 1960.0, "followed_counted": True, "helpful_counted": True}}},
+    )
+    _write_json(sync, {})
+    _write_json(chip, {})
+
+    monkeypatch.setattr(ck, "ADVISORY_LOG", advisory)
+    monkeypatch.setattr(ck, "ADVICE_FEEDBACK_REQUESTS", feedback)
+    monkeypatch.setattr(ck, "EFFECTIVENESS_FILE", effectiveness)
+    monkeypatch.setattr(ck, "SYNC_STATS_FILE", sync)
+    monkeypatch.setattr(ck, "CHIP_MERGE_FILE", chip)
+    monkeypatch.setattr(
+        ck,
+        "_service_status_snapshot",
+        lambda: {"sparkd": {"running": True}, "bridge_worker": {"running": True}, "scheduler": {"running": True}, "watchdog": {"running": True}},
+    )
+
+    score = ck.build_scorecard(window_hours=0.111111111, now_ts=2000.0)
+    assert score["metrics"]["gaur"]["current"] is None
+    assert round(score["metrics"]["gaur_all"]["current"], 4) == 1.0
+    assert round(score["metrics"]["feedback_schema_v2_ratio"]["current"], 4) == 0.0
 
 
 def test_core_reliability_uses_effective_service_signals():

@@ -105,6 +105,42 @@ def _count_emitted_advice_items(rows: List[Dict[str, Any]], start_ts: float, end
     return total
 
 
+def _feedback_schema_stats(rows: List[Dict[str, Any]], start_ts: float, end_ts: float) -> Dict[str, Any]:
+    total_rows = 0
+    schema_v2_rows = 0
+    legacy_rows = 0
+    items_total = 0
+    items_schema_v2 = 0
+    items_legacy = 0
+
+    for row in rows:
+        ts = float(row.get("created_at") or 0.0)
+        if ts < start_ts or ts >= end_ts:
+            continue
+        total_rows += 1
+        advice_ids = row.get("advice_ids")
+        n = len(advice_ids) if isinstance(advice_ids, list) else 0
+        items_total += n
+
+        schema_version = int(row.get("schema_version") or 0)
+        if schema_version >= 2:
+            schema_v2_rows += 1
+            items_schema_v2 += n
+        else:
+            legacy_rows += 1
+            items_legacy += n
+
+    return {
+        "rows_total": int(total_rows),
+        "rows_schema_v2": int(schema_v2_rows),
+        "rows_legacy": int(legacy_rows),
+        "schema_v2_ratio": _safe_ratio(schema_v2_rows, total_rows),
+        "items_total": int(items_total),
+        "items_schema_v2": int(items_schema_v2),
+        "items_legacy": int(items_legacy),
+    }
+
+
 def _count_good_advice_outcomes(recent_outcomes: Dict[str, Any], start_ts: float, end_ts: float) -> Dict[str, int]:
     total = 0
     followed = 0
@@ -132,22 +168,39 @@ def _window_metrics(
     end_ts: float,
 ) -> Dict[str, Any]:
     event_stats = _count_advisory_events(advisory_rows, start_ts, end_ts)
-    emitted_items = _count_emitted_advice_items(feedback_rows, start_ts, end_ts)
+    feedback_schema = _feedback_schema_stats(feedback_rows, start_ts, end_ts)
+    emitted_items = int(feedback_schema["items_total"])
+    emitted_items_schema_v2 = int(feedback_schema["items_schema_v2"])
     outcome_stats = _count_good_advice_outcomes(recent_outcomes, start_ts, end_ts)
     good_used_raw = int(outcome_stats["helpful"])
     followed_raw = int(outcome_stats["followed"])
     good_used = min(good_used_raw, emitted_items)
     followed_used = min(followed_raw, emitted_items)
+    good_used_schema_v2 = min(good_used_raw, emitted_items_schema_v2)
+    followed_used_schema_v2 = min(followed_raw, emitted_items_schema_v2)
     gaur = _safe_ratio(good_used, emitted_items)
+    gaur_schema_v2 = _safe_ratio(good_used_schema_v2, emitted_items_schema_v2)
     return {
         **event_stats,
         "emitted_advice_items": emitted_items,
+        "emitted_advice_items_schema_v2": emitted_items_schema_v2,
+        "emitted_advice_items_legacy": int(feedback_schema["items_legacy"]),
+        "feedback_rows_total": int(feedback_schema["rows_total"]),
+        "feedback_rows_schema_v2": int(feedback_schema["rows_schema_v2"]),
+        "feedback_rows_legacy": int(feedback_schema["rows_legacy"]),
+        "feedback_schema_v2_ratio": feedback_schema.get("schema_v2_ratio"),
         "good_advice_used": int(good_used),
         "good_advice_used_raw": int(good_used_raw),
+        "good_advice_used_schema_v2": int(good_used_schema_v2),
         "followed_advice": int(followed_used),
         "followed_advice_raw": int(followed_raw),
+        "followed_advice_schema_v2": int(followed_used_schema_v2),
         "outcome_overflow_clamped": bool(good_used_raw > emitted_items or followed_raw > emitted_items),
         "gaur": gaur,
+        "gaur_schema_v2": gaur_schema_v2,
+        "quality_gate_schema_version": 2,
+        "quality_gate_emitted_items": int(emitted_items_schema_v2),
+        "quality_gate_ready": bool(emitted_items_schema_v2 > 0),
     }
 
 
@@ -295,6 +348,11 @@ def build_scorecard(window_hours: float = 4.0, now_ts: Optional[float] = None) -
 
     metrics = {
         "gaur": {
+            # Quality KPI is gated on deterministic join schema only.
+            "current": current.get("gaur_schema_v2"),
+            "previous": previous.get("gaur_schema_v2"),
+        },
+        "gaur_all": {
             "current": current.get("gaur"),
             "previous": previous.get("gaur"),
         },
@@ -309,6 +367,10 @@ def build_scorecard(window_hours: float = 4.0, now_ts: Optional[float] = None) -
         "core_reliability": {
             "current": core.get("core_reliability"),
             "previous": None,
+        },
+        "feedback_schema_v2_ratio": {
+            "current": current.get("feedback_schema_v2_ratio"),
+            "previous": previous.get("feedback_schema_v2_ratio"),
         },
     }
     for _, row in metrics.items():
