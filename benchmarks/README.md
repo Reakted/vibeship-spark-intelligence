@@ -84,6 +84,19 @@ Outputs:
 - `benchmarks/out/memory_retrieval_ab_report.json`
 - `benchmarks/out/memory_retrieval_ab_report.md`
 
+Run domain-matrix retrieval benchmark with per-domain gates:
+
+```bash
+python benchmarks/memory_retrieval_domain_matrix.py \
+  --cases benchmarks/data/memory_retrieval_eval_live_2026_02_12.json \
+  --systems embeddings_only,hybrid,hybrid_agentic \
+  --min-cases-per-domain 2
+```
+
+Domain-matrix outputs:
+- `benchmarks/out/memory_retrieval_domain_matrix_report.json`
+- `benchmarks/out/memory_retrieval_domain_matrix_report.md`
+
 ## Advisory Quality A/B
 
 Benchmark advisory usefulness directly (not just retrieval quality):
