@@ -21,6 +21,17 @@ VALID_GUIDANCE_STYLES = {"concise", "balanced", "coach"}
 WRITE_LOCK_TIMEOUT_S = 5.0
 WRITE_LOCK_POLL_S = 0.05
 WRITE_LOCK_STALE_S = 30.0
+DRIFT_KEYS = (
+    "replay_enabled",
+    "replay_min_strict",
+    "replay_min_delta",
+    "replay_max_age_s",
+    "replay_strict_window_s",
+    "replay_min_context",
+    "replay_max_records",
+    "max_items",
+    "min_rank_score",
+)
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -95,6 +106,33 @@ def _normalize_guidance_style(value: Any) -> str:
     if style in VALID_GUIDANCE_STYLES:
         return style
     return "balanced"
+
+
+def _value_differs(actual: Any, expected: Any) -> bool:
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        return bool(actual) != bool(expected)
+    try:
+        if isinstance(actual, (int, float)) or isinstance(expected, (int, float)):
+            return abs(float(actual) - float(expected)) > 1e-9
+    except Exception:
+        pass
+    return actual != expected
+
+
+def _detect_profile_drift(advisor_cfg: Dict[str, Any], baseline: Dict[str, Any]) -> Dict[str, Any]:
+    overrides = []
+    for key in DRIFT_KEYS:
+        if key not in advisor_cfg:
+            continue
+        actual = advisor_cfg.get(key)
+        expected = baseline.get(key)
+        if _value_differs(actual, expected):
+            overrides.append({"key": key, "actual": actual, "expected": expected})
+    return {
+        "has_drift": bool(overrides),
+        "count": len(overrides),
+        "overrides": overrides,
+    }
 
 
 def _derived_overrides(memory_mode: str, guidance_style: str) -> Dict[str, Any]:
@@ -211,25 +249,18 @@ def get_current_preferences(path: Path = TUNEABLES_PATH) -> Dict[str, Any]:
     advisor = data.get("advisor") if isinstance(data.get("advisor"), dict) else {}
     memory_mode = _normalize_memory_mode(advisor.get("replay_mode"))
     guidance_style = _normalize_guidance_style(advisor.get("guidance_style"))
-    effective = _derived_overrides(memory_mode, guidance_style)
+    baseline = _derived_overrides(memory_mode, guidance_style)
+    effective = dict(baseline)
+    drift = _detect_profile_drift(advisor, baseline)
     # Keep explicit overrides visible if present.
-    for key in (
-        "replay_enabled",
-        "replay_min_strict",
-        "replay_min_delta",
-        "replay_max_age_s",
-        "replay_strict_window_s",
-        "replay_min_context",
-        "replay_max_records",
-        "max_items",
-        "min_rank_score",
-    ):
+    for key in DRIFT_KEYS:
         if key in advisor:
             effective[key] = advisor.get(key)
     return {
         "memory_mode": memory_mode,
         "guidance_style": guidance_style,
         "effective": effective,
+        "drift": drift,
     }
 
 

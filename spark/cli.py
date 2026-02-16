@@ -1877,6 +1877,7 @@ def _pick_advisory_option(question: dict, current_value: str) -> str:
 def _print_advisory_preferences(preferences: dict) -> None:
     effective = preferences.get("effective") if isinstance(preferences.get("effective"), dict) else {}
     runtime = preferences.get("runtime") if isinstance(preferences.get("runtime"), dict) else {}
+    drift = preferences.get("drift") if isinstance(preferences.get("drift"), dict) else {}
     memory_mode = str(preferences.get("memory_mode") or "standard")
     guidance_style = str(preferences.get("guidance_style") or "balanced")
     replay_on = bool(effective.get("replay_enabled", memory_mode != "off"))
@@ -1897,6 +1898,10 @@ def _print_advisory_preferences(preferences: dict) -> None:
         print(f"  min_rank_score: {effective.get('min_rank_score')}")
     if runtime_available and "synth_tier" in runtime:
         print(f"  synth_tier: {runtime.get('synth_tier')}")
+    if drift.get("has_drift"):
+        print(f"  profile_drift: yes ({drift.get('count', 0)} overrides)")
+    else:
+        print("  profile_drift: no")
 
 
 def _get_advisory_runtime_state() -> dict:

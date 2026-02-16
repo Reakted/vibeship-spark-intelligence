@@ -69,6 +69,9 @@ def test_get_current_preferences_preserves_explicit_overrides(tmp_path):
     assert out["guidance_style"] == "balanced"
     assert out["effective"]["max_items"] == 3
     assert out["effective"]["replay_min_context"] == 0.42
+    assert out["drift"]["has_drift"] is True
+    assert out["drift"]["count"] >= 1
+    assert any(item.get("key") == "max_items" for item in out["drift"]["overrides"])
 
 
 def test_write_json_atomic_cleans_lock_file(tmp_path):
@@ -94,3 +97,22 @@ def test_apply_preferences_raises_clear_error_on_lock_timeout(monkeypatch, tmp_p
         assert False, "expected RuntimeError"
     except RuntimeError as exc:
         assert "busy" in str(exc)
+
+
+def test_get_current_preferences_no_drift_after_apply(monkeypatch, tmp_path):
+    tuneables = tmp_path / "tuneables.json"
+    monkeypatch.setattr(advisor_mod, "reload_advisor_config", lambda: {})
+
+    prefs.apply_preferences(
+        memory_mode="standard",
+        guidance_style="balanced",
+        path=tuneables,
+        source="test",
+    )
+
+    out = prefs.get_current_preferences(path=tuneables)
+
+    assert out["memory_mode"] == "standard"
+    assert out["guidance_style"] == "balanced"
+    assert out["drift"]["has_drift"] is False
+    assert out["drift"]["count"] == 0

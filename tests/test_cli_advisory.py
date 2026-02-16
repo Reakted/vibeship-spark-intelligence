@@ -152,6 +152,7 @@ def test_print_advisory_preferences_uses_runtime_for_true_on_state(capsys):
                 "emitter_enabled": True,
                 "synth_tier": "Programmatic",
             },
+            "drift": {"has_drift": True, "count": 2, "overrides": []},
         }
     )
     out = capsys.readouterr().out
@@ -159,3 +160,4 @@ def test_print_advisory_preferences_uses_runtime_for_true_on_state(capsys):
     assert "advisory_on: no" in out
     assert "advisory_runtime: down" in out
     assert "replay_advisory: on" in out
+    assert "profile_drift: yes (2 overrides)" in out
