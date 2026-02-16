@@ -8,6 +8,8 @@ Designed for a 1-2 question setup flow:
 from __future__ import annotations
 
 import json
+import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
@@ -16,6 +18,9 @@ from typing import Any, Dict
 TUNEABLES_PATH = Path.home() / ".spark" / "tuneables.json"
 VALID_MEMORY_MODES = {"off", "standard", "replay"}
 VALID_GUIDANCE_STYLES = {"concise", "balanced", "coach"}
+WRITE_LOCK_TIMEOUT_S = 5.0
+WRITE_LOCK_POLL_S = 0.05
+WRITE_LOCK_STALE_S = 30.0
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -32,9 +37,50 @@ def _read_json(path: Path) -> Dict[str, Any]:
 
 def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_fd = _acquire_file_lock(lock_path)
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}.{time.time_ns()}")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
+        _release_file_lock(lock_fd, lock_path)
+
+
+def _acquire_file_lock(lock_path: Path, timeout_s: float = WRITE_LOCK_TIMEOUT_S) -> int:
+    deadline = time.time() + max(0.1, float(timeout_s))
+    while True:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            os.write(fd, f"{os.getpid()} {time.time()}".encode("utf-8"))
+            return fd
+        except FileExistsError:
+            try:
+                age_s = time.time() - float(lock_path.stat().st_mtime)
+                if age_s > WRITE_LOCK_STALE_S:
+                    lock_path.unlink(missing_ok=True)
+                    continue
+            except Exception:
+                pass
+            if time.time() >= deadline:
+                raise TimeoutError(f"timed out acquiring lock: {lock_path}")
+            time.sleep(WRITE_LOCK_POLL_S)
+
+
+def _release_file_lock(fd: int, lock_path: Path) -> None:
+    try:
+        os.close(fd)
+    except Exception:
+        pass
+    try:
+        lock_path.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def _normalize_memory_mode(value: Any) -> str:
@@ -215,7 +261,10 @@ def apply_preferences(
         "source": str(source or "manual"),
         "updated_at": data["updated_at"],
     }
-    _write_json_atomic(path, data)
+    try:
+        _write_json_atomic(path, data)
+    except TimeoutError as exc:
+        raise RuntimeError(f"tuneables update is busy, retry shortly: {path}") from exc
 
     # Best effort hot-reload for active process.
     try:
@@ -233,4 +282,3 @@ def apply_preferences(
         "runtime": runtime,
         "path": str(path),
     }
-

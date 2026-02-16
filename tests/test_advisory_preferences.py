@@ -69,3 +69,28 @@ def test_get_current_preferences_preserves_explicit_overrides(tmp_path):
     assert out["guidance_style"] == "balanced"
     assert out["effective"]["max_items"] == 3
     assert out["effective"]["replay_min_context"] == 0.42
+
+
+def test_write_json_atomic_cleans_lock_file(tmp_path):
+    tuneables = tmp_path / "tuneables.json"
+
+    prefs._write_json_atomic(tuneables, {"advisor": {"replay_mode": "standard"}})
+
+    assert tuneables.exists()
+    assert not tuneables.with_suffix(".json.lock").exists()
+
+
+def test_apply_preferences_raises_clear_error_on_lock_timeout(monkeypatch, tmp_path):
+    tuneables = tmp_path / "tuneables.json"
+
+    monkeypatch.setattr(
+        prefs,
+        "_write_json_atomic",
+        lambda path, payload: (_ for _ in ()).throw(TimeoutError("busy")),
+    )
+
+    try:
+        prefs.apply_preferences(memory_mode="standard", guidance_style="balanced", path=tuneables)
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "busy" in str(exc)
