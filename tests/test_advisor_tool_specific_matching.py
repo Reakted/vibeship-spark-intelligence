@@ -105,3 +105,69 @@ def test_tool_specific_advice_respects_min_reliability(monkeypatch, tmp_path):
     out = advisor._get_tool_specific_advice("Task")
 
     assert out == []
+
+
+def test_tool_specific_advice_filters_telemetry_error_labels(monkeypatch, tmp_path):
+    cognitive = _CognitiveWithInsights(
+        [
+            _FakeInsight("I struggle with WebFetch_error tasks"),
+            _FakeInsight("I fail when WebFetch retries are too aggressive."),
+        ]
+    )
+    _patch_runtime(monkeypatch, tmp_path, cognitive)
+    advisor = advisor_mod.SparkAdvisor()
+
+    out = advisor._get_tool_specific_advice("WebFetch")
+    texts = [row.text.lower() for row in out]
+
+    assert any("retries are too aggressive" in text for text in texts)
+    assert all("webfetch_error" not in text for text in texts)
+
+
+def test_rank_score_heavily_penalizes_low_signal_telemetry_cautions(monkeypatch, tmp_path):
+    cognitive = _CognitiveWithInsights([])
+    _patch_runtime(monkeypatch, tmp_path, cognitive)
+
+    class _DummyRalph:
+        def get_insight_effectiveness(self, _insight_key):
+            return 0.5
+
+    monkeypatch.setattr("lib.meta_ralph.get_meta_ralph", lambda: _DummyRalph())
+
+    advisor = advisor_mod.SparkAdvisor()
+    good = advisor_mod.Advice(
+        advice_id="good",
+        insight_key="k-good",
+        text="Use jittered retries when WebFetch returns 429 to avoid request storms.",
+        confidence=0.8,
+        source="self_awareness",
+        context_match=0.8,
+    )
+    noisy = advisor_mod.Advice(
+        advice_id="noisy",
+        insight_key="k-noisy",
+        text="[Caution] I struggle with WebFetch_error tasks",
+        confidence=0.8,
+        source="self_awareness",
+        context_match=0.8,
+    )
+
+    assert advisor._rank_score(noisy) < advisor._rank_score(good) * 0.2
+
+
+def test_should_drop_read_before_edit_on_unrelated_tools(monkeypatch, tmp_path):
+    cognitive = _CognitiveWithInsights([])
+    _patch_runtime(monkeypatch, tmp_path, cognitive)
+    advisor = advisor_mod.SparkAdvisor()
+
+    item = advisor_mod.Advice(
+        advice_id="read-first",
+        insight_key="k-read",
+        text="Always Read a file before Edit to verify current content",
+        confidence=0.9,
+        source="cognitive",
+        context_match=0.9,
+    )
+
+    assert advisor._should_drop_advice(item, tool_name="WebFetch") is True
+    assert advisor._should_drop_advice(item, tool_name="Edit") is False

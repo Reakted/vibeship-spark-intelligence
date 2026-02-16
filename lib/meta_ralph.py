@@ -48,6 +48,23 @@ INSIGHT_STRICT_QUALITY_FLOOR = 0.45
 # If an insight has poor strict quality but no recent strict outcomes,
 # allow resurfacing for periodic re-test instead of permanent suppression.
 INSIGHT_SUPPRESSION_RETEST_AFTER_S = 6 * 3600
+QUALITY_WINDOW_TRACE_REPEAT_CAP = 6
+QUALITY_WINDOW_EXCLUDE_TRACE_PREFIXES = [
+    "pipeline",
+    "bench",
+    "benchmark",
+    "smoke",
+    "test",
+    "qa",
+    "ci",
+    "calibration",
+]
+QUALITY_WINDOW_EXCLUDE_TEXT_PREFIXES = [
+    "scope:operation op:",
+    "said it like this:",
+    "another reply is:",
+    "[hook_smoke_test]",
+]
 
 
 def _load_meta_ralph_config() -> None:
@@ -57,6 +74,8 @@ def _load_meta_ralph_config() -> None:
     global MIN_SOURCE_SAMPLES, ATTRIBUTION_WINDOW_S, STRICT_ATTRIBUTION_REQUIRE_TRACE
     global INSIGHT_WARMUP_WEAK_SAMPLES, INSIGHT_MIN_STRICT_SAMPLES
     global INSIGHT_STRICT_QUALITY_FLOOR, INSIGHT_SUPPRESSION_RETEST_AFTER_S
+    global QUALITY_WINDOW_TRACE_REPEAT_CAP
+    global QUALITY_WINDOW_EXCLUDE_TRACE_PREFIXES, QUALITY_WINDOW_EXCLUDE_TEXT_PREFIXES
     try:
         tuneables = Path.home() / ".spark" / "tuneables.json"
         if not tuneables.exists():
@@ -92,6 +111,20 @@ def _load_meta_ralph_config() -> None:
             INSIGHT_STRICT_QUALITY_FLOOR = float(cfg["insight_strict_quality_floor"])
         if "insight_suppression_retest_after_s" in cfg:
             INSIGHT_SUPPRESSION_RETEST_AFTER_S = int(cfg["insight_suppression_retest_after_s"])
+        if "quality_rate_trace_repeat_cap" in cfg:
+            QUALITY_WINDOW_TRACE_REPEAT_CAP = max(1, int(cfg["quality_rate_trace_repeat_cap"]))
+        if "quality_rate_exclude_trace_prefixes" in cfg:
+            raw = cfg["quality_rate_exclude_trace_prefixes"]
+            if isinstance(raw, list):
+                QUALITY_WINDOW_EXCLUDE_TRACE_PREFIXES = [
+                    str(item).strip().lower() for item in raw if str(item).strip()
+                ]
+        if "quality_rate_exclude_text_prefixes" in cfg:
+            raw = cfg["quality_rate_exclude_text_prefixes"]
+            if isinstance(raw, list):
+                QUALITY_WINDOW_EXCLUDE_TEXT_PREFIXES = [
+                    str(item).strip().lower() for item in raw if str(item).strip()
+                ]
     except Exception:
         pass
 
@@ -1557,6 +1590,10 @@ class MetaRalph:
         effective = []
         filtered_pipeline_tests = 0
         filtered_duplicates = 0
+        filtered_trace_prefix = 0
+        filtered_trace_churn = 0
+        filtered_text_artifacts = 0
+        trace_kept: Dict[str, int] = {}
         for r in window:
             res = r.get("result") or {}
             verdict = (res.get("verdict") or "").strip()
@@ -1565,9 +1602,33 @@ class MetaRalph:
             if verdict == "duplicate":
                 filtered_duplicates += 1
                 continue
+
+            trace_id_raw = str(r.get("trace_id") or "").strip()
+            trace_id = trace_id_raw.lower()
+            if trace_id:
+                if any(
+                    trace_id.startswith(prefix)
+                    for prefix in QUALITY_WINDOW_EXCLUDE_TRACE_PREFIXES
+                ):
+                    filtered_trace_prefix += 1
+                    continue
+                per_trace_cap = max(1, int(QUALITY_WINDOW_TRACE_REPEAT_CAP))
+                kept_for_trace = trace_kept.get(trace_id_raw, 0)
+                if kept_for_trace >= per_trace_cap:
+                    filtered_trace_churn += 1
+                    continue
+                trace_kept[trace_id_raw] = kept_for_trace + 1
+
             original = res.get("original") or ""
             if isinstance(original, str) and "[PIPELINE_TEST" in original:
                 filtered_pipeline_tests += 1
+                continue
+            original_lower = str(original).strip().lower()
+            if any(
+                original_lower.startswith(prefix)
+                for prefix in QUALITY_WINDOW_EXCLUDE_TEXT_PREFIXES
+            ):
+                filtered_text_artifacts += 1
                 continue
             effective.append(r)
 
@@ -1593,6 +1654,9 @@ class MetaRalph:
             "quality_rate_window_samples": effective_total,
             "quality_rate_window_filtered_pipeline_tests": filtered_pipeline_tests,
             "quality_rate_window_filtered_duplicates": filtered_duplicates,
+            "quality_rate_window_filtered_trace_prefix": filtered_trace_prefix,
+            "quality_rate_window_filtered_trace_churn": filtered_trace_churn,
+            "quality_rate_window_filtered_text_artifacts": filtered_text_artifacts,
             "quality_rate_all_time": quality_rate_all_time,
             "reject_rate": self.primitive_rejected / max(self.total_roasted, 1),
             "outcome_stats": self.get_outcome_stats(),

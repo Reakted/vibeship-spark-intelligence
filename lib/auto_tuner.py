@@ -521,8 +521,11 @@ class AutoTuner:
         data_basis = f"{total_samples:,} advisor outcomes across {len(by_source)} sources"
 
         # Apply changes if not dry run
-        if not dry_run and changes:
-            self._apply_changes(changes, new_effectiveness, now, data_basis)
+        if not dry_run:
+            if changes:
+                self._apply_changes(changes, new_effectiveness, now, data_basis)
+            else:
+                self._record_noop_run(new_effectiveness, now, data_basis)
 
         return TuningReport(
             timestamp=now,
@@ -576,6 +579,39 @@ class AutoTuner:
 
         tuneables["updated_at"] = timestamp
         _write_json_atomic(self.tuneables_path, tuneables)
+        self._tuneables = tuneables
+        self._config = auto_tuner
+
+    def _record_noop_run(
+        self,
+        new_effectiveness: Dict[str, float],
+        timestamp: str,
+        data_basis: str,
+    ) -> None:
+        """Persist run metadata even when no boost changes are required."""
+        tuneables = _read_json(self.tuneables_path)
+        auto_tuner = tuneables.setdefault("auto_tuner", {})
+        auto_tuner["source_effectiveness"] = {
+            k: round(v, 4) for k, v in new_effectiveness.items()
+        }
+        auto_tuner["last_run"] = timestamp
+
+        log = auto_tuner.setdefault("tuning_log", [])
+        log.append(
+            {
+                "timestamp": timestamp,
+                "action": "auto_tune_noop",
+                "changes": {},
+                "data_basis": data_basis,
+            }
+        )
+        if len(log) > 50:
+            auto_tuner["tuning_log"] = log[-50:]
+
+        tuneables["updated_at"] = timestamp
+        _write_json_atomic(self.tuneables_path, tuneables)
+        self._tuneables = tuneables
+        self._config = auto_tuner
 
     def get_status(self) -> Dict[str, Any]:
         """Get current auto-tuner status for dashboards."""

@@ -557,6 +557,14 @@ def _check_obvious_suppression(
     if "webfetch" in text_lower and tool_name not in {"WebFetch", "WebSearch"}:
         return True, "WebFetch caution on non-web tool"
 
+    # Suppress telemetry-heavy struggle cautions (tool_X_error style).
+    # These labels are low-signal and usually reflect instrumentation artifacts,
+    # not actionable guidance for the current step.
+    if re.search(r"\bi struggle with\s+(?:tool[_\s-]*)?\d+[_\s-]*error\s+tasks\b", text_lower):
+        return True, "telemetry struggle caution"
+    if "i struggle with" in text_lower and "_error" in text_lower:
+        return True, "telemetry struggle caution"
+
     # Suppress meta-constraints unless we're in planning/control tools.
     if text_lower.startswith("constraint:") and "one state" in text_lower:
         if tool_name not in {"Task", "EnterPlanMode", "ExitPlanMode"}:

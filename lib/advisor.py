@@ -68,6 +68,16 @@ CHIP_TELEMETRY_MARKERS = (
     "status: success",
     "cwd:",
 )
+_LOW_SIGNAL_STRUGGLE_PATTERNS = (
+    re.compile(r"\bi struggle with\s+(?:tool[_\s-]*)?\d+[_\s-]*error\s+tasks\b", re.I),
+    re.compile(r"\bi struggle with\s+[a-z0-9_]+_error\s+tasks\b", re.I),
+)
+_TRANSCRIPT_ARTIFACT_PATTERNS = (
+    re.compile(r"^\s*said it like this[:\s]", re.I),
+    re.compile(r"^\s*another reply is[:\s]", re.I),
+    re.compile(r"^\s*user wanted[:\s]", re.I),
+    re.compile(r"^\s*#\s*spark\s", re.I),
+)
 RECENT_OUTCOMES_MAX = 5000
 
 # Thresholds (Improvement #8: Advisor Integration tuneables)
@@ -1327,6 +1337,7 @@ class SparkAdvisor:
         # Global domain guard: do not let X-social specific learnings leak
         # into non-social tasks from non-semantic sources (chip/mind/cognitive/etc.).
         advice_list = self._filter_cross_domain_advice(advice_list, context)
+        advice_list = [a for a in advice_list if not self._should_drop_advice(a, tool_name=tool_name)]
 
         # Sort by relevance (confidence * context_match * effectiveness_boost)
         advice_list = self._rank_advice(advice_list)
@@ -1954,6 +1965,8 @@ class SparkAdvisor:
         for insight in self.cognitive.get_self_awareness_insights():
             insight_text = str(getattr(insight, "insight", "") or "").strip()
             if not insight_text:
+                continue
+            if self._is_low_signal_struggle_text(insight_text):
                 continue
             if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(insight_text):
                 continue
@@ -2601,6 +2614,66 @@ class SparkAdvisor:
 
         return max(0.1, min(1.0, score))
 
+    def _is_low_signal_struggle_text(self, text: str) -> bool:
+        sample = str(text or "").strip().lower()
+        if not sample:
+            return False
+        normalized = re.sub(r"^\[[^\]]+\]\s*", "", sample)
+        if any(rx.search(normalized) for rx in _LOW_SIGNAL_STRUGGLE_PATTERNS):
+            return True
+        if "i struggle with" not in normalized:
+            return False
+        noisy_tokens = (
+            "_error",
+            "mcp__",
+            "command_not_found",
+            "permission_denied",
+            "file_not_found",
+            "syntax_error",
+        )
+        return any(tok in normalized for tok in noisy_tokens)
+
+    def _is_transcript_artifact(self, text: str) -> bool:
+        sample = str(text or "").strip()
+        if not sample:
+            return False
+        lowered = sample.lower()
+        if any(rx.match(sample) for rx in _TRANSCRIPT_ARTIFACT_PATTERNS):
+            return True
+        if lowered.startswith("from lib.") and " import " in lowered:
+            return True
+        return False
+
+    def _should_drop_advice(self, advice: Advice, tool_name: str = "") -> bool:
+        text = str(getattr(advice, "text", "") or "").strip()
+        if not text:
+            return True
+        if self._is_low_signal_struggle_text(text):
+            return True
+        if self._is_transcript_artifact(text):
+            return True
+        if (
+            advice.source in {"bank", "mind", "cognitive", "semantic", "semantic-hybrid", "semantic-agentic"}
+            and self._is_metadata_pattern(text)
+        ):
+            return True
+        text_lower = text.lower()
+        if any(
+            token in text_lower
+            for token in (
+                "read before edit",
+                "read a file before edit",
+                "read file before edit",
+                "before edit to verify",
+            )
+        ):
+            if str(tool_name or "").strip() not in {"Read", "Edit", "Write"}:
+                return True
+        if text_lower.startswith("constraint:") and "one state" in text_lower:
+            if str(tool_name or "").strip() not in {"Task", "EnterPlanMode", "ExitPlanMode"}:
+                return True
+        return False
+
     # Source quality tiers (Task #10: boost validated sources)
     _SOURCE_BOOST = {
         "eidos": 1.4,           # EIDOS distillations are validated patterns
@@ -2622,6 +2695,13 @@ class SparkAdvisor:
     def _rank_score(self, a: Advice) -> float:
         """Compute a relevance score for a single advice item."""
         base_score = a.confidence * a.context_match
+
+        if self._is_low_signal_struggle_text(a.text):
+            base_score *= 0.05
+        elif self._is_transcript_artifact(a.text):
+            base_score *= 0.4
+        elif self._is_metadata_pattern(a.text):
+            base_score *= 0.6
 
         # Source quality boost (Task #10)
         base_score *= self._SOURCE_BOOST.get(a.source, 1.0)
@@ -3045,6 +3125,8 @@ class SparkAdvisor:
         for insight in self.cognitive.get_self_awareness_insights():
             insight_text = str(getattr(insight, "insight", "") or "").strip()
             if not insight_text:
+                continue
+            if self._is_low_signal_struggle_text(insight_text):
                 continue
             if not self._insight_mentions_tool(tool_name, insight_text, getattr(insight, "context", "")):
                 continue

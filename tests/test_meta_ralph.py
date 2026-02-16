@@ -157,6 +157,50 @@ def test_stats():
     print("Stats tracking: PASSED")
 
 
+def test_quality_rate_window_filters_trace_churn_and_nonprod_prefixes():
+    ralph = MetaRalph()
+    ralph.roast_history = []
+
+    for i in range(8):
+        ralph.roast_history.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "source": "user_prompt",
+                "trace_id": f"bench-case-{i}",
+                "result": {"verdict": "needs_work", "original": "scope:operation op:cinematic_creation"},
+            }
+        )
+
+    for _ in range(8):
+        ralph.roast_history.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "source": "user_prompt",
+                "trace_id": "live-heavy-trace",
+                "result": {"verdict": "primitive", "original": "low quality sample"},
+            }
+        )
+
+    for idx in range(2):
+        ralph.roast_history.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "source": "user_prompt",
+                "trace_id": f"live-keep-{idx}",
+                "result": {
+                    "verdict": "quality",
+                    "original": "Use schema validation because it prevents malformed payload regressions.",
+                },
+            }
+        )
+
+    stats = ralph.get_stats()
+    assert stats["quality_rate_window_samples"] == 8
+    assert stats["quality_rate"] == 0.25
+    assert stats["quality_rate_window_filtered_trace_prefix"] >= 8
+    assert stats["quality_rate_window_filtered_trace_churn"] >= 2
+
+
 def test_outcome_stats_ignore_unknown_for_effectiveness():
     """Unknown outcomes should not dilute explicit good/bad effectiveness."""
     ralph = MetaRalph()

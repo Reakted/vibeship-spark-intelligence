@@ -415,6 +415,37 @@ class TestAutoTuner:
 
         assert tp.read_text(encoding="utf-8") == before
 
+    def test_run_records_last_run_on_noop_cycle(self, tmp_path):
+        from lib.auto_tuner import AutoTuner, _write_json_atomic
+
+        tuneables = {
+            "auto_tuner": {
+                "enabled": True,
+                "run_interval_s": 86400,
+                "max_change_per_run": 0.15,
+                "source_boosts": {},
+                "source_effectiveness": {},
+                "tuning_log": [],
+            }
+        }
+        tp = tmp_path / "tuneables.json"
+        _write_json_atomic(tp, tuneables)
+
+        tuner = AutoTuner(tp)
+        tuner.get_effectiveness_data = lambda: {}
+
+        assert tuner.should_run() is True
+        report = tuner.run(dry_run=False, force=True)
+        assert report.changes == []
+
+        after = json.loads(tp.read_text(encoding="utf-8"))
+        auto = after.get("auto_tuner", {})
+        assert auto.get("last_run")
+        assert auto.get("tuning_log")
+        assert auto["tuning_log"][-1].get("action") == "auto_tune_noop"
+
+        assert tuner.should_run() is False
+
 
 # ===== Anti-Pattern Fix Tests =====
 
