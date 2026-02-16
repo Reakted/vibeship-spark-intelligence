@@ -96,3 +96,29 @@ def test_build_report_redacts_sensitive_fields(tmp_path):
 
     md = render_markdown(report)
     assert "OpenClaw Integration Audit" in md
+
+
+def test_build_report_detects_plugin_based_llm_hooks(tmp_path):
+    cfg = tmp_path / "openclaw.json"
+    jobs = tmp_path / "jobs.json"
+    pkg = tmp_path / "package.json"
+    _write_json(
+        cfg,
+        {
+            "plugins": {
+                "entries": {
+                    "spark-telemetry-hooks": {
+                        "enabled": True,
+                        "config": {
+                            "spoolFile": "C:\\Users\\USER\\.spark\\openclaw_hook_events.jsonl",
+                        },
+                    }
+                }
+            }
+        },
+    )
+    _write_json(jobs, {"jobs": []})
+    _write_json(pkg, {"version": "2026.2.15"})
+
+    report = build_report(openclaw_config=cfg, cron_jobs=jobs, openclaw_package=pkg)
+    assert report["openclaw"]["hooks"]["llm_input_output_configured"] is True

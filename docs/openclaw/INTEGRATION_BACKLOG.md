@@ -16,14 +16,14 @@ Maintain an auditable backlog for Spark x OpenClaw integration changes, with:
 ## Current priorities
 
 1. P0: Operational hardening
-- [ ] Move OpenClaw credentials from plain `openclaw.json` values to environment/secret-store resolution.
-- [ ] Configure `cron.webhook` + dedicated `cron.webhookToken` for finished-run notifications.
-- [ ] Enable subagent nesting policy explicitly (`maxSpawnDepth=2`, conservative `maxChildrenPerAgent`).
-- [ ] Wire `llm_input`/`llm_output` hook ingestion path to Spark telemetry.
+- [x] Move OpenClaw credentials from plain `openclaw.json` values to environment/secret-store resolution.
+- [x] Configure `cron.webhook` + dedicated `cron.webhookToken` for finished-run notifications.
+- [x] Enable subagent nesting policy explicitly (`maxSpawnDepth=2`, conservative `maxChildrenPerAgent`).
+- [x] Wire `llm_input`/`llm_output` hook ingestion path to Spark telemetry.
 
 2. P1: Reliability and observability
-- [ ] Make KPI auto-remediation resilient in all invocation contexts (module/script execution modes).
-- [ ] Add schema-transition dashboards for advisory feedback (`legacy` vs `schema_version=2`).
+- [x] Make KPI auto-remediation resilient in all invocation contexts (module/script execution modes).
+- [x] Add schema-transition dashboards for advisory feedback (`legacy` vs `schema_version=2`).
 - [ ] Add weekly "strict quality" rollup report with source/tool/session lineage slices.
 - [x] Add redacted OpenClaw integration audit tooling (`scripts/openclaw_integration_audit.py`).
 
@@ -35,12 +35,12 @@ Maintain an auditable backlog for Spark x OpenClaw integration changes, with:
 ## Validation gates
 
 1. Security
-- [ ] No raw secrets in committed files.
-- [ ] Ingestion artifacts contain redacted tokens and safe allowlisted fields.
+- [x] No raw secrets in committed files.
+- [x] Ingestion artifacts contain redacted tokens and safe allowlisted fields.
 
 2. Attribution quality
-- [ ] New advisory request records include `schema_version`, `trace_id`, `run_id`, `advisory_group_key`.
-- [ ] Strict attribution metrics are computed from trace-bound outcome joins only.
+- [x] New advisory request records include `schema_version`, `trace_id`, `run_id`, `advisory_group_key`.
+- [x] Strict attribution metrics are computed from trace-bound outcome joins only.
 
 3. Runtime health
 - [ ] `spark-health-alert-watch` cron runs cleanly every hour.

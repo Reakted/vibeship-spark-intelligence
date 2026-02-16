@@ -84,9 +84,21 @@ def _openclaw_version(pkg: Dict[str, Any]) -> str:
 def _has_llm_hooks(cfg: Dict[str, Any]) -> bool:
     hooks = cfg.get("hooks") or {}
     if not isinstance(hooks, dict):
-        return False
+        hooks = {}
     raw = json.dumps(hooks).lower()
-    return "llm_input" in raw and "llm_output" in raw
+    if "llm_input" in raw and "llm_output" in raw:
+        return True
+
+    plugins = cfg.get("plugins") or {}
+    if not isinstance(plugins, dict):
+        return False
+    entries = plugins.get("entries") or {}
+    if not isinstance(entries, dict):
+        return False
+    telemetry = entries.get("spark-telemetry-hooks") or {}
+    if not isinstance(telemetry, dict):
+        return False
+    return telemetry.get("enabled") is not False
 
 
 def build_report(

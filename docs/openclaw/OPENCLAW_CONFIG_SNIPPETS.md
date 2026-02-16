@@ -41,23 +41,44 @@ Notes:
 
 ## 3) Hook telemetry enablement (llm_input / llm_output)
 
-Wire OpenClaw hook handlers so Spark receives model-aware telemetry:
+Use plugin-based hook capture + tailer ingestion:
 
-- `llm_input`: prompt/input context shape
-- `llm_output`: output/usage/route completion context
+```json
+{
+  "plugins": {
+    "load": {
+      "paths": [
+        "C:\\Users\\USER\\Desktop\\vibeship-spark-intelligence\\extensions\\openclaw-spark-telemetry"
+      ]
+    },
+    "entries": {
+      "spark-telemetry-hooks": {
+        "enabled": true,
+        "config": {
+          "spoolFile": "C:\\Users\\USER\\.spark\\openclaw_hook_events.jsonl",
+          "includePromptPreview": false,
+          "includeOutputPreview": false,
+          "previewChars": 240
+        }
+      }
+    }
+  }
+}
+```
 
-Implementation options:
+Run tailer with hook spool ingestion enabled:
 
-1. Hook handlers post to Spark ingest endpoint directly.
-2. Hook handlers write structured JSONL consumed by Spark tailer.
+```powershell
+python adapters\openclaw_tailer.py --agent main --hook-events-file C:\Users\USER\.spark\openclaw_hook_events.jsonl
+```
 
-Required join fields to emit:
+Join fields emitted by plugin rows:
 
-- `trace_id`
-- `run_id` (if available)
+- `run_id`
 - `session_id` / `session_key`
-- model/provider/route metadata
-- tool-call context
+- `agent_id`
+- `provider` / `model`
+- prompt/output shape and hashes (redacted by default)
 
 ## 4) Secret hygiene policy
 
