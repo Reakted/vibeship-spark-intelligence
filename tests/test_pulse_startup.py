@@ -1,4 +1,5 @@
 from pathlib import Path
+import builtins
 
 import lib.service_control as service_control
 import spark_pulse
@@ -179,3 +180,39 @@ def test_env_for_child_includes_repo_env_without_overriding(monkeypatch, tmp_pat
     env = service_control._env_for_child(tmp_path)
     assert env["MINIMAX_API_KEY"] == "from_env"
     assert env["SPARK_MINIMAX_MODEL"] == "MiniMax-M2.5"
+
+
+def test_scheduler_heartbeat_age_falls_back_to_root_file(monkeypatch, tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "spark_scheduler.py").write_text(
+        "def scheduler_heartbeat_age_s():\n    return 42.5\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service_control, "ROOT_DIR", root)
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "spark_scheduler":
+            raise ModuleNotFoundError("forced missing module")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    assert service_control._scheduler_heartbeat_age() == 42.5
+
+
+def test_scheduler_heartbeat_age_returns_none_when_unavailable(monkeypatch, tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(service_control, "ROOT_DIR", root)
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "spark_scheduler":
+            raise ModuleNotFoundError("forced missing module")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    assert service_control._scheduler_heartbeat_age() is None

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import signal
 import subprocess
@@ -271,9 +272,33 @@ def _bridge_heartbeat_age() -> Optional[float]:
 
 
 def _scheduler_heartbeat_age() -> Optional[float]:
-    from spark_scheduler import scheduler_heartbeat_age_s
+    try:
+        from spark_scheduler import scheduler_heartbeat_age_s
 
-    return scheduler_heartbeat_age_s()
+        return scheduler_heartbeat_age_s()
+    except ModuleNotFoundError:
+        # Support script invocations (e.g. `python scripts/...`) where repo root
+        # may not be on sys.path.
+        scheduler_file = ROOT_DIR / "spark_scheduler.py"
+        if not scheduler_file.exists():
+            return None
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "spark_scheduler_runtime",
+                scheduler_file,
+            )
+            if spec is None or spec.loader is None:
+                return None
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            fn = getattr(mod, "scheduler_heartbeat_age_s", None)
+            if callable(fn):
+                return fn()
+            return None
+        except Exception:
+            return None
+    except Exception:
+        return None
 
 
 def _load_repo_env(path: Path = REPO_ENV_FILE) -> dict[str, str]:
