@@ -42,6 +42,8 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `docs/ADVISORY_BENCHMARK_SYSTEM.md`: advisory-quality benchmark design, scoring model, and iteration loop
 - `docs/ADVISORY_REALISM_PLAYBOOK.md`: cross-system advisory realism loop (depth tiers, theory seeding, source-alignment gates)
 - `docs/ADVISORY_AND_LEARNING_BENCHMARKS.md`: top-10 benchmark map tying advisory correctness to learning capture/retrieval/utilization (what to run, where to look)
+- `docs/ADVISORY_DAY_TRIAL.md`: 24-hour real-time advisory validation runbook (start/snapshot/close + day-end scoring contract)
+- `scripts/advisory_day_trial.py`: CLI runner for day trial state, snapshots, close report, and canary embedding
 - `scripts/run_advisory_realism_domain_matrix.py`: multi-domain advisory realism matrix runner (10+ domain slices per run)
 - `scripts/run_advisory_chip_experiments.py`: chip strategy experiment runner (A/B/C/D off/on/targeted segment plans)
 - `scripts/run_chip_schema_experiments.py`: schema-capture A/B/C/D runner for chip observer quality and distillation readiness
