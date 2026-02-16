@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
@@ -24,6 +25,33 @@ _SOURCE_WRITE_POLICIES = {
     "chip_merge": {"max_items": 8, "dedupe_window_s": 900.0},
 }
 _POLICY_RECENT_SCAN_LIMIT = 300
+
+# Secret-redaction patterns for ingestion boundaries.
+_REDACT_PATTERNS = [
+    # Authorization/Bearer headers
+    (re.compile(r"(?i)\b(authorization\s*[:=]\s*bearer\s+)([A-Za-z0-9._\-]+)"), r"\1[REDACTED]"),
+    # Generic API key assignments (api_key=..., token: ...)
+    (re.compile(r"(?i)\b(api[_-]?key|token|secret|password)\s*[:=]\s*([A-Za-z0-9_\-]{8,})"), r"\1=[REDACTED]"),
+    # OpenAI-style keys
+    (re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"), "[REDACTED_SK]"),
+    # Telegram bot token-ish pattern
+    (re.compile(r"\b\d{6,12}:[A-Za-z0-9_\-]{20,}\b"), "[REDACTED_TELEGRAM_TOKEN]"),
+]
+
+
+def _sanitize_text(value: Optional[str], max_len: int = 2000) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value)
+    for pattern, repl in _REDACT_PATTERNS:
+        try:
+            text = pattern.sub(repl, text)
+        except Exception:
+            continue
+    text = text.strip()
+    if max_len > 0:
+        text = text[:max_len]
+    return text or None
 
 
 def _normalize_signature(value: str) -> str:
@@ -121,17 +149,18 @@ def record_exposures(
     for item in items:
         if not item:
             continue
-        text = item.get("text")
+        text = _sanitize_text(item.get("text"))
         if isinstance(text, str) and is_primitive_text(text):
             continue
+        # Ingestion boundary allowlist: persist only safe, minimal fields.
         rows.append({
             "ts": now,
-            "source": source,
-            "insight_key": item.get("insight_key"),
-            "category": item.get("category"),
+            "source": str(source or "")[:80],
+            "insight_key": _sanitize_text(item.get("insight_key"), max_len=200),
+            "category": _sanitize_text(item.get("category"), max_len=80),
             "text": text,
-            "session_id": session_id,
-            "trace_id": trace_id,
+            "session_id": (str(session_id)[:160] if session_id else None),
+            "trace_id": (str(trace_id)[:160] if trace_id else None),
         })
 
     if not rows:

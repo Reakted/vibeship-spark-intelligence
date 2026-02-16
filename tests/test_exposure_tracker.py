@@ -93,3 +93,27 @@ def test_unthrottled_source_keeps_all_items(tmp_path, monkeypatch):
 
     assert written == 7
     assert len(rows) == 7
+
+
+def test_record_exposures_redacts_secrets(tmp_path, monkeypatch):
+    exposures_file = tmp_path / "exposures.jsonl"
+    last_file = tmp_path / "last_exposure.json"
+    monkeypatch.setattr(et, "EXPOSURES_FILE", exposures_file)
+    monkeypatch.setattr(et, "LAST_EXPOSURE_FILE", last_file)
+
+    text = "Authorization: Bearer supersecrettoken123 api_key=abcd1234efgh5678 sk-abcdefghijklmnopqrstuvwxyz"
+    written = et.record_exposures(
+        source="spark_context:warnings",
+        items=[{"insight_key": "k1", "category": "warning", "text": text}],
+        session_id="s1",
+        trace_id="t1",
+    )
+
+    assert written == 1
+    rows = _read_jsonl(exposures_file)
+    assert len(rows) == 1
+    saved = rows[0]["text"]
+    assert "supersecrettoken123" not in saved
+    assert "abcd1234efgh5678" not in saved
+    assert "sk-abcdefghijklmnopqrstuvwxyz" not in saved
+    assert "[REDACTED" in saved

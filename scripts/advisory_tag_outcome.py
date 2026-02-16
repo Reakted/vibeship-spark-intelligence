@@ -102,6 +102,8 @@ def main() -> int:
         return 2
 
     trace_id = req.get("trace_id")
+    run_id = req.get("run_id")
+    session_id = req.get("session_id")
     packet_id = req.get("packet_id")
     route = req.get("route")
     ok = record_feedback(
@@ -112,6 +114,8 @@ def main() -> int:
         status=status,
         outcome=outcome,
         trace_id=(str(trace_id) if trace_id else None),
+        run_id=(str(run_id) if run_id else None),
+        session_id=(str(session_id) if session_id else None),
         packet_id=(str(packet_id) if packet_id else None),
         route=(str(route) if route else None),
         notes=notes,

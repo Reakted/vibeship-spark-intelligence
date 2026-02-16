@@ -543,11 +543,15 @@ def record_recent_delivery(
     """
     if not tool or not advice_list:
         return
+    advice_ids = [a.advice_id for a in advice_list]
+    run_seed = f"{tool}|{str(trace_id or '').strip()}|{','.join(sorted(str(x) for x in advice_ids if str(x).strip()))}"
+    run_id = hashlib.sha1(run_seed.encode("utf-8", errors="ignore")).hexdigest()[:20]
     recent = {
         "ts": time.time(),
         "tool": tool,
         "trace_id": trace_id,
-        "advice_ids": [a.advice_id for a in advice_list],
+        "run_id": run_id,
+        "advice_ids": advice_ids,
         "advice_texts": [a.text[:160] for a in advice_list],
         "insight_keys": [a.insight_key for a in advice_list],
         "sources": [a.source for a in advice_list],
@@ -3378,6 +3382,9 @@ class SparkAdvisor:
                 insight_keys = []
                 sources = []
                 tool_name = tool
+                entry_trace_id = None
+                entry_run_id = None
+                entry_session_id = None
                 if entry:
                     tool_name = tool_name or entry.get("tool")
                     ids = entry.get("advice_ids") or []
@@ -3388,6 +3395,9 @@ class SparkAdvisor:
                         insight_keys = [ik[idx]]
                     if 0 <= idx < len(src):
                         sources = [src[idx]]
+                    entry_trace_id = entry.get("trace_id")
+                    entry_run_id = entry.get("run_id")
+                    entry_session_id = entry.get("session_id")
                 from .advice_feedback import record_feedback
                 record_feedback(
                     advice_ids=[advice_id],
@@ -3397,6 +3407,9 @@ class SparkAdvisor:
                     notes=notes or "",
                     insight_keys=insight_keys,
                     sources=sources,
+                    trace_id=(str(entry_trace_id) if entry_trace_id else None),
+                    run_id=(str(entry_run_id) if entry_run_id else None),
+                    session_id=(str(entry_session_id) if entry_session_id else None),
                 )
             except Exception:
                 pass
@@ -3414,6 +3427,9 @@ class SparkAdvisor:
             try:
                 insight_keys = entry.get("insight_keys") or []
                 sources = entry.get("sources") or []
+                entry_trace_id = entry.get("trace_id")
+                entry_run_id = entry.get("run_id")
+                entry_session_id = entry.get("session_id")
                 from .advice_feedback import record_feedback
                 record_feedback(
                     advice_ids=advice_ids,
@@ -3423,6 +3439,9 @@ class SparkAdvisor:
                     notes=notes or "",
                     insight_keys=insight_keys,
                     sources=sources,
+                    trace_id=(str(entry_trace_id) if entry_trace_id else None),
+                    run_id=(str(entry_run_id) if entry_run_id else None),
+                    session_id=(str(entry_session_id) if entry_session_id else None),
                 )
             except Exception:
                 pass

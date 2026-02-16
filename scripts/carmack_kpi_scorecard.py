@@ -8,7 +8,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from lib.carmack_kpi import build_scorecard
+from lib.carmack_kpi import build_scorecard, build_health_alert
 
 
 def _fmt_ratio(value: Optional[float]) -> str:
@@ -21,6 +21,23 @@ def _fmt_delta(value: Optional[float]) -> str:
     if value is None:
         return "N/A"
     return f"{value * 100:+.1f}pp"
+
+
+def _parse_threshold_overrides(raw_items: list[str]) -> Dict[str, float]:
+    out: Dict[str, float] = {}
+    for raw in raw_items:
+        token = str(raw or "").strip()
+        if not token or "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        try:
+            out[key] = float(value.strip())
+        except Exception:
+            continue
+    return out
 
 
 def _render_text(score: Dict[str, Any]) -> str:
@@ -78,15 +95,40 @@ def _render_text(score: Dict[str, Any]) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Compute aligned Carmack KPI scorecard.")
     ap.add_argument("--window-hours", type=float, default=4.0, help="Window size in hours.")
-    ap.add_argument("--json", action="store_true", help="Print JSON only.")
+    ap.add_argument("--json", action="store_true", help="Print scorecard JSON only.")
+    ap.add_argument("--alert-json", action="store_true", help="Print health-alert summary JSON.")
+    ap.add_argument(
+        "--threshold",
+        action="append",
+        default=[],
+        help="Override alert threshold as key=value (repeatable)",
+    )
+    ap.add_argument(
+        "--fail-on-breach",
+        action="store_true",
+        help="Exit non-zero when alert status is breach (for cron/webhook gating).",
+    )
     args = ap.parse_args()
 
     score = build_scorecard(window_hours=args.window_hours)
+    threshold_overrides = _parse_threshold_overrides(args.threshold or [])
+
+    if args.alert_json:
+        alert = build_health_alert(score, thresholds=threshold_overrides)
+        print(json.dumps(alert, indent=2))
+        if args.fail_on_breach and str(alert.get("status")) == "breach":
+            return 2
+        return 0
+
     if args.json:
         print(json.dumps(score, indent=2))
         return 0
 
     print(_render_text(score))
+    if args.fail_on_breach:
+        alert = build_health_alert(score, thresholds=threshold_overrides)
+        if str(alert.get("status")) == "breach":
+            return 2
     return 0
 
 
