@@ -39,6 +39,15 @@ MIN_NEEDS_WORK_SAMPLES = 5
 MIN_SOURCE_SAMPLES = 15
 ATTRIBUTION_WINDOW_S = 1200
 STRICT_ATTRIBUTION_REQUIRE_TRACE = True
+# Dual-gate advisory promotion/suppression tuneables.
+# 1) Require weak coverage first (warm-up)
+# 2) Then enforce strict quality floor when strict samples are sufficient.
+INSIGHT_WARMUP_WEAK_SAMPLES = 3
+INSIGHT_MIN_STRICT_SAMPLES = 2
+INSIGHT_STRICT_QUALITY_FLOOR = 0.45
+# If an insight has poor strict quality but no recent strict outcomes,
+# allow resurfacing for periodic re-test instead of permanent suppression.
+INSIGHT_SUPPRESSION_RETEST_AFTER_S = 6 * 3600
 
 
 def _load_meta_ralph_config() -> None:
@@ -46,6 +55,8 @@ def _load_meta_ralph_config() -> None:
     global QUALITY_THRESHOLD, NEEDS_WORK_THRESHOLD, NEEDS_WORK_CLOSE_DELTA
     global MIN_OUTCOME_SAMPLES, MIN_TUNEABLE_SAMPLES, MIN_NEEDS_WORK_SAMPLES
     global MIN_SOURCE_SAMPLES, ATTRIBUTION_WINDOW_S, STRICT_ATTRIBUTION_REQUIRE_TRACE
+    global INSIGHT_WARMUP_WEAK_SAMPLES, INSIGHT_MIN_STRICT_SAMPLES
+    global INSIGHT_STRICT_QUALITY_FLOOR, INSIGHT_SUPPRESSION_RETEST_AFTER_S
     try:
         tuneables = Path.home() / ".spark" / "tuneables.json"
         if not tuneables.exists():
@@ -73,6 +84,14 @@ def _load_meta_ralph_config() -> None:
             ATTRIBUTION_WINDOW_S = int(cfg["attribution_window_s"])
         if "strict_attribution_require_trace" in cfg:
             STRICT_ATTRIBUTION_REQUIRE_TRACE = bool(cfg["strict_attribution_require_trace"])
+        if "insight_warmup_weak_samples" in cfg:
+            INSIGHT_WARMUP_WEAK_SAMPLES = int(cfg["insight_warmup_weak_samples"])
+        if "insight_min_strict_samples" in cfg:
+            INSIGHT_MIN_STRICT_SAMPLES = int(cfg["insight_min_strict_samples"])
+        if "insight_strict_quality_floor" in cfg:
+            INSIGHT_STRICT_QUALITY_FLOOR = float(cfg["insight_strict_quality_floor"])
+        if "insight_suppression_retest_after_s" in cfg:
+            INSIGHT_SUPPRESSION_RETEST_AFTER_S = int(cfg["insight_suppression_retest_after_s"])
     except Exception:
         pass
 
@@ -1456,25 +1475,74 @@ class MetaRalph:
     def get_insight_effectiveness(self, insight_key: str) -> float:
         """Get effectiveness rate for a specific insight (0.0 to 1.0).
 
-        Returns 0.5 (neutral) if no outcome data available.
-        Used by Advisor for outcome-based ranking (Task #11).
+        Dual-gate policy:
+        1) Warm-up on weak coverage first (acted-on + explicit outcome),
+        2) Enforce strict quality floor once strict attribution samples are sufficient.
+
+        Returns 0.5 (neutral) if no usable outcome data is available.
+        Used by Advisor for outcome-based ranking.
         """
         if not insight_key:
             return 0.5
 
-        # Check outcome records that match this insight key
-        matching = [
-            r for r in self.outcome_records.values()
-            if r.insight_key == insight_key and r.acted_on and r.outcome
+        # Weak coverage set: acted-on records with explicit good/bad outcomes.
+        weak = [
+            r
+            for r in self.outcome_records.values()
+            if r.insight_key == insight_key
+            and r.acted_on
+            and self._normalize_outcome(r.outcome) in ("good", "bad")
         ]
+        if not weak:
+            return 0.5
 
-        if not matching:
-            return 0.5  # No data = neutral
+        weak_good = len([r for r in weak if self._normalize_outcome(r.outcome) == "good"])
+        weak_total = len(weak)
+        weak_rate = weak_good / max(weak_total, 1)
 
-        good = len([r for r in matching if r.outcome == "good"])
-        total = len(matching)
+        warmup_min = max(1, int(INSIGHT_WARMUP_WEAK_SAMPLES))
+        if weak_total < warmup_min:
+            # Do not over-suppress new/low-volume advisories.
+            return weak_rate
 
-        return good / total
+        strict = [
+            r
+            for r in weak
+            if self._is_strictly_attributable(
+                r,
+                window_s=int(ATTRIBUTION_WINDOW_S),
+                require_trace=bool(STRICT_ATTRIBUTION_REQUIRE_TRACE),
+            )
+        ]
+        strict_good = len([r for r in strict if self._normalize_outcome(r.outcome) == "good"])
+        strict_total = len(strict)
+        strict_rate = strict_good / max(strict_total, 1) if strict_total > 0 else 0.0
+
+        strict_min = max(1, int(INSIGHT_MIN_STRICT_SAMPLES))
+        if strict_total < strict_min:
+            # Coverage-first: keep advisory eligible until we have enough strict evidence.
+            return weak_rate
+
+        strict_floor = max(0.0, min(1.0, float(INSIGHT_STRICT_QUALITY_FLOOR)))
+        if strict_rate < strict_floor:
+            # Periodic re-test path: after a cooldown, stop hard-suppressing and let
+            # weak evidence (or neutral baseline) resurface the advisory for re-evaluation.
+            last_strict_at = None
+            for rec in strict:
+                ts = self._parse_iso_timestamp(rec.outcome_at)
+                if ts and (last_strict_at is None or ts > last_strict_at):
+                    last_strict_at = ts
+
+            if last_strict_at is not None:
+                age_s = max(0.0, datetime.now().timestamp() - last_strict_at.timestamp())
+                if age_s >= max(0, int(INSIGHT_SUPPRESSION_RETEST_AFTER_S)):
+                    return max(0.5, weak_rate)
+
+            # Suppression path while strict evidence is fresh and below floor.
+            return max(0.05, min(weak_rate, strict_rate * 0.5))
+
+        # Promotion path: strict is primary signal, weak still contributes stability.
+        return (0.35 * weak_rate) + (0.65 * strict_rate)
 
     # =========================================================================
     # STATS AND REPORTING

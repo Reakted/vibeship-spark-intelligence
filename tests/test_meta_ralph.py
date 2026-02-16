@@ -334,6 +334,68 @@ def test_source_attribution_strict_trace_window():
     assert attr["totals"]["strict_effectiveness_rate"] == 1.0
 
 
+def test_insight_effectiveness_dual_gate_warmup_uses_weak_coverage(monkeypatch):
+    """Before strict sample minimum, weak coverage should drive score (no early suppression)."""
+    import lib.meta_ralph as mr
+
+    monkeypatch.setattr(mr, "INSIGHT_WARMUP_WEAK_SAMPLES", 2)
+    monkeypatch.setattr(mr, "INSIGHT_MIN_STRICT_SAMPLES", 3)
+    monkeypatch.setattr(mr, "INSIGHT_STRICT_QUALITY_FLOOR", 0.6)
+
+    ralph = mr.MetaRalph()
+    # Two weak explicit outcomes with mismatched traces => strict samples remain 0.
+    ralph.track_retrieval("w1", "advice", insight_key="k:warm", source="cognitive", trace_id="t1")
+    ralph.track_outcome("w1", "good", "ok", trace_id="t1-mismatch")
+    ralph.track_retrieval("w2", "advice", insight_key="k:warm", source="cognitive", trace_id="t2")
+    ralph.track_outcome("w2", "bad", "nope", trace_id="t2-mismatch")
+
+    score = ralph.get_insight_effectiveness("k:warm")
+    assert score == 0.5  # weak_rate = 1/2
+
+
+def test_insight_effectiveness_dual_gate_enforces_strict_floor(monkeypatch):
+    """Once strict samples are sufficient and below floor, score should be suppressed."""
+    import lib.meta_ralph as mr
+
+    monkeypatch.setattr(mr, "INSIGHT_WARMUP_WEAK_SAMPLES", 2)
+    monkeypatch.setattr(mr, "INSIGHT_MIN_STRICT_SAMPLES", 2)
+    monkeypatch.setattr(mr, "INSIGHT_STRICT_QUALITY_FLOOR", 0.75)
+    monkeypatch.setattr(mr, "INSIGHT_SUPPRESSION_RETEST_AFTER_S", 999999)
+
+    ralph = mr.MetaRalph()
+    ralph.track_retrieval("s1", "advice", insight_key="k:strict", source="cognitive", trace_id="ts1")
+    ralph.track_outcome("s1", "bad", "nope", trace_id="ts1")
+    ralph.track_retrieval("s2", "advice", insight_key="k:strict", source="cognitive", trace_id="ts2")
+    ralph.track_outcome("s2", "bad", "nope", trace_id="ts2")
+
+    score = ralph.get_insight_effectiveness("k:strict")
+    assert score < 0.2
+
+
+def test_insight_effectiveness_retest_after_cooldown(monkeypatch):
+    """Stale low-quality strict evidence should reopen for re-test (not hard-suppressed forever)."""
+    import lib.meta_ralph as mr
+
+    monkeypatch.setattr(mr, "INSIGHT_WARMUP_WEAK_SAMPLES", 2)
+    monkeypatch.setattr(mr, "INSIGHT_MIN_STRICT_SAMPLES", 2)
+    monkeypatch.setattr(mr, "INSIGHT_STRICT_QUALITY_FLOOR", 0.8)
+    monkeypatch.setattr(mr, "INSIGHT_SUPPRESSION_RETEST_AFTER_S", 60)
+
+    ralph = mr.MetaRalph()
+    ralph.track_retrieval("r1", "advice", insight_key="k:retest", source="cognitive", trace_id="tr1")
+    ralph.track_outcome("r1", "bad", "nope", trace_id="tr1")
+    ralph.track_retrieval("r2", "advice", insight_key="k:retest", source="cognitive", trace_id="tr2")
+    ralph.track_outcome("r2", "bad", "nope", trace_id="tr2")
+
+    # Age strict outcomes beyond retest window.
+    old = (datetime.now() - timedelta(minutes=5)).isoformat()
+    ralph.outcome_records["r1"].outcome_at = old
+    ralph.outcome_records["r2"].outcome_at = old
+
+    score = ralph.get_insight_effectiveness("k:retest")
+    assert score >= 0.5
+
+
 def run_all_tests():
     """Run all tests and report results."""
     print("=" * 60)
@@ -353,6 +415,9 @@ def run_all_tests():
         ("Outcome Retention", test_outcome_retention_keeps_actionable_records),
         ("Source Attribution", test_source_attribution_rollup),
         ("Strict Attribution", test_source_attribution_strict_trace_window),
+        ("Dual Gate Warmup", test_insight_effectiveness_dual_gate_warmup_uses_weak_coverage),
+        ("Dual Gate Strict Floor", test_insight_effectiveness_dual_gate_enforces_strict_floor),
+        ("Dual Gate Retest", test_insight_effectiveness_retest_after_cooldown),
     ]
 
     passed = 0

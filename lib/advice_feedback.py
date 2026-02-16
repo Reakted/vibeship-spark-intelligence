@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -14,6 +15,40 @@ REQUESTS_FILE = Path.home() / ".spark" / "advice_feedback_requests.jsonl"
 FEEDBACK_FILE = Path.home() / ".spark" / "advice_feedback.jsonl"
 SUMMARY_FILE = Path.home() / ".spark" / "advice_feedback_summary.json"
 STATE_FILE = Path.home() / ".spark" / "advice_feedback_state.json"
+
+CORRELATION_SCHEMA_VERSION = 2
+
+
+def _correlation_ids(
+    *,
+    session_id: Optional[str],
+    tool: Optional[str],
+    trace_id: Optional[str],
+    advice_ids: Optional[List[str]],
+    run_id: Optional[str] = None,
+) -> Dict[str, Optional[str]]:
+    """Build deterministic correlation ids for advisory telemetry joins."""
+    sid = str(session_id or "").strip()
+    tname = str(tool or "").strip()
+    tid = str(trace_id or "").strip()
+    ids = [str(x).strip() for x in (advice_ids or []) if str(x).strip()]
+    primary_advisory_id = ids[0] if ids else None
+    # Deterministic group key so request/feedback records can be joined even
+    # when emitted by different code paths.
+    group_blob = "|".join([sid, tname, tid, ",".join(sorted(ids))])
+    advisory_group_key = hashlib.sha1(group_blob.encode("utf-8", errors="ignore")).hexdigest()[:24]
+
+    rid = str(run_id or "").strip()
+    if not rid:
+        rid_blob = "|".join([sid, tid, tname, advisory_group_key])
+        rid = hashlib.sha1(rid_blob.encode("utf-8", errors="ignore")).hexdigest()[:20]
+
+    return {
+        "trace_id": tid or None,
+        "run_id": rid,
+        "primary_advisory_id": primary_advisory_id,
+        "advisory_group_key": advisory_group_key,
+    }
 
 
 def _load_state() -> Dict[str, Any]:
@@ -41,6 +76,7 @@ def record_advice_request(
     advice_texts: Optional[List[str]] = None,
     sources: Optional[List[str]] = None,
     trace_id: Optional[str] = None,
+    run_id: Optional[str] = None,
     route: Optional[str] = None,
     packet_id: Optional[str] = None,
     min_interval_s: int = 600,
@@ -55,13 +91,29 @@ def record_advice_request(
             return False
 
         REQUESTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        corr = _correlation_ids(
+            session_id=session_id,
+            tool=tool,
+            trace_id=trace_id,
+            advice_ids=advice_ids,
+            run_id=run_id,
+        )
+        # Deterministic joins require trace_id for high-confidence attribution.
+        if not corr.get("trace_id"):
+            log_debug("advice_feedback", "record_advice_request skipped: missing trace_id", None)
+            return False
+
         row = {
+            "schema_version": CORRELATION_SCHEMA_VERSION,
             "session_id": session_id,
             "tool": tool,
             "advice_ids": advice_ids[:20],
             "advice_texts": [str(x)[:240] for x in (advice_texts or [])[:20]],
             "sources": [str(x)[:80] for x in (sources or [])[:20]],
-            "trace_id": (str(trace_id)[:120] if trace_id else None),
+            "trace_id": corr.get("trace_id"),
+            "run_id": corr.get("run_id"),
+            "primary_advisory_id": corr.get("primary_advisory_id"),
+            "advisory_group_key": corr.get("advisory_group_key"),
             "route": (str(route)[:80] if route else None),
             "packet_id": (str(packet_id)[:120] if packet_id else None),
             "created_at": now,
@@ -112,6 +164,7 @@ def record_feedback(
     status: Optional[str] = None,
     outcome: Optional[str] = None,
     trace_id: Optional[str] = None,
+    run_id: Optional[str] = None,
     packet_id: Optional[str] = None,
     route: Optional[str] = None,
     notes: str = "",
@@ -126,7 +179,15 @@ def record_feedback(
         oc = str(outcome or "").strip().lower() if outcome else ""
         if oc and oc not in {"good", "bad", "neutral"}:
             oc = ""
+        corr = _correlation_ids(
+            session_id=None,
+            tool=tool,
+            trace_id=trace_id,
+            advice_ids=advice_ids,
+            run_id=run_id,
+        )
         row = {
+            "schema_version": CORRELATION_SCHEMA_VERSION,
             "advice_ids": advice_ids[:20],
             "tool": tool,
             "helpful": helpful,
@@ -135,7 +196,10 @@ def record_feedback(
             "outcome": oc or None,
             "insight_keys": (insight_keys or [])[:20],
             "sources": (sources or [])[:20],
-            "trace_id": (str(trace_id)[:120] if trace_id else None),
+            "trace_id": corr.get("trace_id"),
+            "run_id": corr.get("run_id"),
+            "primary_advisory_id": corr.get("primary_advisory_id"),
+            "advisory_group_key": corr.get("advisory_group_key"),
             "packet_id": (str(packet_id)[:120] if packet_id else None),
             "route": (str(route)[:80] if route else None),
             "notes": notes[:200] if notes else "",
