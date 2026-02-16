@@ -578,6 +578,59 @@ def test_advise_level_domain_filter_blocks_x_social_noise_across_sources(monkeyp
     assert filtered[0].insight_key == "cognitive:y"
 
 
+def test_detect_retrieval_domain_prefers_context_signals(monkeypatch, tmp_path):
+    _patch_advisor_runtime(monkeypatch, tmp_path)
+    advisor = advisor_mod.SparkAdvisor()
+
+    assert advisor._detect_retrieval_domain("Bash", "memory retrieval stale index issue across sessions") == "memory"
+    assert advisor._detect_retrieval_domain("Read", "design a clean mobile ui layout with better typography") == "ui_design"
+    assert advisor._detect_retrieval_domain("Edit", "fix python module traceback for auth token flow") == "coding"
+
+
+def test_domain_profile_overrides_apply_when_enabled(monkeypatch, tmp_path):
+    _patch_advisor_runtime(monkeypatch, tmp_path)
+
+    class _DomainRetriever:
+        def retrieve(self, _query: str, _insights, limit: int = 8):
+            return [
+                SimpleNamespace(
+                    insight_key="memory-1",
+                    insight_text="Use session-scoped retrieval checks before distillation.",
+                    semantic_sim=0.25,
+                    trigger_conf=0.0,
+                    fusion_score=0.25,
+                    source_type="semantic",
+                    why="domain profile check",
+                )
+            ][:limit]
+
+    monkeypatch.setattr(semantic_retriever_mod, "get_semantic_retriever", lambda: _DomainRetriever())
+    advisor = advisor_mod.SparkAdvisor()
+    advisor.retrieval_policy = _policy_with(
+        advisor,
+        mode="embeddings_only",
+        semantic_context_min=0.95,
+        semantic_lexical_min=0.95,
+        semantic_intent_min=0.95,
+        semantic_strong_override=0.99,
+        domain_profile_enabled=True,
+        domain_profiles={
+            "memory": {
+                "semantic_context_min": 0.0,
+                "semantic_lexical_min": 0.0,
+                "semantic_intent_min": 0.0,
+            }
+        },
+    )
+
+    advice = advisor._get_semantic_cognitive_advice("Bash", "memory retrieval stale index checks")
+    route = _load_last_route(tmp_path / "retrieval_router.jsonl")
+
+    assert advice
+    assert route["active_domain"] == "memory"
+    assert route["profile_domain"] == "memory"
+
+
 def test_chip_advice_uses_quality_as_confidence_fallback(monkeypatch, tmp_path):
     _patch_advisor_runtime(monkeypatch, tmp_path)
     monkeypatch.setattr(advisor_mod, "CHIP_INSIGHTS_DIR", tmp_path)

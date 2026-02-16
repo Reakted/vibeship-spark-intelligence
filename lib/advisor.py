@@ -266,6 +266,153 @@ X_SOCIAL_MARKERS = (
     "tao subnet",
     "mac mini + ai",
 )
+RETRIEVAL_DOMAIN_MARKERS: Dict[str, Tuple[str, ...]] = {
+    "x_social": X_SOCIAL_MARKERS,
+    "memory": (
+        "memory",
+        "retrieval",
+        "distillation",
+        "cross-session",
+        "session",
+        "stale",
+        "index",
+        "embedding",
+        "insight",
+    ),
+    "coding": (
+        "code",
+        "coding",
+        "debug",
+        "refactor",
+        "function",
+        "module",
+        "python",
+        "typescript",
+        "javascript",
+        "compile",
+        "stack trace",
+        "traceback",
+    ),
+    "marketing": (
+        "marketing",
+        "campaign",
+        "conversion",
+        "audience",
+        "brand",
+        "positioning",
+        "launch",
+        "pricing",
+        "growth",
+    ),
+    "strategy": (
+        "strategy",
+        "roadmap",
+        "prioritize",
+        "tradeoff",
+        "go-to-market",
+        "gtm",
+        "moat",
+        "position",
+        "risk",
+    ),
+    "ui_design": (
+        "ui",
+        "ux",
+        "layout",
+        "visual",
+        "design",
+        "mobile",
+        "desktop",
+        "component",
+        "typography",
+        "color",
+    ),
+    "testing": (
+        "test",
+        "pytest",
+        "unit test",
+        "integration test",
+        "assert",
+        "coverage",
+        "regression",
+        "benchmark",
+    ),
+    "research": (
+        "research",
+        "compare",
+        "evaluate",
+        "analysis",
+        "survey",
+        "paper",
+        "source",
+        "evidence",
+    ),
+    "conversation": (
+        "coach",
+        "coaching",
+        "advice",
+        "self-improvement",
+        "habit",
+        "reflection",
+        "mindset",
+        "communication",
+        "feedback",
+    ),
+    "prompting": (
+        "prompt",
+        "instruction",
+        "system prompt",
+        "few-shot",
+        "token budget",
+        "chain of thought",
+    ),
+}
+RETRIEVAL_TOOL_DOMAIN_HINTS: Dict[str, str] = {
+    "edit": "coding",
+    "bash": "coding",
+    "read": "coding",
+    "write": "coding",
+    "multi_edit": "coding",
+    "grep": "coding",
+    "search_files": "coding",
+    "pytest": "testing",
+    "test": "testing",
+    "x_post": "x_social",
+    "x_reply": "x_social",
+    "x_research": "x_social",
+}
+RETRIEVAL_DOMAIN_PROFILE_KEYS = {
+    "mode",
+    "gate_strategy",
+    "semantic_limit",
+    "semantic_context_min",
+    "semantic_lexical_min",
+    "semantic_strong_override",
+    "max_queries",
+    "agentic_query_limit",
+    "agentic_deadline_ms",
+    "agentic_rate_limit",
+    "agentic_rate_window",
+    "fast_path_budget_ms",
+    "deny_escalation_when_over_budget",
+    "prefilter_enabled",
+    "prefilter_max_insights",
+    "prefilter_drop_low_signal",
+    "lexical_weight",
+    "intent_coverage_weight",
+    "support_boost_weight",
+    "reliability_weight",
+    "bm25_k1",
+    "bm25_b",
+    "bm25_mix",
+    "semantic_intent_min",
+    "complexity_threshold",
+    "min_results_no_escalation",
+    "min_top_score_no_escalation",
+    "escalate_on_weak_primary",
+    "escalate_on_high_risk",
+    "escalate_on_trigger",
+}
 _INTENT_STOPWORDS = {
     "a",
     "an",
@@ -312,6 +459,25 @@ def _parse_bool(value: Any, default: bool) -> bool:
     if text in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _norm_retrieval_domain(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return "general"
+    text = re.sub(r"[^a-z0-9_]+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    if not text:
+        return "general"
+    aliases = {
+        "xsocial": "x_social",
+        "social": "x_social",
+        "social_media": "x_social",
+        "x": "x_social",
+        "ui": "ui_design",
+        "ux": "ui_design",
+    }
+    return aliases.get(text, text)
 
 
 def _parse_iso_ts(value: Any) -> Optional[float]:
@@ -1020,6 +1186,66 @@ class SparkAdvisor:
 
     # ============= Retrieval Policy =============
 
+    def _sanitize_domain_profiles(self, raw: Any) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        if not isinstance(raw, dict):
+            return out
+        for domain_raw, profile_raw in raw.items():
+            if not isinstance(profile_raw, dict):
+                continue
+            domain = _norm_retrieval_domain(domain_raw)
+            profile: Dict[str, Any] = {}
+            for key, value in profile_raw.items():
+                if key in RETRIEVAL_DOMAIN_PROFILE_KEYS:
+                    profile[key] = value
+            if profile:
+                out[domain] = profile
+        return out
+
+    def _detect_retrieval_domain(self, tool_name: str, context: str) -> str:
+        tool = str(tool_name or "").strip().lower()
+        body = str(context or "").strip().lower()
+        combined = f"{tool} {body}".strip()
+        if not combined:
+            return "general"
+
+        if self._is_x_social_query(combined):
+            return "x_social"
+
+        for domain, markers in RETRIEVAL_DOMAIN_MARKERS.items():
+            if domain == "x_social":
+                continue
+            if any(marker in combined for marker in markers):
+                return domain
+        hinted = RETRIEVAL_TOOL_DOMAIN_HINTS.get(tool)
+        if hinted:
+            return hinted
+        return "general"
+
+    def _effective_retrieval_policy(self, tool_name: str, context: str) -> Dict[str, Any]:
+        policy = dict(self.retrieval_policy or {})
+        active_domain = self._detect_retrieval_domain(tool_name, context)
+        policy["active_domain"] = active_domain
+        policy["profile_domain"] = "default"
+        enabled = _parse_bool(policy.get("domain_profile_enabled", True), True)
+        policy["domain_profile_enabled"] = enabled
+        if not enabled:
+            return policy
+
+        domain_profiles = policy.get("domain_profiles") or {}
+        if not isinstance(domain_profiles, dict):
+            return policy
+        overrides = domain_profiles.get(active_domain)
+        if overrides is None:
+            overrides = domain_profiles.get("default")
+            if isinstance(overrides, dict):
+                policy["profile_domain"] = "default"
+        else:
+            policy["profile_domain"] = active_domain
+        if isinstance(overrides, dict):
+            policy.update(overrides)
+        return policy
+
     def _load_retrieval_policy(self) -> Dict[str, Any]:
         """Load retrieval routing policy from tuneables + env."""
         level = str(os.getenv("SPARK_RETRIEVAL_LEVEL", "1") or "1").strip()
@@ -1053,6 +1279,9 @@ class SparkAdvisor:
                         by_level = profile_overrides.get(level) or {}
                         if isinstance(by_level, dict):
                             policy.update(by_level)
+                    domain_profiles = retrieval.get("domain_profiles")
+                    if isinstance(domain_profiles, dict):
+                        policy["domain_profiles"] = domain_profiles
                     overrides = retrieval.get("overrides") or {}
                     if isinstance(overrides, dict):
                         for key in (
@@ -1100,6 +1329,8 @@ class SparkAdvisor:
                         "escalate_on_weak_primary",
                         "escalate_on_high_risk",
                         "escalate_on_trigger",
+                        "domain_profile_enabled",
+                        "domain_profiles",
                     ):
                         if key in retrieval:
                             policy[key] = retrieval.get(key)
@@ -1190,6 +1421,8 @@ class SparkAdvisor:
         policy["escalate_on_weak_primary"] = bool(policy.get("escalate_on_weak_primary", True))
         policy["escalate_on_high_risk"] = bool(policy.get("escalate_on_high_risk", True))
         policy["escalate_on_trigger"] = bool(policy.get("escalate_on_trigger", True))
+        policy["domain_profile_enabled"] = _parse_bool(policy.get("domain_profile_enabled", True), True)
+        policy["domain_profiles"] = self._sanitize_domain_profiles(policy.get("domain_profiles") or {})
         policy["complexity_hints"] = list(DEFAULT_COMPLEXITY_HINTS)
         policy["high_risk_hints"] = list(DEFAULT_HIGH_RISK_HINTS)
         return policy
@@ -1581,7 +1814,9 @@ class SparkAdvisor:
             return []
 
         route_start = time.perf_counter()
-        policy = dict(self.retrieval_policy or {})
+        policy = self._effective_retrieval_policy(tool_name=tool_name, context=context)
+        active_domain = str(policy.get("active_domain") or "general")
+        profile_domain = str(policy.get("profile_domain") or "default")
         mode = str(policy.get("mode") or "auto").strip().lower()
         gate_strategy = str(policy.get("gate_strategy") or "minimal").strip().lower()
         semantic_limit = int(policy.get("semantic_limit", 8) or 8)
@@ -1728,6 +1963,9 @@ class SparkAdvisor:
                     "tool": tool_name,
                     "profile_level": policy.get("level"),
                     "profile_name": policy.get("profile"),
+                    "active_domain": active_domain,
+                    "profile_domain": profile_domain,
+                    "domain_profile_enabled": bool(policy.get("domain_profile_enabled", True)),
                     "mode": mode,
                     "route": "empty",
                     "escalated": should_escalate,
@@ -1806,7 +2044,7 @@ class SparkAdvisor:
         advice: List[Advice] = []
         filtered_low_match = 0
         filtered_domain_mismatch = 0
-        social_query = self._is_x_social_query(context)
+        social_query = active_domain == "x_social" or self._is_x_social_query(context)
         for r in ranked_rows[:semantic_limit]:
             if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(r.insight_text):
                 continue
@@ -1865,6 +2103,9 @@ class SparkAdvisor:
                 "tool": tool_name,
                 "profile_level": policy.get("level"),
                 "profile_name": policy.get("profile"),
+                "active_domain": active_domain,
+                "profile_domain": profile_domain,
+                "domain_profile_enabled": bool(policy.get("domain_profile_enabled", True)),
                 "mode": mode,
                 "gate_strategy": gate_strategy,
                 "route": semantic_source,
