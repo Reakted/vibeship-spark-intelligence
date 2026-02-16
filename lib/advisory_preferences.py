@@ -32,6 +32,24 @@ DRIFT_KEYS = (
     "max_items",
     "min_rank_score",
 )
+QUALITY_PROFILES = {
+    "balanced": {
+        "force_programmatic_synth": True,
+        "synth_mode": "programmatic",
+        "ai_timeout_s": 3.0,
+    },
+    "enhanced": {
+        "force_programmatic_synth": False,
+        "synth_mode": "auto",
+        "ai_timeout_s": 6.0,
+    },
+    "max": {
+        "force_programmatic_synth": False,
+        "synth_mode": "ai_only",
+        "ai_timeout_s": 8.0,
+    },
+}
+VALID_SYNTH_PROVIDERS = {"auto", "ollama", "openai", "minimax", "anthropic", "gemini"}
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -310,6 +328,93 @@ def apply_preferences(
         "memory_mode": resolved_mode,
         "guidance_style": resolved_style,
         "effective": derived,
+        "runtime": runtime,
+        "path": str(path),
+    }
+
+
+def apply_quality_uplift(
+    *,
+    profile: Any = "enhanced",
+    preferred_provider: Any = "auto",
+    ai_timeout_s: Any = None,
+    path: Path = TUNEABLES_PATH,
+    source: str = "manual",
+) -> Dict[str, Any]:
+    profile_key = str(profile or "enhanced").strip().lower()
+    if profile_key not in QUALITY_PROFILES:
+        profile_key = "enhanced"
+    base = QUALITY_PROFILES[profile_key]
+
+    provider = str(preferred_provider or "auto").strip().lower()
+    if provider not in VALID_SYNTH_PROVIDERS:
+        provider = "auto"
+
+    timeout_value = base["ai_timeout_s"]
+    if ai_timeout_s is not None:
+        try:
+            timeout_value = max(0.2, float(ai_timeout_s))
+        except Exception:
+            timeout_value = base["ai_timeout_s"]
+
+    data = _read_json(path)
+    advisory_engine_cfg = data.setdefault("advisory_engine", {})
+    if not isinstance(advisory_engine_cfg, dict):
+        advisory_engine_cfg = {}
+        data["advisory_engine"] = advisory_engine_cfg
+    synthesizer_cfg = data.setdefault("synthesizer", {})
+    if not isinstance(synthesizer_cfg, dict):
+        synthesizer_cfg = {}
+        data["synthesizer"] = synthesizer_cfg
+
+    advisory_engine_cfg["enabled"] = True
+    advisory_engine_cfg["force_programmatic_synth"] = bool(base["force_programmatic_synth"])
+    synthesizer_cfg["mode"] = str(base["synth_mode"])
+    synthesizer_cfg["preferred_provider"] = provider
+    synthesizer_cfg["ai_timeout_s"] = timeout_value
+
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    data["updated_at"] = now_iso
+    data["advisory_quality"] = {
+        "profile": profile_key,
+        "preferred_provider": provider,
+        "ai_timeout_s": timeout_value,
+        "source": str(source or "manual"),
+        "updated_at": now_iso,
+    }
+    try:
+        _write_json_atomic(path, data)
+    except TimeoutError as exc:
+        raise RuntimeError(f"tuneables update is busy, retry shortly: {path}") from exc
+
+    runtime: Dict[str, Any] = {}
+    try:
+        from .advisory_engine import apply_engine_config, get_engine_status
+
+        apply_engine_config(advisory_engine_cfg)
+        runtime["engine"] = get_engine_status()
+    except Exception:
+        runtime["engine"] = {}
+
+    try:
+        from .advisory_synthesizer import apply_synth_config, get_synth_status
+
+        apply_synth_config(synthesizer_cfg)
+        runtime["synthesizer"] = get_synth_status()
+    except Exception:
+        runtime["synthesizer"] = {}
+
+    synth = runtime.get("synthesizer") if isinstance(runtime.get("synthesizer"), dict) else {}
+    warnings = []
+    if not bool(synth.get("ai_available")) and str(base["synth_mode"]) != "programmatic":
+        warnings.append("no_ai_provider_available")
+
+    return {
+        "ok": True,
+        "profile": profile_key,
+        "preferred_provider": provider,
+        "ai_timeout_s": timeout_value,
+        "warnings": warnings,
         "runtime": runtime,
         "path": str(path),
     }

@@ -13,6 +13,9 @@ def _args(**kwargs):
         "source": "test",
         "memory_mode": None,
         "guidance_style": None,
+        "profile": "enhanced",
+        "provider": "auto",
+        "ai_timeout_s": None,
     }
     defaults.update(kwargs)
     return SimpleNamespace(**defaults)
@@ -161,3 +164,40 @@ def test_print_advisory_preferences_uses_runtime_for_true_on_state(capsys):
     assert "advisory_runtime: down" in out
     assert "replay_advisory: on" in out
     assert "profile_drift: yes (2 overrides)" in out
+
+
+def test_cmd_advisory_quality_calls_uplift(monkeypatch, capsys):
+    calls = {}
+
+    def _fake_quality(profile="enhanced", preferred_provider="auto", ai_timeout_s=None, source=""):
+        calls["profile"] = profile
+        calls["preferred_provider"] = preferred_provider
+        calls["ai_timeout_s"] = ai_timeout_s
+        calls["source"] = source
+        return {
+            "profile": profile,
+            "preferred_provider": preferred_provider,
+            "ai_timeout_s": ai_timeout_s or 6.0,
+            "runtime": {"synthesizer": {"tier_label": "AI-Enhanced", "ai_available": True}},
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(spark_cli, "apply_advisory_quality_uplift", _fake_quality)
+
+    spark_cli.cmd_advisory(
+        _args(
+            advisory_cmd="quality",
+            profile="max",
+            provider="openai",
+            ai_timeout_s=7.5,
+            source="spark_cli_quality",
+        )
+    )
+    out = capsys.readouterr().out
+
+    assert calls["profile"] == "max"
+    assert calls["preferred_provider"] == "openai"
+    assert calls["ai_timeout_s"] == 7.5
+    assert calls["source"] == "spark_cli_quality"
+    assert "Advisory Quality Uplift" in out
+    assert "synth_tier: AI-Enhanced" in out

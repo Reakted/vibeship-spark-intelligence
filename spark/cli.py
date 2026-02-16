@@ -92,6 +92,7 @@ from lib.eidos.store import purge_telemetry_distillations
 from lib.advisor import record_advice_feedback
 from lib.advisory_preferences import (
     apply_preferences as apply_advisory_preferences,
+    apply_quality_uplift as apply_advisory_quality_uplift,
     get_current_preferences as get_current_advisory_preferences,
     setup_questions as get_advisory_setup_questions,
 )
@@ -1945,6 +1946,26 @@ def cmd_advisory(args):
         return
 
     source = str(getattr(args, "source", "") or f"spark_cli_{advisory_cmd}")
+    if advisory_cmd == "quality":
+        result = apply_advisory_quality_uplift(
+            profile=getattr(args, "profile", "enhanced"),
+            preferred_provider=getattr(args, "provider", "auto"),
+            ai_timeout_s=getattr(args, "ai_timeout_s", None),
+            source=source,
+        )
+        runtime = result.get("runtime") if isinstance(result.get("runtime"), dict) else {}
+        synth = runtime.get("synthesizer") if isinstance(runtime.get("synthesizer"), dict) else {}
+        print("[SPARK] Advisory Quality Uplift")
+        print(f"  profile: {result.get('profile')}")
+        print(f"  preferred_provider: {result.get('preferred_provider')}")
+        print(f"  ai_timeout_s: {result.get('ai_timeout_s')}")
+        print(f"  synth_tier: {synth.get('tier_label', 'unknown')}")
+        print(f"  ai_available: {'yes' if synth.get('ai_available') else 'no'}")
+        warnings = result.get("warnings") or []
+        if warnings:
+            print(f"  warnings: {', '.join(str(w) for w in warnings)}")
+        return
+
     if advisory_cmd == "setup":
         current = get_current_advisory_preferences()
         setup = get_advisory_setup_questions(current=current)
@@ -1998,7 +2019,7 @@ def cmd_advisory(args):
         _print_advisory_preferences(_with_advisory_runtime(result))
         return
 
-    print("Use: spark advisory [setup|show|set|on|off]")
+    print("Use: spark advisory [setup|show|set|on|off|quality]")
 
 
 def cmd_memory(args):
@@ -2520,6 +2541,7 @@ Examples:
   spark capture --accept <id>
   spark advisory
   spark advisory on
+  spark advisory quality --profile enhanced
 """
     )
     
@@ -2676,6 +2698,22 @@ Examples:
         help="Optional style to persist while disabled",
     )
     advisory_off.add_argument("--source", default="spark_cli_off", help="Source label for metadata")
+
+    advisory_quality = advisory_sub.add_parser("quality", help="Configure AI synthesis quality profile")
+    advisory_quality.add_argument(
+        "--profile",
+        choices=["balanced", "enhanced", "max"],
+        default="enhanced",
+        help="Quality profile (default: enhanced)",
+    )
+    advisory_quality.add_argument(
+        "--provider",
+        choices=["auto", "ollama", "openai", "minimax", "anthropic", "gemini"],
+        default="auto",
+        help="Preferred synth provider (default: auto)",
+    )
+    advisory_quality.add_argument("--ai-timeout-s", type=float, help="Override synth AI timeout seconds")
+    advisory_quality.add_argument("--source", default="spark_cli_quality", help="Source label for metadata")
 
     # outcome
     outcome_parser = subparsers.add_parser("outcome", help="Record explicit outcome check-in")

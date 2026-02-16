@@ -88,6 +88,27 @@ Default-on behavior:
   - `guidance_style=balanced`
 - This ensures the baseline advisory mode is enabled by default.
 
+### 6) Advisory quality uplift command
+
+Files: `spark/cli.py`, `lib/advisory_preferences.py`
+
+- New command:
+  - `spark advisory quality --profile enhanced`
+- Optional knobs:
+  - `--provider auto|ollama|openai|minimax|anthropic|gemini`
+  - `--ai-timeout-s <seconds>`
+
+What it does:
+
+- Persists quality/synth settings in `~/.spark/tuneables.json`:
+  - `advisory_engine.enabled = true`
+  - `advisory_engine.force_programmatic_synth` (profile-based)
+  - `synthesizer.mode` (profile-based)
+  - `synthesizer.preferred_provider`
+  - `synthesizer.ai_timeout_s`
+- Hot-applies settings at runtime (engine + synthesizer).
+- Reports whether AI providers are actually available, and warns if none are available for AI modes.
+
 ## Why this design
 
 - Two questions are enough for most users:

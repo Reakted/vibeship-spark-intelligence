@@ -4,6 +4,8 @@ import json
 
 import lib.advisor as advisor_mod
 import lib.advisory_preferences as prefs
+import lib.advisory_engine as advisory_engine_mod
+import lib.advisory_synthesizer as advisory_synth_mod
 
 
 def test_setup_questions_has_two_questions_and_normalized_current():
@@ -116,3 +118,50 @@ def test_get_current_preferences_no_drift_after_apply(monkeypatch, tmp_path):
     assert out["guidance_style"] == "balanced"
     assert out["drift"]["has_drift"] is False
     assert out["drift"]["count"] == 0
+
+
+def test_apply_quality_uplift_persists_and_hot_applies(monkeypatch, tmp_path):
+    tuneables = tmp_path / "tuneables.json"
+    calls = {"engine": None, "synth": None}
+
+    def _fake_apply_engine(cfg):
+        calls["engine"] = dict(cfg)
+        return {"applied": ["enabled", "force_programmatic_synth"], "warnings": []}
+
+    def _fake_get_engine_status():
+        return {"enabled": True}
+
+    def _fake_apply_synth(cfg):
+        calls["synth"] = dict(cfg)
+        return {"applied": ["mode", "preferred_provider"], "warnings": []}
+
+    def _fake_get_synth_status():
+        return {"tier_label": "AI-Enhanced", "ai_available": True}
+
+    monkeypatch.setattr(advisory_engine_mod, "apply_engine_config", _fake_apply_engine)
+    monkeypatch.setattr(advisory_engine_mod, "get_engine_status", _fake_get_engine_status)
+    monkeypatch.setattr(advisory_synth_mod, "apply_synth_config", _fake_apply_synth)
+    monkeypatch.setattr(advisory_synth_mod, "get_synth_status", _fake_get_synth_status)
+
+    out = prefs.apply_quality_uplift(
+        profile="enhanced",
+        preferred_provider="ollama",
+        ai_timeout_s=5.5,
+        path=tuneables,
+        source="test",
+    )
+    data = json.loads(tuneables.read_text(encoding="utf-8"))
+
+    assert out["ok"] is True
+    assert out["profile"] == "enhanced"
+    assert out["preferred_provider"] == "ollama"
+    assert out["warnings"] == []
+    assert calls["engine"]["enabled"] is True
+    assert calls["engine"]["force_programmatic_synth"] is False
+    assert calls["synth"]["mode"] == "auto"
+    assert calls["synth"]["preferred_provider"] == "ollama"
+    assert calls["synth"]["ai_timeout_s"] == 5.5
+    assert data["advisory_engine"]["force_programmatic_synth"] is False
+    assert data["synthesizer"]["mode"] == "auto"
+    assert data["synthesizer"]["preferred_provider"] == "ollama"
+    assert data["advisory_quality"]["profile"] == "enhanced"
