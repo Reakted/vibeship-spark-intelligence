@@ -1925,6 +1925,9 @@ def _get_advisory_runtime_state() -> dict:
         "emitter_enabled": bool(emitter.get("enabled")),
         "synth_tier": str(synth.get("tier_label") or ""),
         "synth_ai_available": bool(synth.get("ai_available")),
+        "preferred_provider": str(synth.get("preferred_provider") or "auto"),
+        "providers": synth.get("providers") if isinstance(synth.get("providers"), dict) else {},
+        "minimax_model": str(synth.get("minimax_model") or ""),
     }
 
 
@@ -1932,6 +1935,45 @@ def _with_advisory_runtime(preferences: dict) -> dict:
     out = dict(preferences or {})
     out["runtime"] = _get_advisory_runtime_state()
     return out
+
+
+_ADVISORY_PROVIDER_META = {
+    "auto": {
+        "service": "Auto",
+        "key_envs": [],
+        "note": "Tries available providers in order.",
+    },
+    "ollama": {
+        "service": "Ollama",
+        "key_envs": [],
+        "note": "Local model service; no API key needed.",
+    },
+    "minimax": {
+        "service": "MiniMax",
+        "key_envs": ["MINIMAX_API_KEY", "SPARK_MINIMAX_API_KEY"],
+        "note": "Recommended model: MiniMax-M2.5",
+    },
+    "openai": {
+        "service": "OpenAI",
+        "key_envs": ["OPENAI_API_KEY", "CODEX_API_KEY"],
+        "note": "Use a valid OpenAI-compatible key.",
+    },
+    "anthropic": {
+        "service": "Anthropic",
+        "key_envs": ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"],
+        "note": "Use a valid Anthropic key.",
+    },
+    "gemini": {
+        "service": "Google Gemini",
+        "key_envs": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "note": "Use a valid Google AI key.",
+    },
+}
+
+
+def _advisory_provider_meta(provider: str) -> dict:
+    key = str(provider or "auto").strip().lower()
+    return _ADVISORY_PROVIDER_META.get(key, _ADVISORY_PROVIDER_META["auto"])
 
 
 def _advisory_doctor_snapshot() -> dict:
@@ -1951,8 +1993,12 @@ def _advisory_doctor_snapshot() -> dict:
         recommendations.append("spark advisory on")
     if drift.get("has_drift"):
         recommendations.append("spark advisory repair")
+    preferred = str(runtime.get("preferred_provider") or "auto")
     if not bool(runtime.get("synth_ai_available")):
-        recommendations.append("spark advisory quality --profile enhanced --provider ollama")
+        if preferred == "minimax":
+            recommendations.append("Set MINIMAX_API_KEY (or SPARK_MINIMAX_API_KEY), then rerun doctor")
+        else:
+            recommendations.append("spark advisory quality --profile enhanced --provider ollama")
     if not recommendations:
         recommendations.append("No action needed")
 
@@ -1965,6 +2011,8 @@ def _advisory_doctor_snapshot() -> dict:
         "guidance_style": prefs.get("guidance_style"),
         "drift": drift,
         "runtime": runtime,
+        "preferred_provider": preferred,
+        "provider_meta": _advisory_provider_meta(preferred),
         "recommendations": recommendations,
         "preferences": prefs,
     }
@@ -1993,6 +2041,14 @@ def cmd_advisory(args):
         runtime = snapshot.get("runtime") if isinstance(snapshot.get("runtime"), dict) else {}
         print(f"  synth_tier: {runtime.get('synth_tier', 'unknown')}")
         print(f"  synth_ai_available: {'yes' if runtime.get('synth_ai_available') else 'no'}")
+        provider = str(snapshot.get("preferred_provider") or "auto")
+        meta = snapshot.get("provider_meta") if isinstance(snapshot.get("provider_meta"), dict) else {}
+        print(f"  preferred_provider: {provider} ({meta.get('service', 'Unknown')})")
+        key_envs = meta.get("key_envs") if isinstance(meta.get("key_envs"), list) else []
+        if key_envs:
+            print(f"  api_key_env: {' | '.join(key_envs)}")
+        if provider == "minimax" and runtime.get("minimax_model"):
+            print(f"  minimax_model: {runtime.get('minimax_model')}")
         recs = snapshot.get("recommendations") or []
         print("  recommended_next:")
         for rec in recs:
@@ -2019,20 +2075,28 @@ def cmd_advisory(args):
         return
 
     if advisory_cmd == "quality":
+        provider = getattr(args, "provider", "auto")
         result = apply_advisory_quality_uplift(
             profile=getattr(args, "profile", "enhanced"),
-            preferred_provider=getattr(args, "provider", "auto"),
+            preferred_provider=provider,
+            minimax_model=getattr(args, "minimax_model", None),
             ai_timeout_s=getattr(args, "ai_timeout_s", None),
             source=source,
         )
         runtime = result.get("runtime") if isinstance(result.get("runtime"), dict) else {}
         synth = runtime.get("synthesizer") if isinstance(runtime.get("synthesizer"), dict) else {}
+        meta = _advisory_provider_meta(str(provider))
         print("[SPARK] Advisory Quality Uplift")
         print(f"  profile: {result.get('profile')}")
-        print(f"  preferred_provider: {result.get('preferred_provider')}")
+        print(f"  preferred_provider: {result.get('preferred_provider')} ({meta.get('service')})")
         print(f"  ai_timeout_s: {result.get('ai_timeout_s')}")
+        if result.get("minimax_model"):
+            print(f"  minimax_model: {result.get('minimax_model')}")
         print(f"  synth_tier: {synth.get('tier_label', 'unknown')}")
         print(f"  ai_available: {'yes' if synth.get('ai_available') else 'no'}")
+        key_envs = meta.get("key_envs") if isinstance(meta.get("key_envs"), list) else []
+        if key_envs:
+            print(f"  api_key_env: {' | '.join(key_envs)}")
         warnings = result.get("warnings") or []
         if warnings:
             print(f"  warnings: {', '.join(str(w) for w in warnings)}")
@@ -2791,6 +2855,11 @@ Examples:
         choices=["auto", "ollama", "openai", "minimax", "anthropic", "gemini"],
         default="auto",
         help="Preferred synth provider (default: auto)",
+    )
+    advisory_quality.add_argument(
+        "--minimax-model",
+        default="MiniMax-M2.5",
+        help="MiniMax model to use when provider=minimax (default: MiniMax-M2.5)",
     )
     advisory_quality.add_argument("--ai-timeout-s", type=float, help="Override synth AI timeout seconds")
     advisory_quality.add_argument("--source", default="spark_cli_quality", help="Source label for metadata")

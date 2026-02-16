@@ -189,3 +189,37 @@ def test_repair_profile_drift_clears_overrides(monkeypatch, tmp_path):
     assert out["ok"] is True
     assert out["before_drift"]["has_drift"] is True
     assert out["after_drift"]["has_drift"] is False
+
+
+def test_apply_quality_uplift_sets_minimax_model(monkeypatch, tmp_path):
+    tuneables = tmp_path / "tuneables.json"
+    calls = {"synth": None}
+
+    monkeypatch.setattr(advisory_engine_mod, "apply_engine_config", lambda cfg: {"applied": [], "warnings": []})
+    monkeypatch.setattr(advisory_engine_mod, "get_engine_status", lambda: {"enabled": True})
+    monkeypatch.setattr(
+        advisory_synth_mod,
+        "apply_synth_config",
+        lambda cfg: calls.update({"synth": dict(cfg)}) or {"applied": [], "warnings": []},
+    )
+    monkeypatch.setattr(
+        advisory_synth_mod,
+        "get_synth_status",
+        lambda: {"tier_label": "AI-Enhanced", "ai_available": True, "minimax_model": "MiniMax-M2.5"},
+    )
+
+    out = prefs.apply_quality_uplift(
+        profile="enhanced",
+        preferred_provider="minimax",
+        minimax_model="MiniMax-M2.5",
+        path=tuneables,
+        source="test",
+    )
+    data = json.loads(tuneables.read_text(encoding="utf-8"))
+
+    assert out["ok"] is True
+    assert out["preferred_provider"] == "minimax"
+    assert out["minimax_model"] == "MiniMax-M2.5"
+    assert calls["synth"]["preferred_provider"] == "minimax"
+    assert calls["synth"]["minimax_model"] == "MiniMax-M2.5"
+    assert data["synthesizer"]["minimax_model"] == "MiniMax-M2.5"

@@ -337,6 +337,7 @@ def apply_quality_uplift(
     *,
     profile: Any = "enhanced",
     preferred_provider: Any = "auto",
+    minimax_model: Any = None,
     ai_timeout_s: Any = None,
     path: Path = TUNEABLES_PATH,
     source: str = "manual",
@@ -372,6 +373,10 @@ def apply_quality_uplift(
     synthesizer_cfg["mode"] = str(base["synth_mode"])
     synthesizer_cfg["preferred_provider"] = provider
     synthesizer_cfg["ai_timeout_s"] = timeout_value
+    if provider == "minimax":
+        resolved_minimax_model = str(minimax_model or synthesizer_cfg.get("minimax_model") or "MiniMax-M2.5").strip()
+        if resolved_minimax_model:
+            synthesizer_cfg["minimax_model"] = resolved_minimax_model
 
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     data["updated_at"] = now_iso
@@ -379,6 +384,7 @@ def apply_quality_uplift(
         "profile": profile_key,
         "preferred_provider": provider,
         "ai_timeout_s": timeout_value,
+        "minimax_model": synthesizer_cfg.get("minimax_model") if provider == "minimax" else None,
         "source": str(source or "manual"),
         "updated_at": now_iso,
     }
@@ -414,6 +420,7 @@ def apply_quality_uplift(
         "profile": profile_key,
         "preferred_provider": provider,
         "ai_timeout_s": timeout_value,
+        "minimax_model": synthesizer_cfg.get("minimax_model") if provider == "minimax" else None,
         "warnings": warnings,
         "runtime": runtime,
         "path": str(path),

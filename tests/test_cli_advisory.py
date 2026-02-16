@@ -15,6 +15,7 @@ def _args(**kwargs):
         "guidance_style": None,
         "profile": "enhanced",
         "provider": "auto",
+        "minimax_model": "MiniMax-M2.5",
         "ai_timeout_s": None,
     }
     defaults.update(kwargs)
@@ -169,14 +170,22 @@ def test_print_advisory_preferences_uses_runtime_for_true_on_state(capsys):
 def test_cmd_advisory_quality_calls_uplift(monkeypatch, capsys):
     calls = {}
 
-    def _fake_quality(profile="enhanced", preferred_provider="auto", ai_timeout_s=None, source=""):
+    def _fake_quality(
+        profile="enhanced",
+        preferred_provider="auto",
+        minimax_model=None,
+        ai_timeout_s=None,
+        source="",
+    ):
         calls["profile"] = profile
         calls["preferred_provider"] = preferred_provider
+        calls["minimax_model"] = minimax_model
         calls["ai_timeout_s"] = ai_timeout_s
         calls["source"] = source
         return {
             "profile": profile,
             "preferred_provider": preferred_provider,
+            "minimax_model": minimax_model,
             "ai_timeout_s": ai_timeout_s or 6.0,
             "runtime": {"synthesizer": {"tier_label": "AI-Enhanced", "ai_available": True}},
             "warnings": [],
@@ -189,6 +198,7 @@ def test_cmd_advisory_quality_calls_uplift(monkeypatch, capsys):
             advisory_cmd="quality",
             profile="max",
             provider="openai",
+            minimax_model="MiniMax-M2.5",
             ai_timeout_s=7.5,
             source="spark_cli_quality",
         )
@@ -197,6 +207,7 @@ def test_cmd_advisory_quality_calls_uplift(monkeypatch, capsys):
 
     assert calls["profile"] == "max"
     assert calls["preferred_provider"] == "openai"
+    assert calls["minimax_model"] == "MiniMax-M2.5"
     assert calls["ai_timeout_s"] == 7.5
     assert calls["source"] == "spark_cli_quality"
     assert "Advisory Quality Uplift" in out

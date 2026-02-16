@@ -33,23 +33,55 @@ except Exception:
 # ============= Configuration =============
 
 SYNTH_CONFIG_FILE = Path.home() / ".spark" / "tuneables.json"
+_REPO_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+
+def _load_repo_env_value(*keys: str) -> Optional[str]:
+    """Read KEY from process env first, then fallback to repo-level .env."""
+    names = [str(k or "").strip() for k in keys if str(k or "").strip()]
+    if not names:
+        return None
+
+    for name in names:
+        val = os.getenv(name)
+        if val:
+            return str(val)
+
+    try:
+        if not _REPO_ENV_FILE.exists():
+            return None
+        with _REPO_ENV_FILE.open("r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if key not in names:
+                    continue
+                value = value.strip().strip('"').strip("'")
+                if value:
+                    return value
+    except Exception:
+        return None
+    return None
 
 # LLM provider config (reuses existing Pulse patterns)
 OLLAMA_API = os.getenv("SPARK_OLLAMA_API", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("SPARK_OLLAMA_MODEL", "phi4-mini")  # Default quality-first local model; override via SPARK_OLLAMA_MODEL
 
 # Cloud fallback (only used if local unavailable and keys present)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("CODEX_API_KEY")
+OPENAI_API_KEY = _load_repo_env_value("OPENAI_API_KEY", "CODEX_API_KEY")
 OPENAI_MODEL = os.getenv("SPARK_OPENAI_MODEL", "gpt-4o-mini")  # Cost-efficient
 
-MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY") or os.getenv("SPARK_MINIMAX_API_KEY")
+MINIMAX_API_KEY = _load_repo_env_value("MINIMAX_API_KEY", "SPARK_MINIMAX_API_KEY")
 MINIMAX_BASE_URL = os.getenv("SPARK_MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
 MINIMAX_MODEL = os.getenv("SPARK_MINIMAX_MODEL", "MiniMax-M2.5")
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
+ANTHROPIC_API_KEY = _load_repo_env_value("ANTHROPIC_API_KEY", "CLAUDE_API_KEY")
 ANTHROPIC_MODEL = os.getenv("SPARK_ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+GEMINI_API_KEY = _load_repo_env_value("GEMINI_API_KEY", "GOOGLE_API_KEY")
 GEMINI_MODEL = os.getenv("SPARK_GEMINI_MODEL", "gemini-2.0-flash")
 
 # Synthesis mode: "auto" (try AI → fall back to programmatic), "ai_only", "programmatic"
@@ -95,7 +127,7 @@ PREFERRED_PROVIDER = _sanitize_provider(PREFERRED_PROVIDER_ENV)
 
 def _apply_synth_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     """Apply synthesizer config dict to module-level runtime settings."""
-    global SYNTH_MODE, AI_TIMEOUT_S, CACHE_TTL_S, MAX_CACHE_ENTRIES, PREFERRED_PROVIDER
+    global SYNTH_MODE, AI_TIMEOUT_S, CACHE_TTL_S, MAX_CACHE_ENTRIES, PREFERRED_PROVIDER, MINIMAX_MODEL
     applied: List[str] = []
     warnings: List[str] = []
     if not isinstance(cfg, dict):
@@ -132,6 +164,14 @@ def _apply_synth_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     if "preferred_provider" in cfg:
         PREFERRED_PROVIDER = _sanitize_provider(cfg.get("preferred_provider"))
         applied.append("preferred_provider")
+
+    if "minimax_model" in cfg:
+        model = str(cfg.get("minimax_model") or "").strip()
+        if model:
+            MINIMAX_MODEL = model
+            applied.append("minimax_model")
+        else:
+            warnings.append("invalid_minimax_model")
 
     env_provider = _sanitize_provider(PREFERRED_PROVIDER_ENV)
     if env_provider is not None:
@@ -662,5 +702,5 @@ def get_synth_status() -> Dict[str, Any]:
         "tier_label": "AI-Enhanced" if any_ai else "Programmatic",
         "cache_size": len(_synth_cache),
         "ollama_model": OLLAMA_MODEL if ai.get("ollama") else None,
-        "minimax_model": MINIMAX_MODEL if ai.get("minimax") else None,
+        "minimax_model": MINIMAX_MODEL,
     }

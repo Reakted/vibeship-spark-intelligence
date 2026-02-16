@@ -96,6 +96,7 @@ Files: `spark/cli.py`, `lib/advisory_preferences.py`
   - `spark advisory quality --profile enhanced`
 - Optional knobs:
   - `--provider auto|ollama|openai|minimax|anthropic|gemini`
+  - `--minimax-model MiniMax-M2.5`
   - `--ai-timeout-s <seconds>`
 
 What it does:
@@ -108,6 +109,8 @@ What it does:
   - `synthesizer.ai_timeout_s`
 - Hot-applies settings at runtime (engine + synthesizer).
 - Reports whether AI providers are actually available, and warns if none are available for AI modes.
+- Prints provider/service and expected API-key env vars for cloud providers.
+- Synth provider keys can now be read from either process env or repo `.env`.
 
 ### 7) Advisory doctor + repair commands
 
