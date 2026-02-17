@@ -100,25 +100,28 @@ Example:
 
 ## Inspect / Apply / Reset
 
-Utility script added:
+CLI hook added:
 
-- `scripts/personality_evolution.py`
+- `spark personality-evolution inspect|apply|reset`
+- Utility mirror: `scripts/personality_evolution.py`
 
 ### Inspect
 ```bash
+python -m spark.cli personality-evolution inspect
+# or
 python scripts/personality_evolution.py inspect
 ```
 
 ### Apply signals (feature must be enabled)
 ```bash
 set SPARK_PERSONALITY_EVOLUTION_V1=1
-python scripts/personality_evolution.py apply --signals "{\"user_guided\": true, \"trait_deltas\": {\"warmth\": 1.0}}"
+python -m spark.cli personality-evolution apply --signals "{\"user_guided\": true, \"trait_deltas\": {\"warmth\": 1.0}}"
 ```
 
 ### Reset
 ```bash
 set SPARK_PERSONALITY_EVOLUTION_V1=1
-python scripts/personality_evolution.py reset --yes
+python -m spark.cli personality-evolution reset --yes
 ```
 
 ### Optional observer mode

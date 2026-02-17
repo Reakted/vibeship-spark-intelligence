@@ -23,6 +23,7 @@ Usage:
     python -m spark.cli eval       # Evaluate predictions vs outcomes
     python -m spark.cli validate-ingest  # Validate recent queue events
     python -m spark.cli project    # Project questioning + capture
+    python -m spark.cli personality-evolution  # Inspect/apply/reset personality evolution V1
 """
 
 import sys
@@ -106,6 +107,7 @@ from lib.memory_capture import (
 )
 from lib.capture_cli import format_pending
 from lib.memory_migrate import migrate as migrate_memory
+from lib.personality_evolver import load_personality_evolver
 
 # Chips imports (lazy to avoid startup cost if not used)
 def _get_chips_registry():
@@ -1276,6 +1278,46 @@ def cmd_voice(args):
     print(f"   Opinions: {stats['opinions_formed']} ({stats['strong_opinions']} strong)")
     print(f"   Growth moments: {stats['growth_moments']}")
     print()
+
+
+def cmd_personality_evolution(args):
+    """Inspect/apply/reset bounded user-guided personality evolution state."""
+    evolver = load_personality_evolver(
+        state_path=(Path(args.state_path).expanduser() if getattr(args, "state_path", None) else None)
+    )
+
+    if args.evolution_cmd in (None, "inspect"):
+        print(
+            json.dumps(
+                {
+                    "enabled": evolver.enabled,
+                    "observer_mode": evolver.observer_mode,
+                    "state_path": str(evolver.state_path),
+                    "state": evolver.state,
+                    "style_profile": evolver.emit_style_profile(),
+                },
+                indent=2,
+            )
+        )
+        return
+
+    if args.evolution_cmd == "apply":
+        if args.signals:
+            signals = json.loads(args.signals)
+        elif args.signals_file:
+            signals = json.loads(Path(args.signals_file).expanduser().read_text(encoding="utf-8"))
+        else:
+            raise SystemExit("Missing --signals or --signals-file")
+        result = evolver.ingest_signals(signals, persist=True)
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.evolution_cmd == "reset":
+        if not args.yes:
+            raise SystemExit("Refusing reset without --yes")
+        state = evolver.reset_state(persist=True)
+        print(json.dumps({"reset": True, "state": state}, indent=2))
+        return
 
 
 def cmd_bridge(args):
@@ -3026,6 +3068,20 @@ Examples:
     voice_parser.add_argument("--growth", "-g", action="store_true", help="Show growth moments")
     voice_parser.add_argument("--limit", "-n", type=int, default=5, help="Number to show")
     
+    # personality-evolution - safe bounded style adaptation controls
+    personality_parser = subparsers.add_parser("personality-evolution", help="Inspect/apply/reset personality evolution V1")
+    personality_parser.add_argument("--state-path", help="Optional custom state file path")
+    personality_sub = personality_parser.add_subparsers(dest="evolution_cmd")
+
+    personality_sub.add_parser("inspect", help="Show current evolution state")
+
+    personality_apply = personality_sub.add_parser("apply", help="Apply explicit user-guided signals")
+    personality_apply.add_argument("--signals", help="Signals payload as JSON")
+    personality_apply.add_argument("--signals-file", help="Path to signals JSON file")
+
+    personality_reset = personality_sub.add_parser("reset", help="Reset evolution state to defaults")
+    personality_reset.add_argument("--yes", action="store_true", help="Confirm reset")
+
     # timeline
     timeline_parser = subparsers.add_parser("timeline", help="Show growth timeline")
     timeline_parser.add_argument("--limit", "-n", type=int, default=10, help="Number of events")
@@ -3177,6 +3233,7 @@ Examples:
         "contradictions": cmd_contradictions,
         "eidos": cmd_eidos,
         "voice": cmd_voice,
+        "personality-evolution": cmd_personality_evolution,
         "timeline": cmd_timeline,
         "bridge": cmd_bridge,
         "memory": cmd_memory,
