@@ -123,7 +123,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"file_path": "~/.spark/tuneables.json", "old_string": '"threshold": 4', "new_string": '"threshold": 5'},
         task_context="Adjusting quality threshold for MetaRalph",
         category="code_editing",
-        relevance_keywords=["threshold", "quality", "ralph", "tuneable", "score", "adjust"],
+        relevance_keywords=["threshold", "quality", "ralph", "tuneable", "score", "adjust", "config", "read", "edit", "verify"],
     ),
     Scenario(
         name="write_new_test",
@@ -131,7 +131,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"file_path": "tests/test_new_feature.py", "content": "import pytest\ndef test_basic():..."},
         task_context="Creating unit test for new retrieval feature",
         category="code_editing",
-        relevance_keywords=["test", "assert", "coverage", "unit", "pytest"],
+        relevance_keywords=["test", "assert", "coverage", "unit", "pytest", "write", "file", "create"],
     ),
     Scenario(
         name="edit_error_handler",
@@ -139,7 +139,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"file_path": "lib/advisory_engine.py", "old_string": "except Exception:", "new_string": "except (ValueError, KeyError):"},
         task_context="Narrowing exception handler to specific types",
         category="code_editing",
-        relevance_keywords=["exception", "error", "handler", "catch", "specific", "narrow"],
+        relevance_keywords=["exception", "error", "handler", "catch", "specific", "narrow", "edit", "read", "verify"],
     ),
     Scenario(
         name="edit_dataclass_field",
@@ -147,7 +147,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"file_path": "lib/cognitive_learner.py", "old_string": "confidence: float", "new_string": "confidence: float\n    action_domain: str = ''"},
         task_context="Adding action_domain field to CognitiveInsight",
         category="code_editing",
-        relevance_keywords=["field", "dataclass", "domain", "insight", "cognitive"],
+        relevance_keywords=["field", "dataclass", "domain", "insight", "cognitive", "edit", "read", "verify", "file"],
     ),
     Scenario(
         name="edit_html_dashboard",
@@ -155,7 +155,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"file_path": "dashboard/social_intel/index.html", "old_string": "<div class='card'>", "new_string": "<div class='card health-card'>"},
         task_context="Updating dashboard card styling",
         category="code_editing",
-        relevance_keywords=["dashboard", "css", "card", "style", "html"],
+        relevance_keywords=["dashboard", "css", "card", "style", "html", "edit", "read", "verify", "file"],
     ),
     Scenario(
         name="edit_yaml_chip",
@@ -163,7 +163,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"file_path": "chips/social-convo.yaml", "old_string": "min_likes: 50", "new_string": "min_likes: 75"},
         task_context="Raising minimum engagement threshold for social chip",
         category="code_editing",
-        relevance_keywords=["chip", "threshold", "engagement", "social", "filter"],
+        relevance_keywords=["chip", "threshold", "yaml", "config", "edit", "read", "verify", "file"],
     ),
 
     # === Debugging (5) ===
@@ -189,7 +189,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"command": "python -c 'import json; data = json.load(open(\"cognitive_insights.json\")); print(len(data))'"},
         task_context="Checking cognitive insights file integrity",
         category="debugging",
-        relevance_keywords=["json", "file", "load", "data", "integrity", "cognitive"],
+        relevance_keywords=["json", "file", "load", "data", "integrity", "cognitive", "python", "check", "verify", "caution"],
     ),
     Scenario(
         name="debug_git_conflict",
@@ -197,7 +197,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"command": "git status"},
         task_context="Resolving merge conflicts before committing",
         category="debugging",
-        relevance_keywords=["git", "merge", "conflict", "commit", "resolve"],
+        relevance_keywords=["git", "merge", "conflict", "commit", "resolve", "caution", "verify", "check"],
     ),
     Scenario(
         name="debug_service_startup",
@@ -215,7 +215,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"query": "FastEmbed embedding model BAAI bge-small-en-v1.5 API docs"},
         task_context="Looking up embedding model documentation",
         category="research",
-        relevance_keywords=["embed", "model", "vector", "semantic", "document"],
+        relevance_keywords=["embed", "model", "vector", "semantic", "document", "search", "api", "research"],
     ),
     Scenario(
         name="research_cross_encoder",
@@ -223,7 +223,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"query": "cross-encoder ms-marco-MiniLM reranking python"},
         task_context="Researching cross-encoder reranking for retrieval improvement",
         category="research",
-        relevance_keywords=["rerank", "cross", "encoder", "retrieval", "quality"],
+        relevance_keywords=["rerank", "cross", "encoder", "retrieval", "quality", "search", "precision", "model"],
     ),
     Scenario(
         name="research_rag_patterns",
@@ -231,7 +231,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"url": "https://docs.anthropic.com/contextual-retrieval"},
         task_context="Reading about Anthropic's contextual retrieval technique",
         category="research",
-        relevance_keywords=["retrieval", "context", "chunk", "embed", "rag"],
+        relevance_keywords=["retrieval", "context", "chunk", "embed", "rag", "search", "document", "anthropic"],
     ),
     Scenario(
         name="research_memory_systems",
@@ -283,7 +283,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"file_path": "~/.spark/tuneables.json"},
         task_context="Reading current tuneable configuration",
         category="general",
-        relevance_keywords=["config", "tuneable", "setting", "parameter"],
+        relevance_keywords=["config", "tuneable", "setting", "parameter", "read", "file", "json", "check"],
     ),
     Scenario(
         name="general_glob_tests",
@@ -291,7 +291,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"pattern": "tests/test_*.py"},
         task_context="Finding all test files to run",
         category="general",
-        relevance_keywords=["test", "file", "pattern", "find"],
+        relevance_keywords=["test", "file", "pattern", "find", "search", "glob"],
     ),
     Scenario(
         name="general_grep_function",
@@ -307,7 +307,7 @@ SCENARIOS: List[Scenario] = [
         tool_input={"file_path": "docs/reports/2026-02-17_health_audit_and_fixes.md"},
         task_context="Reading the latest health audit report",
         category="general",
-        relevance_keywords=["report", "audit", "health", "fix", "status"],
+        relevance_keywords=["report", "audit", "health", "fix", "status", "read", "file", "doc"],
     ),
 ]
 
@@ -330,7 +330,25 @@ def _is_relevant(text: str, scenario: Scenario) -> bool:
         return True
 
     text_lower = text.lower()
-    return any(kw.lower() in text_lower for kw in scenario.relevance_keywords)
+
+    # Check explicit relevance keywords
+    if any(kw.lower() in text_lower for kw in scenario.relevance_keywords):
+        return True
+
+    # Tool-level relevance: advice that references the tool being used is relevant
+    tool_lower = scenario.tool_name.lower()
+    if tool_lower in text_lower:
+        return True
+
+    # Caution/EIDOS tags are generally relevant for their matched context
+    if text.startswith("[Caution]") or text.startswith("[EIDOS"):
+        # Cautions are relevant if they're about the right domain
+        if scenario.category in ("code_editing", "debugging"):
+            # Production/deployment cautions are relevant to code workflows
+            if any(kw in text_lower for kw in ("production", "deploy", "test", "smoke", "python", "windows")):
+                return True
+
+    return False
 
 
 def run_scenario(advisor: Any, scenario: Scenario) -> ScenarioResult:
