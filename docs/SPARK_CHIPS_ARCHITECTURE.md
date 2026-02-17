@@ -4,6 +4,17 @@
 
 ---
 
+## Implementation Status (2026-02-17)
+
+This document mixes architecture vision with implementation details.
+
+- `implemented` in this repo:
+  - `lib/chips/{loader,router,runtime,schema,policy,registry,runner,store,scoring,evolution}.py`
+  - `lib/chip_merger.py`
+- `planned/vision`:
+  - open ecosystem and registry distribution surfaces described here
+  - some reference examples and companion docs may live in archived docs or external repos
+
 ## Executive Summary
 
 Spark Chips transform Spark from a monolithic learning system into an **open platform for domain-specific intelligence**. Instead of Spark knowing only how to learn from code and tools, chips teach Spark how to learn from *anything* — marketing campaigns, sales deals, factory operations, team dynamics, financial decisions, and beyond.

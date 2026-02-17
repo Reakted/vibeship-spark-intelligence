@@ -3,6 +3,24 @@
 Date: 2026-02-06  
 Status: Comprehensive design for implementation
 
+## Implementation Status (2026-02-17)
+
+Implemented in this repo:
+
+- `lib/advisory_packet_store.py`
+- `lib/advisory_prefetch_planner.py`
+- `lib/advisory_prefetch_worker.py`
+- `lib/advisory_intent_taxonomy.py`
+
+Planned or not yet present in this repo:
+
+- `lib/advisory_conflict_resolver.py`
+- `lib/advisory_orchestration_graph.py`
+- `lib/advisory_predictor.py`
+- `lib/advisory_program_goals.py`
+- `lib/advisory_team_context.py`
+- `scripts/advisory_packet_report.py`
+
 ## 1) Executive Summary
 
 This system is worth building. The architecture direction is correct, but the original version under-specified the two capabilities that determine whether it feels truly "anticipatory":

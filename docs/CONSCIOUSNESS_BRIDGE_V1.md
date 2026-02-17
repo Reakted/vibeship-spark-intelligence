@@ -5,6 +5,18 @@ Define how **vibeship-spark-intelligence** ingests emotional context from **vibe
 
 ---
 
+## 0) Contract precedence and fallback order
+
+This is the canonical runtime order for response-shaping strategy:
+
+1. **Primary:** Bridge file contract (`bridge.v1`) read via `lib.consciousness_bridge`.
+2. **Secondary fallback:** Local `SparkEmotions().decision_hooks()` from `lib.spark_emotions`.
+3. **Final fallback:** neutral defaults in `advisory_synthesizer` (`balanced`, `medium`, `grounded_warm`, no forced clarifier).
+
+Pulse companion HTTP state (`lib.soul_upgrade`) remains allowed as contextual metadata (mission/mood preface), but it is **not authoritative** for bridge strategy override.
+
+---
+
 ## 1) Ingestion points in intelligence pipeline
 
 Primary ingestion target (V1):

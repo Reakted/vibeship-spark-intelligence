@@ -3,6 +3,32 @@
 Date: 2026-02-06  
 Status: Execution backlog aligned to AGI-like structuring plan
 
+## Runtime Status Legend (2026-02-17)
+
+- `implemented`: artifact exists and is used by current runtime paths.
+- `planned`: backlog target not yet implemented in this repo.
+- `deferred`: planned later than current phase.
+
+Current snapshot:
+
+- `implemented`: `A1`, `A2`, `A3`, `B1`, `C1` core wiring and their listed tests.
+- `planned/deferred`: advanced conflict/goal/program/provider modules in later workstreams.
+
+Planned artifacts not yet present in this repo:
+
+- `lib/advisory_conflict_resolver.py`
+- `lib/advisory_feedback.py`
+- `lib/advisory_goals.py`
+- `lib/advisory_gotchas.py`
+- `lib/advisory_orchestration_graph.py`
+- `lib/advisory_program_goals.py`
+- `lib/advisory_provider_audit.py`
+- `lib/advisory_provider_policy.py`
+- `lib/advisory_rails.py`
+- `lib/advisory_recovery_playbooks.py`
+- `lib/advisory_team_context.py`
+- `scripts/advisory_packet_report.py`
+
 ## 0) Pre-v1 Execution Decision (Ship Now vs Post-v1)
 
 Pre-v1 implementation scope (this cycle):
