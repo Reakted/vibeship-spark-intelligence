@@ -62,6 +62,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 - `docs/CHIPS.md`: chips usage and authoring
 - `docs/CHIPS_SCHEMA_FIRST_PLAYBOOK.md`: schema-first chips design, authoring rules, variation testing, and promotion gates
 - `docs/CHIP_WORKFLOW.md`: fast chip creation workflow
+- `docs/CHIP_VIBECODING.md`: pointer doc for vibecoding chip references (active + historical locations)
 - `STUCK_STATE_PLAYBOOK.md`: recovery playbook
 
 ## Core Systems
@@ -77,6 +78,7 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 ## Current Program Docs
 
 - `docs/PROGRAM_STATUS.md`: consolidated implementation status and priorities
+- `docs/architecture/CONSCIOUSNESS_INTELLIGENCE_ALIGNMENT_TASK_SYSTEM.md`: cross-repo Spark Consciousness x Spark Intelligence alignment backlog with ordered execution phases
 - `docs/memory-retrieval-status.md`: memory retrieval stabilization + A/B execution spec
 - `docs/reports/2026-02-12_memory_retrieval_tuned_two_system_scorecard.md`: tuned best-vs-best comparison (`embeddings_only` vs `hybrid_agentic`)
 - `docs/reports/2026-02-12_advisory_tuning_delta.md`: advisory tuneables execution report + measured pre/post deltas
