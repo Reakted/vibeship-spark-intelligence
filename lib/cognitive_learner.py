@@ -270,6 +270,7 @@ class CognitiveInsight:
     promoted_to: Optional[str] = None
     last_validated_at: Optional[str] = None
     source: str = ""  # adapter that captured this: "openclaw", "cursor", "windsurf", "claude", "depth_forge", etc.
+    action_domain: str = ""  # pre-retrieval filter domain: "code", "x_social", "depth_training", "user_context", "system", "general"
 
     @property
     def reliability(self) -> float:
@@ -297,6 +298,7 @@ class CognitiveInsight:
             "promoted_to": self.promoted_to,
             "last_validated_at": self.last_validated_at,
             "source": self.source,
+            "action_domain": self.action_domain,
         }
     
     @classmethod
@@ -322,7 +324,71 @@ class CognitiveInsight:
             promoted_to=data.get("promoted_to"),
             last_validated_at=data.get("last_validated_at"),
             source=data.get("source", ""),
+            action_domain=data.get("action_domain", ""),
         )
+
+
+def classify_action_domain(insight_text: str, category: str = "", source: str = "") -> str:
+    """Classify an insight into an action domain for pre-retrieval filtering.
+
+    Domains:
+        x_social       - X/Twitter engagement, voice, social media
+        depth_training  - DEPTH training logs and reasoning exercises
+        user_context    - Verbatim user quotes and preferences
+        code            - Code patterns, tool advice, engineering
+        system          - Spark system internals, pipeline, config
+        general         - Everything else (always included in retrieval)
+    """
+    text = str(insight_text or "").strip()
+    text_lower = text.lower()
+    src = str(source or "").lower()
+    cat = str(category or "").lower()
+
+    # X/Social domain
+    if any(tag in src for tag in ("x_research", "x_social", "engagement", "social-convo", "xresearch")):
+        return "x_social"
+    if any(text.startswith(p) for p in ("[X Strategy]", "[Chip:x_social]", "[Chip:engagement", "[Chip:social")):
+        return "x_social"
+    if re.search(r"^\[(?:vibe_coding|bittensor|openclaw_moltbook|ai agents)\]", text, re.IGNORECASE):
+        return "x_social"
+    if re.search(r"^RT @\w+:", text):
+        return "x_social"
+    if any(kw in text_lower for kw in ("tweet", "engagement", "likes", "followers", "x strategy", "reply thread")):
+        if any(kw in text_lower for kw in ("voice", "tone", "social", "hook", "viral")):
+            return "x_social"
+
+    # DEPTH training domain
+    if text.startswith("[DEPTH:") or "Strong " in text and " reasoning:" in text:
+        return "depth_training"
+    if any(tag in src for tag in ("depth", "depth_forge")):
+        return "depth_training"
+    if re.search(r"Strong Socratic depth on", text):
+        return "depth_training"
+
+    # User context (verbatim quotes)
+    if cat == "user_understanding":
+        # Check for verbatim user quotes (starts with lowercase, contains conversational patterns)
+        if re.match(r"^(User prefers |Now, can we|Can you now|lets make sure|by the way|instead of this|I think we)", text):
+            return "user_context"
+        if re.match(r"^I'd say|^I don't think|^can we now|^please remember", text, re.IGNORECASE):
+            return "user_context"
+
+    # Code domain — look for code patterns
+    if cat in ("self_awareness", "reasoning"):
+        if re.search(r"(def |class |import |from \w+ import|self\.\w+|\.py\b)", text):
+            return "code"
+    if "Always Read a file before Edit" in text:
+        return "code"
+    if re.search(r"\b(function|method|variable|parameter|argument|return|exception|error handling)\b", text_lower):
+        return "code"
+
+    # System domain — Spark internals
+    if any(kw in text_lower for kw in ("tuneables", "meta-ralph", "metaralph", "bridge_cycle", "pipeline", "cognitive_learner")):
+        return "system"
+    if re.search(r"\b(auto-tuner|bridge_worker|sparkd|spark daemon|queue\.py)\b", text_lower):
+        return "system"
+
+    return "general"
 
 
 class CognitiveLearner:
@@ -353,8 +419,25 @@ class CognitiveLearner:
                     self.insights[key] = CognitiveInsight.from_dict(info)
                 # Consolidate duplicate struggle variants (e.g., recovered X%).
                 self.dedupe_struggles()
+                # Backfill action_domain for insights loaded without one
+                self._backfill_action_domains()
             except Exception as e:
                 print(f"[SPARK] Error loading insights: {e}")
+
+    def _backfill_action_domains(self):
+        """Backfill action_domain for insights that don't have one."""
+        changed = False
+        for key, insight in self.insights.items():
+            if not insight.action_domain:
+                domain = classify_action_domain(
+                    insight.insight,
+                    category=insight.category.value if hasattr(insight.category, "value") else str(insight.category),
+                    source=insight.source,
+                )
+                insight.action_domain = domain
+                changed = True
+        if changed and not getattr(self, "_defer_saves", False):
+            self._save_insights()
 
     def _merge_insight(self, current: CognitiveInsight, disk: CognitiveInsight) -> CognitiveInsight:
         """Merge two insights, preserving the most reliable/complete data."""
@@ -1172,6 +1255,7 @@ class CognitiveLearner:
                 existing.evidence.append(context[:200])
                 existing.evidence = existing.evidence[-10:]
         else:
+            domain = classify_action_domain(insight, category=category.value, source=source)
             self.insights[key] = CognitiveInsight(
                 category=category,
                 insight=insight,
@@ -1179,6 +1263,7 @@ class CognitiveLearner:
                 confidence=confidence,
                 context=context[:100] if context else "",
                 source=source,
+                action_domain=domain,
             )
 
         self._save_insights()
