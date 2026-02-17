@@ -100,7 +100,7 @@ MIN_VALIDATIONS_FOR_STRONG_ADVICE = 2
 # Some experiments may tune this lower via config.
 MAX_ADVICE_ITEMS = 8
 ADVICE_CACHE_TTL_SECONDS = 120  # 2 minutes (lowered from 5 for fresher advice)
-MIN_RANK_SCORE = 0.55  # Drop advice below this after ranking — tuned to reduce repeat/noise
+MIN_RANK_SCORE = 0.60  # Drop advice below this after ranking — raised from 0.55 (Phase 1 retrieval improvement)
 MIND_MAX_STALE_SECONDS = float(os.environ.get("SPARK_ADVISOR_MIND_MAX_STALE_S", "0"))
 MIND_STALE_ALLOW_IF_EMPTY = os.environ.get("SPARK_ADVISOR_MIND_STALE_ALLOW_IF_EMPTY", "1") != "0"
 MIND_MIN_SALIENCE = float(os.environ.get("SPARK_ADVISOR_MIND_MIN_SALIENCE", "0.5"))
@@ -1613,6 +1613,23 @@ class SparkAdvisor:
                 self._prefilter_cache.pop(k, None)
         return tokens, blob
 
+    # Intent → allowed action_domains mapping for pre-retrieval filtering.
+    # "general" is always allowed as a fallback domain.
+    _INTENT_DOMAIN_MAP: Dict[str, set] = {
+        "auth_security":             {"code", "system", "general"},
+        "deployment_ops":            {"code", "system", "general"},
+        "testing_validation":        {"code", "general"},
+        "schema_contracts":          {"code", "general"},
+        "performance_latency":       {"code", "system", "general"},
+        "tool_reliability":          {"code", "system", "general"},
+        "knowledge_alignment":       {"code", "system", "general"},
+        "team_coordination":         {"general"},
+        "orchestration_execution":   {"code", "system", "general"},
+        "stakeholder_alignment":     {"general"},
+        "research_decision_support": {"code", "general"},
+        "emergent_other":            {"code", "system", "general"},
+    }
+
     def _prefilter_insights_for_retrieval(
         self,
         insights: Dict[str, Any],
@@ -1624,16 +1641,30 @@ class SparkAdvisor:
             return insights
         limit = max(20, int(max_items or 500))
         drop_low_signal = bool((self.retrieval_policy or {}).get("prefilter_drop_low_signal", True))
-        if len(insights) <= limit:
+
+        # --- Phase 1: Intent-based domain filtering ---
+        allowed_domains = self._get_allowed_domains(tool_name, context)
+        domain_filtered: Dict[str, Any] = {}
+        for key, insight in insights.items():
+            action_domain = getattr(insight, "action_domain", "") or "general"
+            if action_domain in allowed_domains:
+                domain_filtered[key] = insight
+        # Fallback: if domain filtering is too aggressive (<20 items), include all
+        if len(domain_filtered) < 20:
+            domain_filtered = insights
+        working_set = domain_filtered
+
+        # --- Phase 2: Low-signal drop + keyword scoring (existing logic) ---
+        if len(working_set) <= limit:
             if not drop_low_signal:
-                return insights
+                return working_set
             filtered: Dict[str, Any] = {}
-            for key, insight in insights.items():
+            for key, insight in working_set.items():
                 _, blob = self._prefilter_cached_blob_tokens(str(key), insight)
                 if self._should_drop_low_signal_candidate(blob):
                     continue
                 filtered[key] = insight
-            return filtered or insights
+            return filtered or working_set
 
         query_tokens = self._intent_terms(context)
         if not query_tokens:
@@ -1641,7 +1672,7 @@ class SparkAdvisor:
         tool = str(tool_name or "").strip().lower()
         scored: List[Tuple[float, str, Any]] = []
         fallback: List[Tuple[float, str, Any]] = []
-        for key, insight in insights.items():
+        for key, insight in working_set.items():
             blob_tokens, blob = self._prefilter_cached_blob_tokens(str(key), insight)
             if drop_low_signal and self._should_drop_low_signal_candidate(blob):
                 continue
@@ -1662,8 +1693,18 @@ class SparkAdvisor:
 
         selected = ranked[:limit]
         if not selected:
-            return insights
+            return working_set
         return {key: insight for _, key, insight in selected}
+
+    def _get_allowed_domains(self, tool_name: str, context: str) -> set:
+        """Determine which action_domains are allowed for this tool+context."""
+        try:
+            from .advisory_intent_taxonomy import map_intent
+            intent_result = map_intent(context or "", tool_name or "")
+            intent_family = intent_result.get("intent_family", "emergent_other")
+        except Exception:
+            intent_family = "emergent_other"
+        return self._INTENT_DOMAIN_MAP.get(intent_family, {"code", "system", "general"})
 
     def _mind_retrieval_allowed(self, include_mind: bool, pre_mind_count: int) -> bool:
         """Gate Mind retrieval for freshness while preserving empty-result fallback."""
