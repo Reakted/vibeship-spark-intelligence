@@ -268,32 +268,22 @@ DEFAULT_DECISION_STRATEGY = {
 }
 
 
-def _emotion_decision_hooks() -> Dict[str, Any]:
-    """Resolve Emotions V2 decision hooks safely for runtime response shaping."""
-    fallback = {
-        "current_emotion": "steady",
-        "strategy": dict(DEFAULT_DECISION_STRATEGY),
-        "guardrails": {
-            "user_guided": True,
-            "no_autonomous_objectives": True,
-            "no_manipulative_affect": True,
-        },
-    }
+def _resolve_local_emotion_hooks() -> Optional[Dict[str, Any]]:
+    """Resolve local SparkEmotions hooks (secondary fallback)."""
     try:
         from .spark_emotions import SparkEmotions
 
         hooks = SparkEmotions().decision_hooks()
     except Exception:
-        return fallback
+        return None
 
     if not isinstance(hooks, dict):
-        return fallback
+        return None
+
     strategy = hooks.get("strategy") if isinstance(hooks.get("strategy"), dict) else {}
     guardrails = hooks.get("guardrails") if isinstance(hooks.get("guardrails"), dict) else {}
-
-    # Fail closed: only use strategy when user-guided + no autonomous objectives are explicit.
     if not (guardrails.get("user_guided") and guardrails.get("no_autonomous_objectives")):
-        return fallback
+        return None
 
     merged = dict(DEFAULT_DECISION_STRATEGY)
     merged.update({k: v for k, v in strategy.items() if k in merged})
@@ -305,7 +295,94 @@ def _emotion_decision_hooks() -> Dict[str, Any]:
             "no_autonomous_objectives": True,
             "no_manipulative_affect": bool(guardrails.get("no_manipulative_affect", True)),
         },
+        "source": "spark_emotions",
     }
+
+
+def _resolve_bridge_strategy() -> Dict[str, Any]:
+    """Resolve bridge.v1 strategy override (primary source when valid)."""
+    try:
+        from .consciousness_bridge import resolve_strategy
+
+        payload = resolve_strategy()
+    except Exception as exc:
+        log_debug("advisory_synth", "consciousness_bridge=fallback (error)", exc)
+        return {}
+
+    if not isinstance(payload, dict):
+        log_debug("advisory_synth", "consciousness_bridge=fallback (invalid_payload)")
+        return {}
+
+    source = str(payload.get("source") or "").strip()
+    if source != "consciousness_bridge_v1":
+        log_debug("advisory_synth", "consciousness_bridge=fallback")
+        return {}
+
+    strategy = payload.get("strategy") if isinstance(payload.get("strategy"), dict) else {}
+    strategy = {k: v for k, v in strategy.items() if k in DEFAULT_DECISION_STRATEGY}
+    if not strategy:
+        log_debug("advisory_synth", "consciousness_bridge=fallback (empty_strategy)")
+        return {}
+
+    try:
+        influence = float(payload.get("max_influence", 0.0))
+    except Exception:
+        influence = 0.0
+    influence = max(0.0, min(0.35, influence))
+
+    log_debug("advisory_synth", f"consciousness_bridge=ok influence={influence:.2f}")
+    return {
+        "strategy": strategy,
+        "max_influence": influence,
+        "source": "consciousness_bridge_v1",
+    }
+
+
+def _emotion_decision_hooks() -> Dict[str, Any]:
+    """Resolve Emotions V2 decision hooks safely for runtime response shaping."""
+    resolved = {
+        "current_emotion": "steady",
+        "strategy": dict(DEFAULT_DECISION_STRATEGY),
+        "guardrails": {
+            "user_guided": True,
+            "no_autonomous_objectives": True,
+            "no_manipulative_affect": True,
+        },
+        "strategy_source": "default",
+        "source_chain": ["default"],
+        "bridge": {"applied": False, "source": "fallback", "max_influence": 0.0},
+    }
+    source_chain: List[str] = []
+
+    # Secondary source: local emotions runtime.
+    local_hooks = _resolve_local_emotion_hooks()
+    if local_hooks:
+        resolved["current_emotion"] = str(local_hooks.get("current_emotion") or "steady")
+        local_strategy = local_hooks.get("strategy") if isinstance(local_hooks.get("strategy"), dict) else {}
+        resolved["strategy"].update({k: v for k, v in local_strategy.items() if k in resolved["strategy"]})
+        source_chain.append("spark_emotions")
+
+    # Primary source: bridge.v1 override when valid and safe.
+    bridge_override = _resolve_bridge_strategy()
+    if bridge_override:
+        bridge_strategy = (
+            bridge_override.get("strategy")
+            if isinstance(bridge_override.get("strategy"), dict)
+            else {}
+        )
+        resolved["strategy"].update({k: v for k, v in bridge_strategy.items() if k in resolved["strategy"]})
+        source_chain.append("consciousness_bridge_v1")
+        resolved["bridge"] = {
+            "applied": True,
+            "source": "consciousness_bridge_v1",
+            "max_influence": float(bridge_override.get("max_influence", 0.0)),
+        }
+
+    if source_chain:
+        resolved["source_chain"] = source_chain
+        resolved["strategy_source"] = source_chain[-1]
+
+    return resolved
 
 
 # ============= Tier 1: Programmatic Synthesis =============
