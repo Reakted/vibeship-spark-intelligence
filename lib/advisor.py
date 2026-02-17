@@ -1887,6 +1887,11 @@ class SparkAdvisor:
         # Sort by relevance (confidence * context_match * effectiveness_boost)
         advice_list = self._rank_advice(advice_list)
 
+        # Cross-encoder reranking (Phase 2): rerank top candidates using
+        # full query-document relevance scoring for higher precision.
+        if len(advice_list) > MAX_ADVICE_ITEMS:
+            advice_list = self._cross_encoder_rerank(semantic_context, advice_list)
+
         # Drop low-quality items — prefer fewer, higher-quality results
         advice_list = [a for a in advice_list if self._rank_score(a) >= MIN_RANK_SCORE]
 
@@ -3692,6 +3697,26 @@ class SparkAdvisor:
     def _rank_advice(self, advice_list: List[Advice]) -> List[Advice]:
         """Rank advice by relevance, actionability, and effectiveness."""
         return sorted(advice_list, key=self._rank_score, reverse=True)
+
+    def _cross_encoder_rerank(self, query: str, advice_list: List[Advice]) -> List[Advice]:
+        """Rerank advice using cross-encoder for precise relevance scoring.
+
+        Only called when there are more candidates than MAX_ADVICE_ITEMS.
+        Silently falls back to the original list if the reranker is unavailable.
+        """
+        try:
+            from .cross_encoder_reranker import get_reranker
+            reranker = get_reranker()
+            if reranker is None:
+                return advice_list
+            texts = [a.text for a in advice_list]
+            # Rerank to get double the final limit (cross-encoder picks best, then
+            # MIN_RANK_SCORE and MAX_ADVICE_ITEMS do the final cut)
+            top_k = min(MAX_ADVICE_ITEMS * 2, len(advice_list))
+            ranked = reranker.rerank(query, texts, top_k=top_k)
+            return [advice_list[idx] for idx, _score in ranked]
+        except Exception:
+            return advice_list
 
     def _log_advice(
         self,

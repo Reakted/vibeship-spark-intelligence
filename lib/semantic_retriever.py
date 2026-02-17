@@ -596,9 +596,8 @@ class SemanticRetriever:
                 if (r.category or "").lower() not in exclude
             ]
 
-        # Fusion score
-        for r in results:
-            r.fusion_score = self._compute_fusion(r)
+        # Fusion score (RRF: rank-based combination of semantic + outcome signals)
+        self._compute_fusion_scores_rrf(results)
 
         # Filter by fusion score
         min_fusion = float(self.config.get("min_fusion_score", 0.5))
@@ -703,6 +702,55 @@ class SemanticRetriever:
         priority_bonus = {"critical": 0.2, "high": 0.1, "normal": 0.0, "background": -0.1}
         base += priority_bonus.get(r.priority, 0.0)
         return max(0.0, min(1.0, base))
+
+    def _compute_fusion_scores_rrf(self, results: List[SemanticResult]) -> None:
+        """Compute fusion scores using Reciprocal Rank Fusion (RRF).
+
+        Combines semantic similarity rank and outcome effectiveness rank:
+            score = 1/(k + rank_semantic) + 1/(k + rank_outcome)
+
+        Triggers bypass RRF and use the per-item formula.
+        Recency and priority are additive bonuses after RRF normalisation.
+        """
+        k = float(self.config.get("rrf_k", 30))
+        w_rec = float(self.config.get("weight_recency", 0.2))
+
+        semantic: List[SemanticResult] = []
+        for r in results:
+            if r.source_type == "trigger":
+                r.fusion_score = self._compute_fusion(r)
+            else:
+                semantic.append(r)
+
+        if not semantic:
+            return
+
+        n = len(semantic)
+
+        # Rank by semantic similarity (descending, 1-based)
+        sim_order = sorted(range(n), key=lambda i: semantic[i].semantic_sim, reverse=True)
+        sim_rank = [0] * n
+        for rank, idx in enumerate(sim_order):
+            sim_rank[idx] = rank + 1
+
+        # Rank by outcome effectiveness (descending, 1-based)
+        out_order = sorted(range(n), key=lambda i: semantic[i].outcome_score, reverse=True)
+        out_rank = [0] * n
+        for rank, idx in enumerate(out_order):
+            out_rank[idx] = rank + 1
+
+        # RRF + additive bonuses
+        max_rrf = 2.0 / (k + 1)  # Theoretical max (rank 1 in both signals)
+        priority_bonus = {"critical": 0.15, "high": 0.08, "normal": 0.0, "background": -0.05}
+
+        for i, r in enumerate(semantic):
+            rrf_raw = 1.0 / (k + sim_rank[i]) + 1.0 / (k + out_rank[i])
+            normalized = rrf_raw / max_rrf if max_rrf > 0 else 0.0
+
+            normalized += r.recency_score * w_rec * 0.15
+            normalized += priority_bonus.get(r.priority, 0.0)
+
+            r.fusion_score = max(0.0, min(1.0, normalized))
 
     def _compute_recency(self, insight: Any) -> float:
         ts = getattr(insight, "last_validated_at", None) or getattr(insight, "created_at", None)
