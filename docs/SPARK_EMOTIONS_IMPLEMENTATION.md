@@ -9,7 +9,9 @@ Phase 1 delivers a standalone runtime module for emotional state handling and vo
   - bounded mode transitions (`spark_alive`, `real_talk`, `calm_focus`)
   - feedback application (`too_fast`, `too_sharp`, `too_flat`, `too_intense`, `wants_more_emotion`)
   - deterministic TTS profile mapping from emotional state
-  - persistence in `.spark/emotion_state.json`
+  - default persistence in `~/.spark/emotion_state.json`
+  - optional override via `SPARK_EMOTION_STATE_FILE`
+  - one-time migration from legacy repo-local `.spark/emotion_state.json` when runtime file is absent
 
 ## Why standalone first
 To avoid piecemeal wiring and regressions. This keeps the core logic testable and ready for one-shot integration.

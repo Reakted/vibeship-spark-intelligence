@@ -11,11 +11,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Literal
 import json
+import os
 
 Mode = Literal["spark_alive", "real_talk", "calm_focus"]
 
-SPARK_DIR = Path(__file__).parent.parent / ".spark"
-STATE_FILE = SPARK_DIR / "emotion_state.json"
+SPARK_DIR = Path.home() / ".spark"
+STATE_FILE = Path(os.environ.get("SPARK_EMOTION_STATE_FILE") or (SPARK_DIR / "emotion_state.json"))
+LEGACY_STATE_FILE = Path(__file__).resolve().parent.parent / ".spark" / "emotion_state.json"
 
 
 @dataclass
@@ -93,11 +95,24 @@ TRIGGER_MAP: Dict[str, Dict[str, Any]] = {
 
 
 class SparkEmotions:
-    def __init__(self, state_file: Path = STATE_FILE):
-        self.state_file = state_file
+    def __init__(self, state_file: Path | None = None):
+        self.state_file = state_file or STATE_FILE
         self.state = self._load_state()
 
+    def _migrate_legacy_state_if_needed(self) -> None:
+        """Copy repo-local legacy emotion state into ~/.spark path once."""
+        if self.state_file.exists():
+            return
+        if not LEGACY_STATE_FILE.exists():
+            return
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            self.state_file.write_text(LEGACY_STATE_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+        except Exception:
+            return
+
     def _load_state(self) -> EmotionState:
+        self._migrate_legacy_state_if_needed()
         if self.state_file.exists():
             try:
                 raw = json.loads(self.state_file.read_text(encoding="utf-8"))

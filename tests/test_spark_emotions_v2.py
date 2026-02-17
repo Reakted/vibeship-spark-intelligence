@@ -1,3 +1,6 @@
+import json
+
+import lib.spark_emotions as se
 from lib.spark_emotions import SparkEmotions
 
 
@@ -48,3 +51,36 @@ def test_unknown_trigger_is_safe_and_logged(tmp_path):
 
     assert len(emotions.state.emotion_timeline) == before + 1
     assert emotions.state.emotion_timeline[-1]["event"] == "trigger_ignored"
+
+
+def test_legacy_repo_local_state_migrates_to_runtime_path(tmp_path, monkeypatch):
+    legacy_state = tmp_path / "repo" / ".spark" / "emotion_state.json"
+    legacy_state.parent.mkdir(parents=True, exist_ok=True)
+    legacy_state.write_text(
+        json.dumps(
+            {
+                "warmth": 0.51,
+                "energy": 0.52,
+                "confidence": 0.53,
+                "calm": 0.54,
+                "playfulness": 0.55,
+                "strain": 0.21,
+                "mode": "real_talk",
+                "primary_emotion": "steady",
+                "recovery_cooldown": 0,
+                "emotion_timeline": [],
+                "updated_at": "2026-02-17T00:00:00+00:00",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    runtime_state = tmp_path / "home" / ".spark" / "emotion_state.json"
+    monkeypatch.setattr(se, "LEGACY_STATE_FILE", legacy_state)
+
+    emotions = se.SparkEmotions(state_file=runtime_state)
+
+    assert runtime_state.exists()
+    assert emotions.state.warmth == 0.51
+    assert len(emotions.state.emotion_timeline) >= 1
