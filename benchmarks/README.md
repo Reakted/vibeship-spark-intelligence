@@ -87,6 +87,34 @@ Outputs:
 - `benchmarks/out/memory_retrieval_ab_report.json`
 - `benchmarks/out/memory_retrieval_ab_report.md`
 
+Emotion-state rerank sweep (case-level optional field `emotion_state` + knob):
+
+```bash
+python benchmarks/memory_retrieval_ab.py \
+  --cases benchmarks/data/memory_retrieval_eval_seed.json \
+  --emotion-state-weight 0.35
+```
+
+Run dedicated emotion-memory alignment gate benchmark:
+
+```bash
+python benchmarks/emotion_memory_alignment_bench.py
+```
+
+Emotion-memory gate outputs:
+- `benchmarks/out/emotion_memory_alignment_bench.json`
+- `benchmarks/out/emotion_memory_alignment_bench.md`
+
+Real-corpus emotion weight sweep (example):
+
+```bash
+python benchmarks/memory_retrieval_ab.py --cases benchmarks/data/memory_retrieval_eval_multidomain_real_user_2026_02_16.json --systems hybrid_agentic --top-k 5 --emotion-state-weight 0.0 --out-prefix emotion_weight_sweep_0p0
+python benchmarks/memory_retrieval_ab.py --cases benchmarks/data/memory_retrieval_eval_multidomain_real_user_2026_02_16.json --systems hybrid_agentic --top-k 5 --emotion-state-weight 0.1 --out-prefix emotion_weight_sweep_0p1
+python benchmarks/memory_retrieval_ab.py --cases benchmarks/data/memory_retrieval_eval_multidomain_real_user_2026_02_16.json --systems hybrid_agentic --top-k 5 --emotion-state-weight 0.2 --out-prefix emotion_weight_sweep_0p2
+python benchmarks/memory_retrieval_ab.py --cases benchmarks/data/memory_retrieval_eval_multidomain_real_user_2026_02_16.json --systems hybrid_agentic --top-k 5 --emotion-state-weight 0.3 --out-prefix emotion_weight_sweep_0p3
+python benchmarks/memory_retrieval_ab.py --cases benchmarks/data/memory_retrieval_eval_multidomain_real_user_2026_02_16.json --systems hybrid_agentic --top-k 5 --emotion-state-weight 0.4 --out-prefix emotion_weight_sweep_0p4
+```
+
 Run domain-matrix retrieval benchmark with per-domain gates:
 
 ```bash

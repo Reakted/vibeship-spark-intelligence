@@ -543,6 +543,11 @@ _METADATA_TELEMETRY_HINTS = (
     "user_prompt_signal",
     "source: spark_advisory",
 )
+MEMORY_EMOTION_DEFAULTS: Dict[str, Any] = {
+    "enabled": True,
+    "advisory_rerank_weight": 0.15,
+    "advisory_min_state_similarity": 0.30,
+}
 
 
 def _parse_bool(value: Any, default: bool) -> bool:
@@ -554,6 +559,17 @@ def _parse_bool(value: Any, default: bool) -> bool:
     if text in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _safe_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _clamp_01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
 
 
 def _norm_retrieval_domain(value: Any) -> str:
@@ -925,6 +941,8 @@ class SparkAdvisor:
         self._cache: Dict[str, Tuple[List[Advice], float]] = {}
         self.retrieval_policy = self._load_retrieval_policy()
         self._agentic_route_history: List[bool] = []
+        self._memory_emotion_cfg_cache: Dict[str, Any] = dict(MEMORY_EMOTION_DEFAULTS)
+        self._memory_emotion_cfg_mtime: Optional[float] = None
 
         # Prefilter cache: avoid per-query regex tokenization across large insight sets.
         # key -> (blob_hash, token_set, blob_lower)
@@ -1522,6 +1540,128 @@ class SparkAdvisor:
         policy["high_risk_hints"] = list(DEFAULT_HIGH_RISK_HINTS)
         return policy
 
+    def _load_memory_emotion_cfg(self) -> Dict[str, Any]:
+        tuneables = Path.home() / ".spark" / "tuneables.json"
+        current_mtime: Optional[float] = None
+        try:
+            if tuneables.exists():
+                current_mtime = float(tuneables.stat().st_mtime)
+        except Exception:
+            current_mtime = None
+
+        if self._memory_emotion_cfg_mtime == current_mtime:
+            return dict(self._memory_emotion_cfg_cache)
+
+        cfg = dict(MEMORY_EMOTION_DEFAULTS)
+        try:
+            if tuneables.exists():
+                data = json.loads(tuneables.read_text(encoding="utf-8-sig"))
+                section = data.get("memory_emotion") if isinstance(data, dict) else None
+                if isinstance(section, dict):
+                    cfg["enabled"] = _parse_bool(section.get("enabled"), cfg["enabled"])
+                    if "advisory_rerank_weight" in section:
+                        cfg["advisory_rerank_weight"] = _safe_float(
+                            section.get("advisory_rerank_weight"),
+                            cfg["advisory_rerank_weight"],
+                        )
+                    if "advisory_min_state_similarity" in section:
+                        cfg["advisory_min_state_similarity"] = _safe_float(
+                            section.get("advisory_min_state_similarity"),
+                            cfg["advisory_min_state_similarity"],
+                        )
+        except Exception:
+            pass
+
+        env_enabled = os.getenv("SPARK_ADVISORY_MEMORY_EMOTION_ENABLED")
+        if env_enabled is not None:
+            cfg["enabled"] = _parse_bool(env_enabled, cfg["enabled"])
+        env_weight = os.getenv("SPARK_ADVISORY_MEMORY_EMOTION_WEIGHT")
+        if env_weight is not None:
+            cfg["advisory_rerank_weight"] = _safe_float(env_weight, cfg["advisory_rerank_weight"])
+        env_min_sim = os.getenv("SPARK_ADVISORY_MEMORY_EMOTION_MIN_SIM")
+        if env_min_sim is not None:
+            cfg["advisory_min_state_similarity"] = _safe_float(env_min_sim, cfg["advisory_min_state_similarity"])
+
+        cfg["advisory_rerank_weight"] = max(0.0, float(cfg.get("advisory_rerank_weight", 0.0)))
+        cfg["advisory_min_state_similarity"] = _clamp_01(
+            _safe_float(cfg.get("advisory_min_state_similarity"), MEMORY_EMOTION_DEFAULTS["advisory_min_state_similarity"])
+        )
+        cfg["enabled"] = _parse_bool(cfg.get("enabled"), True)
+        self._memory_emotion_cfg_cache = dict(cfg)
+        self._memory_emotion_cfg_mtime = current_mtime
+        return dict(cfg)
+
+    def _current_emotion_state_for_rerank(self) -> Optional[Dict[str, Any]]:
+        try:
+            from .spark_emotions import SparkEmotions
+
+            state = (SparkEmotions().status() or {}).get("state") or {}
+            if not isinstance(state, dict):
+                return None
+            return {
+                "primary_emotion": str(state.get("primary_emotion") or "steady"),
+                "mode": str(state.get("mode") or "real_talk"),
+                "warmth": _clamp_01(_safe_float(state.get("warmth"), 0.0)),
+                "energy": _clamp_01(_safe_float(state.get("energy"), 0.0)),
+                "confidence": _clamp_01(_safe_float(state.get("confidence"), 0.0)),
+                "calm": _clamp_01(_safe_float(state.get("calm"), 0.0)),
+                "playfulness": _clamp_01(_safe_float(state.get("playfulness"), 0.0)),
+                "strain": _clamp_01(_safe_float(state.get("strain"), 0.0)),
+            }
+        except Exception:
+            return None
+
+    def _extract_insight_emotion_state(self, insight: Any) -> Dict[str, Any]:
+        if insight is None:
+            return {}
+        direct = getattr(insight, "emotion_state", None)
+        if isinstance(direct, dict):
+            return direct
+        meta = getattr(insight, "meta", None)
+        if isinstance(meta, dict):
+            emo = meta.get("emotion")
+            if isinstance(emo, dict):
+                return emo
+        if isinstance(insight, dict):
+            if isinstance(insight.get("emotion_state"), dict):
+                return insight.get("emotion_state") or {}
+            meta_raw = insight.get("meta")
+            if isinstance(meta_raw, dict) and isinstance(meta_raw.get("emotion"), dict):
+                return meta_raw.get("emotion") or {}
+        return {}
+
+    def _emotion_state_similarity(
+        self,
+        active_state: Optional[Dict[str, Any]],
+        stored_state: Optional[Dict[str, Any]],
+    ) -> float:
+        if not isinstance(active_state, dict) or not isinstance(stored_state, dict):
+            return 0.0
+        if not active_state or not stored_state:
+            return 0.0
+
+        emotion_match = 1.0 if (
+            str(active_state.get("primary_emotion") or "").strip()
+            and str(active_state.get("primary_emotion") or "").strip()
+            == str(stored_state.get("primary_emotion") or "").strip()
+        ) else 0.0
+        mode_match = 1.0 if (
+            str(active_state.get("mode") or "").strip()
+            and str(active_state.get("mode") or "").strip()
+            == str(stored_state.get("mode") or "").strip()
+        ) else 0.0
+
+        axis_scores: List[float] = []
+        for axis in ("strain", "calm", "energy", "confidence", "warmth", "playfulness"):
+            if axis not in active_state or axis not in stored_state:
+                continue
+            a = _clamp_01(_safe_float(active_state.get(axis), 0.0))
+            b = _clamp_01(_safe_float(stored_state.get(axis), 0.0))
+            axis_scores.append(max(0.0, 1.0 - abs(a - b)))
+
+        axis_similarity = sum(axis_scores) / len(axis_scores) if axis_scores else 0.0
+        return _clamp_01((0.50 * axis_similarity) + (0.35 * emotion_match) + (0.15 * mode_match))
+
     def _analyze_query_complexity(self, tool_name: str, context: str) -> Dict[str, Any]:
         """Estimate when agentic retrieval is worth the added latency/cost."""
         text = str(context or "").strip().lower()
@@ -1987,6 +2127,25 @@ class SparkAdvisor:
         intent_coverage_weight = float(policy.get("intent_coverage_weight", 0.0) or 0.0)
         support_boost_weight = float(policy.get("support_boost_weight", 0.0) or 0.0)
         reliability_weight = float(policy.get("reliability_weight", 0.0) or 0.0)
+        emotion_cfg = self._load_memory_emotion_cfg()
+        emotion_state_enabled = bool(emotion_cfg.get("enabled", True))
+        emotion_state_weight = (
+            float(emotion_cfg.get("advisory_rerank_weight", MEMORY_EMOTION_DEFAULTS["advisory_rerank_weight"]) or 0.0)
+            if emotion_state_enabled
+            else 0.0
+        )
+        emotion_min_state_similarity = float(
+            emotion_cfg.get(
+                "advisory_min_state_similarity",
+                MEMORY_EMOTION_DEFAULTS["advisory_min_state_similarity"],
+            )
+            or MEMORY_EMOTION_DEFAULTS["advisory_min_state_similarity"]
+        )
+        active_emotion_state = (
+            self._current_emotion_state_for_rerank()
+            if emotion_state_enabled and emotion_state_weight > 0.0
+            else None
+        )
 
         analysis = self._analyze_query_complexity(tool_name, context)
         high_risk_hits = list(analysis.get("high_risk_hits") or [])
@@ -2152,6 +2311,7 @@ class SparkAdvisor:
         )
         rank_features: Dict[str, Dict[str, float]] = {}
         scored: List[Tuple[Any, float]] = []
+        emotion_state_match_count = 0
         for idx, (insight_key, bucket) in enumerate(merged_items):
             row = bucket.get("row")
             if row is None:
@@ -2166,12 +2326,25 @@ class SparkAdvisor:
             support_norm = (support_count - 1) / max(1, max_support_count - 1) if max_support_count > 1 else 0.0
             source_insight = active_insights.get(insight_key)
             reliability = float(getattr(source_insight, "reliability", getattr(row, "outcome_score", 0.5)) or 0.5)
+            emotion_similarity = 0.0
+            if active_emotion_state and source_insight is not None:
+                emotion_similarity = self._emotion_state_similarity(
+                    active_emotion_state,
+                    self._extract_insight_emotion_state(source_insight),
+                )
+                if emotion_similarity < emotion_min_state_similarity:
+                    emotion_similarity = 0.0
+            emotion_boost = emotion_state_weight * emotion_similarity
+            if emotion_similarity > 0.0:
+                emotion_state_match_count += 1
             rank_features[insight_key] = {
                 "lex": lex,
                 "intent_coverage": intent_coverage,
                 "support_count": float(support_count),
                 "support_norm": support_norm,
                 "reliability": reliability,
+                "emotion_similarity": emotion_similarity,
+                "emotion_boost": emotion_boost,
             }
             rerank_score = (
                 base
@@ -2179,6 +2352,7 @@ class SparkAdvisor:
                 + (intent_coverage_weight * intent_coverage)
                 + (support_boost_weight * support_norm)
                 + (reliability_weight * reliability)
+                + emotion_boost
             )
             scored.append((row, rerank_score))
         ranked = sorted(
@@ -2271,6 +2445,11 @@ class SparkAdvisor:
                 "intent_coverage_weight": intent_coverage_weight,
                 "support_boost_weight": support_boost_weight,
                 "reliability_weight": reliability_weight,
+                "emotion_state_enabled": emotion_state_enabled,
+                "emotion_state_weight": emotion_state_weight,
+                "emotion_min_state_similarity": emotion_min_state_similarity,
+                "emotion_state_active": bool(active_emotion_state),
+                "emotion_state_match_count": emotion_state_match_count,
                 "semantic_context_min": semantic_context_min,
                 "semantic_lexical_min": semantic_lexical_min,
                 "semantic_intent_min": semantic_intent_min,

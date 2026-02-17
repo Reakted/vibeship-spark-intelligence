@@ -24,6 +24,7 @@ from lib.embeddings import embed_texts
 
 DB_PATH = Path.home() / ".spark" / "memory_store.sqlite"
 _FTS_AVAILABLE: Optional[bool] = None
+TUNEABLES_FILE = Path.home() / ".spark" / "tuneables.json"
 
 # Phase 2: patchified (chunked) memory storage
 PATCHIFIED_ENABLED = os.getenv("SPARK_MEMORY_PATCHIFIED", "0") == "1"
@@ -44,6 +45,134 @@ try:
     PATCH_MIN_CHARS = max(40, min(400, int(os.getenv("SPARK_MEMORY_PATCH_MIN_CHARS", "120") or 120)))
 except Exception:
     PATCH_MIN_CHARS = 120
+
+MEMORY_EMOTION_DEFAULTS: Dict[str, Any] = {
+    "enabled": True,
+    "retrieval_state_match_weight": 0.22,
+    "retrieval_min_state_similarity": 0.30,
+}
+_MEMORY_EMOTION_CFG_CACHE: Dict[str, Any] = dict(MEMORY_EMOTION_DEFAULTS)
+_MEMORY_EMOTION_CFG_MTIME: Optional[float] = None
+
+
+def _safe_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() not in {"0", "false", "off", "no"}
+
+
+def _safe_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _load_memory_emotion_config(*, force: bool = False) -> Dict[str, Any]:
+    global _MEMORY_EMOTION_CFG_MTIME
+    global _MEMORY_EMOTION_CFG_CACHE
+
+    current_mtime: Optional[float] = None
+    try:
+        if TUNEABLES_FILE.exists():
+            current_mtime = float(TUNEABLES_FILE.stat().st_mtime)
+    except Exception:
+        current_mtime = None
+
+    if not force and _MEMORY_EMOTION_CFG_MTIME == current_mtime:
+        return dict(_MEMORY_EMOTION_CFG_CACHE)
+
+    cfg = dict(MEMORY_EMOTION_DEFAULTS)
+    try:
+        if TUNEABLES_FILE.exists():
+            payload = json.loads(TUNEABLES_FILE.read_text(encoding="utf-8-sig"))
+            section = payload.get("memory_emotion") if isinstance(payload, dict) else None
+            if isinstance(section, dict):
+                cfg["enabled"] = _safe_bool(section.get("enabled"), cfg["enabled"])
+                cfg["retrieval_state_match_weight"] = _safe_float(
+                    section.get("retrieval_state_match_weight"),
+                    cfg["retrieval_state_match_weight"],
+                )
+                cfg["retrieval_min_state_similarity"] = _safe_float(
+                    section.get("retrieval_min_state_similarity"),
+                    cfg["retrieval_min_state_similarity"],
+                )
+    except Exception:
+        pass
+
+    env_enabled = os.getenv("SPARK_MEMORY_EMOTION_ENABLED")
+    if env_enabled is not None:
+        cfg["enabled"] = _safe_bool(env_enabled, cfg["enabled"])
+    env_weight = os.getenv("SPARK_MEMORY_EMOTION_WEIGHT")
+    if env_weight is not None:
+        cfg["retrieval_state_match_weight"] = _safe_float(env_weight, cfg["retrieval_state_match_weight"])
+    env_min_sim = os.getenv("SPARK_MEMORY_EMOTION_MIN_SIM")
+    if env_min_sim is not None:
+        cfg["retrieval_min_state_similarity"] = _safe_float(env_min_sim, cfg["retrieval_min_state_similarity"])
+
+    cfg["retrieval_state_match_weight"] = max(0.0, float(cfg["retrieval_state_match_weight"]))
+    cfg["retrieval_min_state_similarity"] = _clamp01(cfg["retrieval_min_state_similarity"])
+
+    _MEMORY_EMOTION_CFG_CACHE = dict(cfg)
+    _MEMORY_EMOTION_CFG_MTIME = current_mtime
+    return dict(cfg)
+
+
+def _current_retrieval_emotion_state() -> Optional[Dict[str, Any]]:
+    try:
+        from lib.spark_emotions import SparkEmotions
+
+        state = (SparkEmotions().status() or {}).get("state") or {}
+        if not isinstance(state, dict):
+            return None
+        return {
+            "primary_emotion": str(state.get("primary_emotion") or "steady"),
+            "mode": str(state.get("mode") or "real_talk"),
+            "warmth": _clamp01(_safe_float(state.get("warmth"), 0.0)),
+            "energy": _clamp01(_safe_float(state.get("energy"), 0.0)),
+            "confidence": _clamp01(_safe_float(state.get("confidence"), 0.0)),
+            "calm": _clamp01(_safe_float(state.get("calm"), 0.0)),
+            "playfulness": _clamp01(_safe_float(state.get("playfulness"), 0.0)),
+            "strain": _clamp01(_safe_float(state.get("strain"), 0.0)),
+        }
+    except Exception:
+        return None
+
+
+def _emotion_state_similarity(
+    active_state: Optional[Dict[str, Any]],
+    stored_state: Optional[Dict[str, Any]],
+) -> float:
+    if not isinstance(active_state, dict) or not isinstance(stored_state, dict):
+        return 0.0
+
+    emotion_match = 1.0 if (
+        str(active_state.get("primary_emotion") or "").strip()
+        and str(active_state.get("primary_emotion") or "").strip()
+        == str(stored_state.get("primary_emotion") or "").strip()
+    ) else 0.0
+    mode_match = 1.0 if (
+        str(active_state.get("mode") or "").strip()
+        and str(active_state.get("mode") or "").strip()
+        == str(stored_state.get("mode") or "").strip()
+    ) else 0.0
+
+    axis_scores: List[float] = []
+    for axis in ("strain", "calm", "energy", "confidence", "warmth", "playfulness"):
+        if axis not in active_state or axis not in stored_state:
+            continue
+        a = _clamp01(_safe_float(active_state.get(axis), 0.0))
+        b = _clamp01(_safe_float(stored_state.get(axis), 0.0))
+        axis_scores.append(max(0.0, 1.0 - abs(a - b)))
+
+    axis_similarity = sum(axis_scores) / len(axis_scores) if axis_scores else 0.0
+    return _clamp01((0.50 * axis_similarity) + (0.35 * emotion_match) + (0.15 * mode_match))
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -757,6 +886,25 @@ def retrieve(
                 if vec:
                     cos = _cosine(qvec, vec)
                     it["score"] = (0.6 * it["score"]) + (0.4 * cos)
+
+        emotion_cfg = _load_memory_emotion_config()
+        if emotion_cfg.get("enabled"):
+            active_state = _current_retrieval_emotion_state()
+            if active_state:
+                state_weight = float(emotion_cfg.get("retrieval_state_match_weight") or 0.0)
+                min_state_sim = float(emotion_cfg.get("retrieval_min_state_similarity") or 0.0)
+                if state_weight > 0.0:
+                    for it in items:
+                        meta = it.get("meta") if isinstance(it, dict) else None
+                        mem_state = meta.get("emotion") if isinstance(meta, dict) else None
+                        state_match = _emotion_state_similarity(active_state, mem_state)
+                        if state_match < min_state_sim:
+                            state_match = 0.0
+                        state_boost = state_weight * state_match
+                        if state_boost > 0.0:
+                            it["score"] += state_boost
+                        it["emotion_state_match"] = round(state_match, 4)
+                        it["emotion_score_boost"] = round(state_boost, 4)
 
         items.sort(key=lambda i: i.get("score", 0.0), reverse=True)
 

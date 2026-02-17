@@ -120,9 +120,25 @@ Definition of Done:
 - Contract behavior validated by tests.
 - Alignment report shows no open P0/P1 doc-runtime mismatches.
 
+### Phase F: Emotion-Memory-Intelligence Retrieval Unification (M1-M3)
+
+- [x] `F1 / M1` Tag memory writes with bounded emotion snapshot metadata (`meta.emotion`) on live bank writes.
+- [x] `F2 / M2` Add emotion-state similarity rerank signal to memory retrieval with tuneables and observability fields.
+- [x] `F3 / M2` Extend memory retrieval A/B benchmark knobs with `emotion_state_weight` and per-case `emotion_state`.
+- [x] `F4 / M3` Add dedicated emotion-memory alignment gate benchmark (baseline vs emotion-aware rerank, pass/fail thresholds).
+- [x] `F5 / M3` Add targeted tests covering write tagging, retrieval uplift, knob resolution, and benchmark gate behavior.
+- [x] `F6` Integrate emotion-state rerank into live advisory semantic retrieval path behind `memory_emotion.*` gate.
+- [x] `F7` Run real-corpus weight sweep (`0.0, 0.1, 0.2, 0.3, 0.4`) with quality/latency/error gates and record promotion decision.
+
+Definition of Done:
+
+- Emotion metadata is persisted at memory-write time without breaking existing flows.
+- Retrieval can condition on current emotional state via tuneables.
+- Benchmark gates validate uplift and prevent silent regressions.
+
 ## Execution Mode
 
-Run strictly in order: `A -> B -> C -> D -> E`.
+Run strictly in order: `A -> B -> C -> D -> E -> F`.
 
 For each task:
 

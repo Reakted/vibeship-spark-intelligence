@@ -18,6 +18,7 @@ Design constraints
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import hashlib
@@ -31,6 +32,7 @@ from lib.queue import read_recent_events, EventType, _tail_lines
 BANK_DIR = Path.home() / ".spark" / "banks"
 GLOBAL_FILE = BANK_DIR / "global_user.jsonl"
 PROJECTS_DIR = BANK_DIR / "projects"
+TUNEABLES_FILE = Path.home() / ".spark" / "tuneables.json"
 
 
 @dataclass
@@ -62,6 +64,54 @@ class BankEntry:
 def _ensure_dirs():
     BANK_DIR.mkdir(parents=True, exist_ok=True)
     PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _load_memory_emotion_config() -> Dict[str, Any]:
+    cfg: Dict[str, Any] = {}
+    try:
+        if TUNEABLES_FILE.exists():
+            data = json.loads(TUNEABLES_FILE.read_text(encoding="utf-8-sig"))
+            if isinstance(data, dict):
+                mem = data.get("memory_emotion")
+                if isinstance(mem, dict):
+                    cfg = mem
+    except Exception:
+        cfg = {}
+    return cfg
+
+
+def _emotion_write_capture_enabled() -> bool:
+    env = os.getenv("SPARK_MEMORY_EMOTION_WRITE_CAPTURE")
+    if env is not None:
+        return str(env).strip().lower() not in {"0", "false", "no", "off"}
+    cfg = _load_memory_emotion_config()
+    raw = cfg.get("write_capture_enabled", True)
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _current_emotion_snapshot() -> Optional[Dict[str, Any]]:
+    try:
+        from lib.spark_emotions import SparkEmotions
+
+        state = (SparkEmotions().status() or {}).get("state") or {}
+        if not isinstance(state, dict):
+            return None
+        snapshot = {
+            "primary_emotion": str(state.get("primary_emotion") or "steady"),
+            "mode": str(state.get("mode") or "real_talk"),
+            "warmth": float(state.get("warmth", 0.0) or 0.0),
+            "energy": float(state.get("energy", 0.0) or 0.0),
+            "confidence": float(state.get("confidence", 0.0) or 0.0),
+            "calm": float(state.get("calm", 0.0) or 0.0),
+            "playfulness": float(state.get("playfulness", 0.0) or 0.0),
+            "strain": float(state.get("strain", 0.0) or 0.0),
+            "captured_at": float(time.time()),
+        }
+        return snapshot
+    except Exception:
+        return None
 
 
 def _hash_id(*parts: str) -> str:
@@ -196,6 +246,12 @@ def store_memory(text: str, category: str, session_id: Optional[str] = None, sou
     scope, proj = choose_scope(text=text, category=category, project_key=project_key)
 
     entry_id = _hash_id(scope, proj or "", category, text.strip()[:120])
+    meta: Dict[str, Any] = {}
+    if _emotion_write_capture_enabled():
+        snapshot = _current_emotion_snapshot()
+        if snapshot:
+            meta["emotion"] = snapshot
+
     entry = BankEntry(
         entry_id=entry_id,
         created_at=time.time(),
@@ -205,7 +261,7 @@ def store_memory(text: str, category: str, session_id: Optional[str] = None, sou
         text=text.strip(),
         session_id=session_id,
         source=source,
-        meta={},
+        meta=meta,
     )
     append_entry(entry)
     try:

@@ -118,9 +118,13 @@ def test_auto_mode_uses_primary_route_for_strong_simple_query(monkeypatch, tmp_p
     advisor.retrieval_policy = _policy_with(
         advisor,
         mode="auto",
+        gate_strategy="minimal",
         complexity_threshold=4,
         max_queries=4,
         agentic_query_limit=4,
+        domain_profile_enabled=False,
+        domain_profiles={},
+        escalate_on_high_risk=False,
         min_results_no_escalation=3,
         min_top_score_no_escalation=0.8,
     )
@@ -474,6 +478,81 @@ def test_semantic_rerank_boosts_multi_query_support(monkeypatch, tmp_path):
     advice = advisor._get_semantic_cognitive_advice("Read", "auth token session rollback investigation")
     assert advice
     assert advice[0].insight_key == "shared"
+
+
+def test_semantic_rerank_boosts_emotion_state_match(monkeypatch, tmp_path):
+    _patch_advisor_runtime(monkeypatch, tmp_path)
+
+    class _EmotionRetriever:
+        def retrieve(self, _query: str, _insights, limit: int = 8):
+            return [
+                SimpleNamespace(
+                    insight_key="steady",
+                    insight_text="rollback deploy checklist for fast recovery",
+                    semantic_sim=0.72,
+                    trigger_conf=0.0,
+                    fusion_score=0.72,
+                    source_type="semantic",
+                    why="semantic baseline",
+                ),
+                SimpleNamespace(
+                    insight_key="careful",
+                    insight_text="rollback deploy checklist for fast recovery",
+                    semantic_sim=0.72,
+                    trigger_conf=0.0,
+                    fusion_score=0.72,
+                    source_type="semantic",
+                    why="semantic baseline",
+                ),
+            ][:limit]
+
+    monkeypatch.setattr(semantic_retriever_mod, "get_semantic_retriever", lambda: _EmotionRetriever())
+
+    advisor = advisor_mod.SparkAdvisor()
+    advisor.cognitive.insights = {
+        "steady": SimpleNamespace(
+            insight="rollback deploy checklist for fast recovery",
+            reliability=0.5,
+            context="deploy",
+            meta={"emotion": {"primary_emotion": "steady", "mode": "real_talk", "strain": 0.20, "calm": 0.85}},
+        ),
+        "careful": SimpleNamespace(
+            insight="rollback deploy checklist for fast recovery",
+            reliability=0.5,
+            context="deploy",
+            meta={"emotion": {"primary_emotion": "careful", "mode": "real_talk", "strain": 0.82, "calm": 0.58}},
+        ),
+    }
+    advisor.retrieval_policy = _policy_with(
+        advisor,
+        mode="embeddings_only",
+        lexical_weight=0.0,
+        intent_coverage_weight=0.0,
+        support_boost_weight=0.0,
+        reliability_weight=0.0,
+        semantic_context_min=0.0,
+        semantic_lexical_min=0.0,
+        semantic_intent_min=0.0,
+        semantic_strong_override=0.0,
+    )
+    monkeypatch.setattr(
+        advisor,
+        "_load_memory_emotion_cfg",
+        lambda: {
+            "enabled": True,
+            "advisory_rerank_weight": 0.4,
+            "advisory_min_state_similarity": 0.1,
+        },
+    )
+    monkeypatch.setattr(
+        advisor,
+        "_current_emotion_state_for_rerank",
+        lambda: {"primary_emotion": "careful", "mode": "real_talk", "strain": 0.84, "calm": 0.56},
+    )
+
+    advice = advisor._get_semantic_cognitive_advice("Read", "rollback deploy recovery checklist")
+    assert advice
+    assert advice[0].insight_key == "careful"
 
 
 def test_semantic_route_filters_low_match_irrelevant_rows(monkeypatch, tmp_path):

@@ -272,3 +272,102 @@ def test_resolve_case_knobs_cli_overrides_runtime(monkeypatch):
     assert knobs["lexical_weight"] == 0.25
     assert knobs["intent_coverage_weight"] == 0.2
     assert knobs["semantic_intent_min"] == 0.01
+
+
+def test_resolve_case_knobs_includes_emotion_state_weight(monkeypatch):
+    mod = _load_module()
+    case = mod.EvalCase(case_id="c3", query="emotion memory retrieval")
+
+    monkeypatch.setattr(
+        mod,
+        "runtime_policy_overrides_for_case",
+        lambda case, tool_name="Bash": {
+            "emotion_state_weight": 0.22,
+        },
+    )
+
+    knobs = mod.resolve_case_knobs(
+        case=case,
+        use_runtime_policy=True,
+        tool_name="Bash",
+        candidate_k=None,
+        lexical_weight=None,
+        intent_coverage_weight=None,
+        support_boost_weight=None,
+        reliability_weight=None,
+        emotion_state_weight=None,
+        semantic_intent_min=None,
+    )
+    assert knobs["emotion_state_weight"] == 0.22
+
+    cli_knobs = mod.resolve_case_knobs(
+        case=case,
+        use_runtime_policy=True,
+        tool_name="Bash",
+        candidate_k=None,
+        lexical_weight=None,
+        intent_coverage_weight=None,
+        support_boost_weight=None,
+        reliability_weight=None,
+        emotion_state_weight=0.6,
+        semantic_intent_min=None,
+    )
+    assert cli_knobs["emotion_state_weight"] == 0.6
+
+
+def test_retrieve_hybrid_emotion_weight_promotes_state_match():
+    mod = _load_module()
+
+    class _Retriever:
+        def retrieve(self, _query: str, _insights, limit: int = 8):
+            return [
+                SimpleNamespace(
+                    insight_key="calm",
+                    insight_text="rollback deploy fix plan",
+                    semantic_sim=0.7,
+                    trigger_conf=0.0,
+                    fusion_score=0.7,
+                    source_type="semantic",
+                    why="base",
+                ),
+                SimpleNamespace(
+                    insight_key="strained",
+                    insight_text="rollback deploy fix plan",
+                    semantic_sim=0.7,
+                    trigger_conf=0.0,
+                    fusion_score=0.7,
+                    source_type="semantic",
+                    why="base",
+                ),
+            ][:limit]
+
+    insights = {
+        "calm": SimpleNamespace(
+            insight="rollback deploy fix plan",
+            reliability=0.5,
+            meta={"emotion": {"primary_emotion": "steady", "strain": 0.2, "calm": 0.8}},
+        ),
+        "strained": SimpleNamespace(
+            insight="rollback deploy fix plan",
+            reliability=0.5,
+            meta={"emotion": {"primary_emotion": "careful", "strain": 0.85, "calm": 0.5}},
+        ),
+    }
+    out = mod.retrieve_hybrid(
+        retriever=_Retriever(),
+        insights=insights,
+        query="rollback deploy fix plan",
+        top_k=2,
+        candidate_k=8,
+        lexical_weight=0.0,
+        intent_coverage_weight=0.0,
+        support_boost_weight=0.0,
+        reliability_weight=0.0,
+        emotion_state_weight=0.7,
+        semantic_intent_min=0.0,
+        strict_filter=False,
+        agentic=False,
+        emotion_state={"primary_emotion": "careful", "strain": 0.82, "calm": 0.52},
+    )
+    assert out
+    assert out[0].insight_key == "strained"

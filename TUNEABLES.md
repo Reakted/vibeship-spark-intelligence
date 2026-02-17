@@ -56,6 +56,44 @@ Canonical routing tuneables surface:
 | `retrieval.overrides.semantic_strong_override` | `0.92` | If semantic similarity is this strong, keep the candidate even if lexical overlap is weak. |
 
 ---
+## 0.5 Memory Emotion Fusion
+
+**Files:** `lib/memory_banks.py`, `lib/memory_store.py`
+
+This controls how emotional state is attached to memory writes and reused as a retrieval rerank signal.
+
+Tuneable surface:
+- Live: `~/.spark/tuneables.json` -> `memory_emotion.*`
+- Environment overrides:
+  - `SPARK_MEMORY_EMOTION_WRITE_CAPTURE`
+  - `SPARK_MEMORY_EMOTION_ENABLED`
+  - `SPARK_MEMORY_EMOTION_WEIGHT`
+  - `SPARK_MEMORY_EMOTION_MIN_SIM`
+  - `SPARK_ADVISORY_MEMORY_EMOTION_ENABLED`
+  - `SPARK_ADVISORY_MEMORY_EMOTION_WEIGHT`
+  - `SPARK_ADVISORY_MEMORY_EMOTION_MIN_SIM`
+
+### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `memory_emotion.enabled` | `true` | Master switch for retrieval-time emotion/state rerank in memory retrieval. |
+| `memory_emotion.write_capture_enabled` | `true` | Attach current emotion snapshot (`meta.emotion`) when writing memory-bank entries. |
+| `memory_emotion.retrieval_state_match_weight` | `0.22` | Additive score weight applied to state similarity during retrieval rerank. |
+| `memory_emotion.retrieval_min_state_similarity` | `0.30` | Minimum similarity required before state-match contributes to score. |
+| `memory_emotion.advisory_rerank_weight` | `0.15` | Additive weight for emotion-state similarity in live advisory semantic reranking. |
+| `memory_emotion.advisory_min_state_similarity` | `0.30` | Minimum similarity threshold before advisory rerank applies emotion boost. |
+
+### When to Tune
+
+| Scenario | Adjustment |
+|----------|------------|
+| Emotion signal overpowers relevance | Lower `retrieval_state_match_weight` (e.g. `0.10-0.18`) |
+| Emotion signal has no practical effect | Raise `retrieval_state_match_weight` (e.g. `0.30-0.45`) |
+| Too many weak emotional matches | Raise `retrieval_min_state_similarity` (e.g. `0.45`) |
+| Want broader emotional recall | Lower `retrieval_min_state_similarity` (e.g. `0.15-0.25`) |
+
+---
 ## 1. Memory Gate (Pattern → EIDOS)
 
 **File:** `lib/pattern_detection/memory_gate.py`

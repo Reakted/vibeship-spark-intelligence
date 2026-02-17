@@ -98,6 +98,7 @@ DEFAULT_RETRIEVAL_KNOBS = {
     "intent_coverage_weight": 0.0,
     "support_boost_weight": 0.0,
     "reliability_weight": 0.0,
+    "emotion_state_weight": 0.0,
     "semantic_intent_min": 0.0,
 }
 _RUNTIME_ADVISOR = None
@@ -110,6 +111,7 @@ class EvalCase:
     relevant_insight_keys: List[str] = field(default_factory=list)
     relevant_contains: List[str] = field(default_factory=list)
     notes: str = ""
+    emotion_state: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def has_labels(self) -> bool:
@@ -389,6 +391,7 @@ def load_cases(path: Path) -> List[EvalCase]:
         keys = [str(v).strip() for v in (row.get("relevant_insight_keys") or []) if str(v).strip()]
         contains = [str(v).strip().lower() for v in (row.get("relevant_contains") or []) if str(v).strip()]
         notes = str(row.get("notes") or "")
+        emotion_state = row.get("emotion_state") if isinstance(row.get("emotion_state"), dict) else {}
         cases.append(
             EvalCase(
                 case_id=case_id,
@@ -396,6 +399,7 @@ def load_cases(path: Path) -> List[EvalCase]:
                 relevant_insight_keys=keys,
                 relevant_contains=contains,
                 notes=notes,
+                emotion_state=emotion_state,
             )
         )
     return cases
@@ -432,6 +436,9 @@ def runtime_policy_overrides_for_case(
             "reliability_weight": float(
                 policy.get("reliability_weight", DEFAULT_RETRIEVAL_KNOBS["reliability_weight"]) or 0.0
             ),
+            "emotion_state_weight": float(
+                policy.get("emotion_state_weight", DEFAULT_RETRIEVAL_KNOBS["emotion_state_weight"]) or 0.0
+            ),
             "semantic_intent_min": float(
                 policy.get("semantic_intent_min", DEFAULT_RETRIEVAL_KNOBS["semantic_intent_min"]) or 0.0
             ),
@@ -452,7 +459,8 @@ def resolve_case_knobs(
     intent_coverage_weight: Optional[float],
     support_boost_weight: Optional[float],
     reliability_weight: Optional[float],
-    semantic_intent_min: Optional[float],
+    emotion_state_weight: Optional[float] = None,
+    semantic_intent_min: Optional[float] = None,
 ) -> Dict[str, Any]:
     knobs = dict(DEFAULT_RETRIEVAL_KNOBS)
     if use_runtime_policy:
@@ -473,6 +481,8 @@ def resolve_case_knobs(
         knobs["support_boost_weight"] = float(support_boost_weight)
     if reliability_weight is not None:
         knobs["reliability_weight"] = float(reliability_weight)
+    if emotion_state_weight is not None:
+        knobs["emotion_state_weight"] = float(emotion_state_weight)
     if semantic_intent_min is not None:
         knobs["semantic_intent_min"] = float(semantic_intent_min)
 
@@ -485,6 +495,9 @@ def resolve_case_knobs(
         knobs.get("support_boost_weight", DEFAULT_RETRIEVAL_KNOBS["support_boost_weight"])
     )
     knobs["reliability_weight"] = float(knobs.get("reliability_weight", DEFAULT_RETRIEVAL_KNOBS["reliability_weight"]))
+    knobs["emotion_state_weight"] = float(
+        knobs.get("emotion_state_weight", DEFAULT_RETRIEVAL_KNOBS["emotion_state_weight"])
+    )
     knobs["semantic_intent_min"] = float(
         knobs.get("semantic_intent_min", DEFAULT_RETRIEVAL_KNOBS["semantic_intent_min"])
     )
@@ -537,6 +550,53 @@ def compute_case_metrics(case: EvalCase, items: List[RetrievedItem], k: int) -> 
 
 def get_insight_text(insight: Any) -> str:
     return str(getattr(insight, "insight", "") or "").strip()
+
+
+def _extract_insight_emotion_state(insight: Any) -> Dict[str, Any]:
+    if insight is None:
+        return {}
+    direct = getattr(insight, "emotion_state", None)
+    if isinstance(direct, dict):
+        return direct
+    meta = getattr(insight, "meta", None)
+    if isinstance(meta, dict):
+        emo = meta.get("emotion")
+        if isinstance(emo, dict):
+            return emo
+    return {}
+
+
+def _emotion_state_similarity(active_state: Dict[str, Any], stored_state: Dict[str, Any]) -> float:
+    if not isinstance(active_state, dict) or not isinstance(stored_state, dict):
+        return 0.0
+    if not active_state or not stored_state:
+        return 0.0
+
+    emotion_match = 1.0 if (
+        str(active_state.get("primary_emotion") or "").strip()
+        and str(active_state.get("primary_emotion") or "").strip()
+        == str(stored_state.get("primary_emotion") or "").strip()
+    ) else 0.0
+    mode_match = 1.0 if (
+        str(active_state.get("mode") or "").strip()
+        and str(active_state.get("mode") or "").strip()
+        == str(stored_state.get("mode") or "").strip()
+    ) else 0.0
+
+    axes = ("strain", "calm", "energy", "confidence", "warmth", "playfulness")
+    axis_scores: List[float] = []
+    for axis in axes:
+        if axis not in active_state or axis not in stored_state:
+            continue
+        try:
+            a = max(0.0, min(1.0, float(active_state.get(axis))))
+            b = max(0.0, min(1.0, float(stored_state.get(axis))))
+        except Exception:
+            continue
+        axis_scores.append(max(0.0, 1.0 - abs(a - b)))
+
+    axis_similarity = sum(axis_scores) / len(axis_scores) if axis_scores else 0.0
+    return max(0.0, min(1.0, (0.50 * axis_similarity) + (0.35 * emotion_match) + (0.15 * mode_match)))
 
 
 def retrieve_embeddings_only(
@@ -626,9 +686,11 @@ def retrieve_hybrid(
     intent_coverage_weight: float,
     support_boost_weight: float,
     reliability_weight: float,
-    semantic_intent_min: float,
-    strict_filter: bool,
-    agentic: bool,
+    emotion_state_weight: float = 0.0,
+    semantic_intent_min: float = 0.0,
+    strict_filter: bool = True,
+    agentic: bool = False,
+    emotion_state: Optional[Dict[str, Any]] = None,
 ) -> List[RetrievedItem]:
     merged: Dict[str, RetrievedItem] = {}
     support_counts: Dict[str, int] = {}
@@ -682,6 +744,12 @@ def retrieve_hybrid(
         support_norm = (support - 1) / max(1, max_support - 1) if max_support > 1 else 0.0
         insight = insights.get(item.insight_key)
         reliability = float(getattr(insight, "reliability", 0.5) or 0.5)
+        emotion_similarity = 0.0
+        if emotion_state and emotion_state_weight > 0.0:
+            emotion_similarity = _emotion_state_similarity(
+                emotion_state,
+                _extract_insight_emotion_state(insight),
+            )
         if item.semantic_score < semantic_intent_min and coverage < semantic_intent_min and item.fusion_score < 0.9:
             continue
         item.score = (
@@ -690,9 +758,10 @@ def retrieve_hybrid(
             + (intent_coverage_weight * coverage)
             + (support_boost_weight * support_norm)
             + (reliability_weight * reliability)
+            + (emotion_state_weight * emotion_similarity)
         )
         item.why = (
-            f"{item.why} [lex={lex:.2f} coverage={coverage:.2f} support={support} rel={reliability:.2f}]"
+            f"{item.why} [lex={lex:.2f} coverage={coverage:.2f} support={support} rel={reliability:.2f} emotion={emotion_similarity:.2f}]"
         ).strip()
         ranked_candidates.append(item)
 
@@ -713,6 +782,7 @@ def run_system_for_case(
     intent_coverage_weight: float = 0.0,
     support_boost_weight: float = 0.0,
     reliability_weight: float = 0.0,
+    emotion_state_weight: float = 0.0,
     semantic_intent_min: float = 0.0,
     strict_filter: bool = True,
 ) -> Dict[str, Any]:
@@ -739,9 +809,11 @@ def run_system_for_case(
                 intent_coverage_weight=intent_coverage_weight,
                 support_boost_weight=support_boost_weight,
                 reliability_weight=reliability_weight,
+                emotion_state_weight=emotion_state_weight,
                 semantic_intent_min=semantic_intent_min,
                 strict_filter=strict_filter,
                 agentic=False,
+                emotion_state=case.emotion_state,
             )
         elif system == "hybrid_agentic":
             items = retrieve_hybrid(
@@ -754,9 +826,11 @@ def run_system_for_case(
                 intent_coverage_weight=intent_coverage_weight,
                 support_boost_weight=support_boost_weight,
                 reliability_weight=reliability_weight,
+                emotion_state_weight=emotion_state_weight,
                 semantic_intent_min=semantic_intent_min,
                 strict_filter=strict_filter,
                 agentic=True,
+                emotion_state=case.emotion_state,
             )
         else:
             raise ValueError(f"unsupported system: {system}")
@@ -933,6 +1007,7 @@ def main() -> int:
     parser.add_argument("--intent-coverage-weight", type=float, default=None, help="Intent coverage rerank weight")
     parser.add_argument("--support-boost-weight", type=float, default=None, help="Cross-query support rerank weight")
     parser.add_argument("--reliability-weight", type=float, default=None, help="Insight reliability rerank weight")
+    parser.add_argument("--emotion-state-weight", type=float, default=None, help="Emotion-state rerank weight")
     parser.add_argument(
         "--semantic-intent-min",
         type=float,
@@ -1036,6 +1111,7 @@ def main() -> int:
             intent_coverage_weight=args.intent_coverage_weight,
             support_boost_weight=args.support_boost_weight,
             reliability_weight=args.reliability_weight,
+            emotion_state_weight=args.emotion_state_weight,
             semantic_intent_min=args.semantic_intent_min,
         )
         per_case: Dict[str, Any] = {
@@ -1048,6 +1124,7 @@ def main() -> int:
                 "intent_coverage_weight": float(knobs["intent_coverage_weight"]),
                 "support_boost_weight": float(knobs["support_boost_weight"]),
                 "reliability_weight": float(knobs["reliability_weight"]),
+                "emotion_state_weight": float(knobs["emotion_state_weight"]),
                 "semantic_intent_min": float(knobs["semantic_intent_min"]),
                 "runtime_active_domain": str(knobs.get("runtime_active_domain") or ""),
                 "runtime_profile_domain": str(knobs.get("runtime_profile_domain") or ""),
@@ -1067,6 +1144,7 @@ def main() -> int:
                 intent_coverage_weight=float(knobs["intent_coverage_weight"]),
                 support_boost_weight=float(knobs["support_boost_weight"]),
                 reliability_weight=float(knobs["reliability_weight"]),
+                emotion_state_weight=float(knobs["emotion_state_weight"]),
                 semantic_intent_min=float(knobs["semantic_intent_min"]),
                 strict_filter=not bool(args.disable_strict_filter),
             )
@@ -1090,6 +1168,7 @@ def main() -> int:
             "intent_coverage_weight_cli": args.intent_coverage_weight,
             "support_boost_weight_cli": args.support_boost_weight,
             "reliability_weight_cli": args.reliability_weight,
+            "emotion_state_weight_cli": args.emotion_state_weight,
             "semantic_intent_min_cli": args.semantic_intent_min,
             "strict_filter": not bool(args.disable_strict_filter),
             "min_similarity": retriever.config.get("min_similarity"),
