@@ -58,6 +58,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\soak_health.ps1 -Min
 ## Next Plan (Immediate)
 
 1. Cut a Release Candidate and record the build manifest (see `docs/release/RELEASE_CANDIDATE.md` and `scripts/build_rc.ps1`).
-2. Dogfood: run Spark during real sessions to accumulate non-test Meta-Ralph samples until the quality band is enforced with stable stats.
+2. Dogfood: run Spark during real sessions and monitor Meta-Ralph telemetry quality trends. (Historical note: this report predates telemetry-only default gating.)
 3. Finalize launch distribution and ship the announcement pack (see `docs/launch/ANNOUNCEMENT_PACK.md`).
 

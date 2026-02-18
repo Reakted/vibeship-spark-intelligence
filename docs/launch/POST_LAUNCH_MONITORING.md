@@ -16,7 +16,7 @@ Safety:
 
 Quality:
 - production loop gates (`scripts/production_loop_report.py`)
-- Meta-Ralph quality band
+- Meta-Ralph telemetry trend (quality rate/sample health); gate enforcement is optional via `production_gates.enforce_meta_ralph_quality_band`
 
 Support:
 - top 5 issues (see `docs/support/DAILY_SUPPORT_TRACKING.md`)

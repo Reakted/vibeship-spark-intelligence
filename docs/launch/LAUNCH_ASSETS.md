@@ -102,7 +102,7 @@ Link: `docs/GETTING_STARTED_5_MIN.md`
 - `spark health` output (green)
 - `spark services` output (shows ports + running components)
 - Pulse dashboard landing view
-- Meta-Ralph quality view (if public-safe)
+- Meta-Ralph telemetry view (if public-safe)
 - A “before/after” context file change (`SPARK_CONTEXT.md` or equivalent)
 
 ## Pricing Narrative (If Needed)
