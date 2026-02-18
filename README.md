@@ -62,7 +62,7 @@ No API keys needed (Claude OAuth only).
   - bridge workers and learning/distillation loops (EIDOS)
 - Dashboards:
   - Spark Pulse (primary dashboard)
-  - Meta-Ralph quality analyzer (aux)
+  - Meta-Ralph quality analyzer (aux, telemetry-only by default for production gates)
 - Tooling:
   - CLI (`spark ...`) for status, services, opportunities, etc.
   - Hook integration for Claude Code (and other agents that can run a hook command)

@@ -7,7 +7,7 @@ evaluated consistently from live storage state.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -324,12 +324,48 @@ def load_live_metrics() -> LoopMetrics:
     )
 
 
+def _load_loop_thresholds_from_tuneables() -> LoopThresholds:
+    """Load production gate thresholds from ~/.spark/tuneables.json when present."""
+    default = LoopThresholds()
+    data = _read_json(SPARK_DIR / "tuneables.json", {})
+    cfg = data.get("production_gates") if isinstance(data, dict) else None
+    if not isinstance(cfg, dict):
+        return default
+
+    values: Dict[str, Any] = {}
+    for f in fields(LoopThresholds):
+        if f.name not in cfg:
+            continue
+        raw = cfg.get(f.name)
+        try:
+            if f.type is bool:
+                if isinstance(raw, bool):
+                    values[f.name] = raw
+                elif isinstance(raw, (int, float)):
+                    values[f.name] = bool(raw)
+                else:
+                    values[f.name] = str(raw).strip().lower() in {"1", "true", "yes", "on"}
+            elif f.type is int:
+                values[f.name] = int(raw)
+            elif f.type is float:
+                values[f.name] = float(raw)
+            else:
+                values[f.name] = raw
+        except Exception:
+            continue
+
+    try:
+        return LoopThresholds(**values)
+    except Exception:
+        return default
+
+
 def evaluate_gates(
     metrics: LoopMetrics,
     thresholds: LoopThresholds | None = None,
 ) -> Dict[str, Any]:
     """Evaluate metrics against production loop thresholds."""
-    t = thresholds or LoopThresholds()
+    t = thresholds or _load_loop_thresholds_from_tuneables()
     checks: List[Dict[str, Any]] = []
 
     def _add(

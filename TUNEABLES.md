@@ -1066,11 +1066,11 @@ spark importance --text "okay got it"
 
 ---
 
-## 9. Meta-Ralph (Quality Gate)
+## 9. Meta-Ralph (Telemetry + Optional Gate)
 
-**File:** `lib/meta_ralph.py` (vibeship-spark)
+**Files:** `lib/meta_ralph.py`, `lib/production_gates.py` (vibeship-spark)
 
-Meta-Ralph is the quality gate for Spark's self-evolution. It roasts every proposed learning before storage, scoring it on multiple dimensions to ensure only valuable cognitive insights pass through.
+Meta-Ralph remains active for scoring/telemetry of proposed learnings. Production readiness gating on Meta-Ralph quality-band is now optional and controlled from production gate tuneables.
 
 ### How It Works
 
@@ -1087,6 +1087,10 @@ Total = actionability + novelty + reasoning + specificity + outcome_linked
 | `quality_threshold` | **4** | Items scoring >= 4 pass as QUALITY. Lowered from 7→5→4 after over-filtering detected. Wired to `tuneables.json` → `meta_ralph.quality_threshold`. |
 | `needs_work_threshold` | **2** | Items scoring 2-3 are NEEDS_WORK (refinable). Wired to `meta_ralph.needs_work_threshold`. |
 | `primitive_threshold` | **<2** | Items scoring < 2 are PRIMITIVE (rejected). |
+
+Production gate behavior:
+- `production_gates.enforce_meta_ralph_quality_band` defaults to `false` (telemetry-only mode).
+- When set to `true`, readiness enforces the quality band once `production_gates.min_quality_samples` is met.
 
 ### Scoring Dimensions
 
@@ -1427,6 +1431,12 @@ This is the active hot-path advisory stack used by hooks:
     "attribution_window_s": 1200,
     "strict_attribution_require_trace": true
   },
+  "production_gates": {
+    "enforce_meta_ralph_quality_band": false,
+    "min_quality_samples": 50,
+    "min_quality_rate": 0.30,
+    "max_quality_rate": 0.60
+  },
   "eidos": {
     "max_steps": 40,
     "max_time_seconds": 1200,
@@ -1497,7 +1507,8 @@ Components fall back to hard-coded defaults when a key is absent.
 | `request_tracker` | EIDOS request envelope retention + timeout policy (optional) | `max_pending`, `max_completed`, `max_age_seconds` |
 | `memory_capture` | Conversational memory auto-save/suggestion policy (optional) | `auto_save_threshold`, `suggest_threshold`, `max_capture_chars` |
 | `queue` | Queue growth + read safety limits (optional) | `max_events`, `tail_chunk_bytes` |
-| `meta_ralph` | Meta-Ralph quality gate | `quality_threshold`, `needs_work_threshold`, `needs_work_close_delta`, `min_outcome_samples`, `min_tuneable_samples` |
+| `meta_ralph` | Meta-Ralph scoring thresholds | `quality_threshold`, `needs_work_threshold`, `needs_work_close_delta`, `min_outcome_samples`, `min_tuneable_samples` |
+| `production_gates` | Production readiness gate thresholds | `enforce_meta_ralph_quality_band`, `min_quality_samples`, `min_quality_rate`, `max_quality_rate`, plus any `LoopThresholds` key override |
 | `eidos` | EIDOS Budget defaults | `max_steps`, `max_time_seconds`, `max_retries_per_error`, `max_file_touches`, `no_evidence_limit` |
 | `scheduler` | Spark scheduler automation | `enabled`, `mention_poll_interval`, `engagement_snapshot_interval`, `daily_research_interval`, `niche_scan_interval`, `advisory_review_interval`, `advisory_review_window_hours`, `*_enabled` task flags |
 
