@@ -687,10 +687,48 @@ def store_deep_learnings(
             and floor_gate
             and stored < MIN_INSIGHTS_FLOOR
         ):
-            fallback_insight = (
-                "High-volume cycle produced weak distilled yield. "
-                "Prioritize one concise actionable insight before cycle close."
-            )
+            # Build a data-specific fallback insight from actual cycle signals
+            # instead of a generic meta-statement.
+            fallback_parts: List[str] = []
+            # Summarize top tool stat if available
+            tool_stats_raw = tool_effectiveness.get("tool_stats", {})
+            if tool_stats_raw:
+                sorted_tools = sorted(
+                    tool_stats_raw.items(),
+                    key=lambda kv: kv[1].get("total", 0),
+                    reverse=True,
+                )
+                top_tool_name, top_tool_data = sorted_tools[0]
+                sr = top_tool_data.get("success_rate", 1.0)
+                total = top_tool_data.get("total", 0)
+                if sr < 0.9 and total >= 2:
+                    fallback_parts.append(
+                        f"{top_tool_name} had {sr:.0%} success across {total} uses"
+                    )
+                else:
+                    fallback_parts.append(
+                        f"{top_tool_name} used {total} times ({sr:.0%} success)"
+                    )
+            # Summarize error pattern if available
+            err_patterns_list = error_patterns.get("error_patterns", [])
+            if err_patterns_list:
+                ep = err_patterns_list[0]
+                fallback_parts.append(
+                    f"recurring error in {ep.get('tool', '?')}: {ep.get('error_pattern', '')[:60]}"
+                )
+            # Summarize workflow signal if available
+            wf_insights = session_workflows.get("workflow_insights", [])
+            if wf_insights:
+                fallback_parts.append(wf_insights[0].get("insight", "")[:80])
+
+            if fallback_parts:
+                fallback_insight = "Cycle summary: " + "; ".join(fallback_parts) + "."
+            else:
+                fallback_insight = (
+                    f"Processed {events_processed} events with "
+                    f"{tool_updates} tools tracked and "
+                    f"{error_count} error patterns — no strong signal this cycle."
+                )
             context = (
                 f"distillation_floor events={events_processed} "
                 f"tool_updates={tool_effectiveness.get('tools_tracked', 0)} "
