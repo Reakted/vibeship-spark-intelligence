@@ -130,6 +130,31 @@ def _coerce_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _capture_emotion_state_snapshot() -> Dict[str, Any]:
+    env = os.environ.get("SPARK_COGNITIVE_EMOTION_CAPTURE")
+    if env is not None and str(env).strip().lower() in {"0", "false", "off", "no"}:
+        return {}
+    try:
+        from lib.spark_emotions import SparkEmotions
+
+        state = (SparkEmotions().status() or {}).get("state") or {}
+        if not isinstance(state, dict):
+            return {}
+        return {
+            "primary_emotion": str(state.get("primary_emotion") or "steady"),
+            "mode": str(state.get("mode") or "real_talk"),
+            "warmth": float(state.get("warmth", 0.0) or 0.0),
+            "energy": float(state.get("energy", 0.0) or 0.0),
+            "confidence": float(state.get("confidence", 0.0) or 0.0),
+            "calm": float(state.get("calm", 0.0) or 0.0),
+            "playfulness": float(state.get("playfulness", 0.0) or 0.0),
+            "strain": float(state.get("strain", 0.0) or 0.0),
+            "captured_at": time.time(),
+        }
+    except Exception:
+        return {}
+
+
 def _boost_confidence(current: float, validated: int) -> float:
     """Boost confidence based on validation count.
 
@@ -271,6 +296,7 @@ class CognitiveInsight:
     last_validated_at: Optional[str] = None
     source: str = ""  # adapter that captured this: "openclaw", "cursor", "windsurf", "claude", "depth_forge", etc.
     action_domain: str = ""  # pre-retrieval filter domain: "code", "x_social", "depth_training", "user_context", "system", "general"
+    emotion_state: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def reliability(self) -> float:
@@ -299,6 +325,7 @@ class CognitiveInsight:
             "last_validated_at": self.last_validated_at,
             "source": self.source,
             "action_domain": self.action_domain,
+            "emotion_state": self.emotion_state or {},
         }
     
     @classmethod
@@ -325,6 +352,7 @@ class CognitiveInsight:
             last_validated_at=data.get("last_validated_at"),
             source=data.get("source", ""),
             action_domain=data.get("action_domain", ""),
+            emotion_state=data.get("emotion_state", {}) if isinstance(data.get("emotion_state"), dict) else {},
         )
 
 
@@ -1245,6 +1273,7 @@ class CognitiveLearner:
         # Generate key from first few words of insight
         key_part = insight[:40].replace(" ", "_").lower()
         key = self._generate_key(category, key_part)
+        emotion_state = _capture_emotion_state_snapshot()
 
         if key in self.insights:
             # Update existing - boost confidence!
@@ -1254,6 +1283,8 @@ class CognitiveLearner:
             if context and context not in existing.evidence:
                 existing.evidence.append(context[:200])
                 existing.evidence = existing.evidence[-10:]
+            if emotion_state:
+                existing.emotion_state = emotion_state
         else:
             domain = classify_action_domain(insight, category=category.value, source=source)
             self.insights[key] = CognitiveInsight(
@@ -1264,6 +1295,7 @@ class CognitiveLearner:
                 context=context[:100] if context else "",
                 source=source,
                 action_domain=domain,
+                emotion_state=emotion_state,
             )
 
         self._save_insights()

@@ -20,6 +20,7 @@ from collections import defaultdict, deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from threading import Lock
+from threading import Thread
 from urllib.parse import urlparse
 
 import sys
@@ -38,6 +39,7 @@ PORT = SPARKD_PORT
 TOKEN = os.environ.get("SPARKD_TOKEN")
 MAX_BODY_BYTES = int(os.environ.get("SPARKD_MAX_BODY_BYTES", "262144"))
 INVALID_EVENTS_FILE = Path.home() / ".spark" / "invalid_events.jsonl"
+TUNEABLES_FILE = Path.home() / ".spark" / "tuneables.json"
 RATE_LIMIT_PER_MIN = int(os.environ.get("SPARKD_RATE_LIMIT_PER_MIN", "240"))
 RATE_LIMIT_WINDOW_S = int(os.environ.get("SPARKD_RATE_LIMIT_WINDOW_S", "60"))
 INVALID_EVENTS_MAX_LINES = int(os.environ.get("SPARKD_INVALID_EVENTS_MAX_LINES", "2000"))
@@ -45,6 +47,14 @@ INVALID_EVENTS_MAX_PAYLOAD_CHARS = int(os.environ.get("SPARKD_INVALID_EVENTS_MAX
 
 _RATE_LIMIT_BUCKETS = defaultdict(deque)
 _RATE_LIMIT_LOCK = Lock()
+OPENCLAW_RUNTIME_DEFAULTS = {
+    "advisory_bridge_enabled": True,
+    "emotion_updates_enabled": True,
+    "emotion_trigger_intensity": 0.7,
+    "async_dispatch_enabled": True,
+}
+_OPENCLAW_RUNTIME_CFG_CACHE = dict(OPENCLAW_RUNTIME_DEFAULTS)
+_OPENCLAW_RUNTIME_CFG_MTIME = None
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -172,6 +182,281 @@ def _quarantine_invalid(payload, reason: str) -> None:
         with INVALID_EVENTS_FILE.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
         _trim_jsonl_tail(INVALID_EVENTS_FILE, INVALID_EVENTS_MAX_LINES)
+    except Exception:
+        return
+
+
+def _parse_bool(value, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() not in {"0", "false", "off", "no"}
+
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _load_openclaw_runtime_config(*, force: bool = False) -> dict:
+    global _OPENCLAW_RUNTIME_CFG_CACHE
+    global _OPENCLAW_RUNTIME_CFG_MTIME
+
+    mtime = None
+    try:
+        if TUNEABLES_FILE.exists():
+            mtime = float(TUNEABLES_FILE.stat().st_mtime)
+    except Exception:
+        mtime = None
+
+    if not force and _OPENCLAW_RUNTIME_CFG_MTIME == mtime:
+        return dict(_OPENCLAW_RUNTIME_CFG_CACHE)
+
+    cfg = dict(OPENCLAW_RUNTIME_DEFAULTS)
+    try:
+        if TUNEABLES_FILE.exists():
+            data = json.loads(TUNEABLES_FILE.read_text(encoding="utf-8-sig"))
+            section = data.get("openclaw_runtime") if isinstance(data, dict) else None
+            if isinstance(section, dict):
+                cfg["advisory_bridge_enabled"] = _parse_bool(
+                    section.get("advisory_bridge_enabled"),
+                    cfg["advisory_bridge_enabled"],
+                )
+                cfg["emotion_updates_enabled"] = _parse_bool(
+                    section.get("emotion_updates_enabled"),
+                    cfg["emotion_updates_enabled"],
+                )
+                cfg["emotion_trigger_intensity"] = _safe_float(
+                    section.get("emotion_trigger_intensity"),
+                    cfg["emotion_trigger_intensity"],
+                )
+                cfg["async_dispatch_enabled"] = _parse_bool(
+                    section.get("async_dispatch_enabled"),
+                    cfg["async_dispatch_enabled"],
+                )
+    except Exception:
+        pass
+
+    env_advisory = os.environ.get("SPARKD_OPENCLAW_ADVISORY_BRIDGE_ENABLED")
+    if env_advisory is not None:
+        cfg["advisory_bridge_enabled"] = _parse_bool(
+            env_advisory,
+            cfg["advisory_bridge_enabled"],
+        )
+
+    env_emotion = os.environ.get("SPARKD_OPENCLAW_EMOTION_UPDATES_ENABLED")
+    if env_emotion is not None:
+        cfg["emotion_updates_enabled"] = _parse_bool(
+            env_emotion,
+            cfg["emotion_updates_enabled"],
+        )
+
+    env_intensity = os.environ.get("SPARKD_OPENCLAW_EMOTION_TRIGGER_INTENSITY")
+    if env_intensity is not None:
+        cfg["emotion_trigger_intensity"] = _safe_float(
+            env_intensity,
+            cfg["emotion_trigger_intensity"],
+        )
+    env_async = os.environ.get("SPARKD_OPENCLAW_BRIDGE_ASYNC_ENABLED")
+    if env_async is not None:
+        cfg["async_dispatch_enabled"] = _parse_bool(
+            env_async,
+            cfg["async_dispatch_enabled"],
+        )
+
+    cfg["emotion_trigger_intensity"] = max(0.2, min(1.0, float(cfg["emotion_trigger_intensity"])))
+    _OPENCLAW_RUNTIME_CFG_CACHE = dict(cfg)
+    _OPENCLAW_RUNTIME_CFG_MTIME = mtime
+    return dict(cfg)
+
+
+def _resolve_queue_event_type(evt: SparkEventV1) -> EventType:
+    payload = evt.payload if isinstance(evt.payload, dict) else {}
+    kind = str(getattr(evt.kind, "value", ""))
+    if kind == "message":
+        return EventType.USER_PROMPT
+    if kind == "tool":
+        is_result = "tool_result" in payload or "is_error" in payload
+        if is_result:
+            return EventType.POST_TOOL_FAILURE if bool(payload.get("is_error")) else EventType.POST_TOOL
+        return EventType.PRE_TOOL
+    if kind == "command" and str(payload.get("command") or "").strip().lower() == "session_start":
+        return EventType.SESSION_START
+    return EventType.LEARNING
+
+
+def _infer_user_emotion_trigger(text: str):
+    t = str(text or "").strip().lower()
+    if not t:
+        return None
+    if any(tok in t for tok in ("frustrated", "annoyed", "angry", "upset", "not working", "stuck", "broken")):
+        return "user_frustration"
+    if any(tok in t for tok in ("confused", "unclear", "not sure", "don't understand", "dont understand")):
+        return "user_confusion"
+    if any(tok in t for tok in ("urgent", "asap", "production", "incident", "critical", "immediately")):
+        return "high_stakes_request"
+    if any(tok in t for tok in ("great", "awesome", "nice", "perfect", "thanks", "thank you", "good job")):
+        return "user_celebration"
+    return None
+
+
+def _call_advisory_on_user_prompt(session_id: str, prompt_text: str, trace_id: str | None = None) -> None:
+    from lib.advisory_engine import on_user_prompt
+
+    on_user_prompt(session_id, prompt_text, trace_id=trace_id)
+
+
+def _call_advisory_on_pre_tool(
+    session_id: str,
+    tool_name: str,
+    tool_input: dict | None = None,
+    trace_id: str | None = None,
+):
+    from lib.advisory_engine import on_pre_tool
+
+    return on_pre_tool(session_id, tool_name, tool_input=tool_input or {}, trace_id=trace_id)
+
+
+def _call_advisory_on_post_tool(
+    session_id: str,
+    tool_name: str,
+    success: bool,
+    tool_input: dict | None = None,
+    trace_id: str | None = None,
+    error: str | None = None,
+) -> None:
+    from lib.advisory_engine import on_post_tool
+
+    on_post_tool(
+        session_id,
+        tool_name,
+        success=bool(success),
+        tool_input=tool_input or {},
+        trace_id=trace_id,
+        error=error,
+    )
+
+
+def _emotion_register_trigger(trigger: str, *, intensity: float = 0.7, note: str = "") -> None:
+    from lib.spark_emotions import SparkEmotions
+
+    SparkEmotions().register_trigger(trigger, intensity=float(intensity), note=note)
+
+
+def _emotion_recover() -> None:
+    from lib.spark_emotions import SparkEmotions
+
+    SparkEmotions().recover()
+
+
+def _maybe_bridge_openclaw_runtime(evt: SparkEventV1, event_type: EventType) -> None:
+    source = str(getattr(evt, "source", "") or "").strip().lower()
+    if source != "openclaw":
+        return
+
+    cfg = _load_openclaw_runtime_config()
+    advisory_enabled = bool(cfg.get("advisory_bridge_enabled", True))
+    emotion_enabled = bool(cfg.get("emotion_updates_enabled", True))
+    if not advisory_enabled and not emotion_enabled:
+        return
+
+    payload = evt.payload if isinstance(evt.payload, dict) else {}
+    kind = str(getattr(evt.kind, "value", ""))
+    session_id = str(getattr(evt, "session_id", "") or "")
+    trace_id = getattr(evt, "trace_id", None)
+    intensity = float(cfg.get("emotion_trigger_intensity", 0.7) or 0.7)
+
+    if kind == "message":
+        role = str(payload.get("role") or "").strip().lower()
+        text = str(payload.get("text") or "").strip()
+        if role != "user" or not text:
+            return
+        if advisory_enabled:
+            try:
+                _call_advisory_on_user_prompt(session_id, text, trace_id=trace_id)
+            except Exception:
+                pass
+        if emotion_enabled:
+            try:
+                trigger = _infer_user_emotion_trigger(text)
+                if trigger:
+                    _emotion_register_trigger(trigger, intensity=intensity, note="openclaw_user_prompt")
+                else:
+                    _emotion_recover()
+            except Exception:
+                pass
+        return
+
+    if kind != "tool":
+        return
+
+    tool_name = str(payload.get("tool_name") or "").strip()
+    if not tool_name:
+        return
+    tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+
+    if event_type == EventType.PRE_TOOL:
+        if advisory_enabled:
+            try:
+                _call_advisory_on_pre_tool(session_id, tool_name, tool_input=tool_input, trace_id=trace_id)
+            except Exception:
+                pass
+        return
+
+    if event_type not in {EventType.POST_TOOL, EventType.POST_TOOL_FAILURE}:
+        return
+
+    success = bool(event_type == EventType.POST_TOOL and not payload.get("is_error"))
+    error_text = ""
+    if not success:
+        error_text = str(payload.get("error") or payload.get("tool_result") or "")[:200]
+
+    if advisory_enabled:
+        try:
+            _call_advisory_on_post_tool(
+                session_id,
+                tool_name,
+                success=success,
+                tool_input=tool_input,
+                trace_id=trace_id,
+                error=error_text or None,
+            )
+        except Exception:
+            pass
+
+    if emotion_enabled:
+        try:
+            if success:
+                _emotion_recover()
+            else:
+                _emotion_register_trigger(
+                    "repair_after_mistake",
+                    intensity=max(0.5, intensity),
+                    note=f"openclaw_tool_failure:{tool_name}",
+                )
+        except Exception:
+            pass
+
+
+def _dispatch_openclaw_runtime_bridge(evt: SparkEventV1, event_type: EventType) -> None:
+    source = str(getattr(evt, "source", "") or "").strip().lower()
+    if source != "openclaw":
+        return
+    cfg = _load_openclaw_runtime_config()
+    if not bool(cfg.get("advisory_bridge_enabled", True)) and not bool(cfg.get("emotion_updates_enabled", True)):
+        return
+    if not bool(cfg.get("async_dispatch_enabled", True)):
+        _maybe_bridge_openclaw_runtime(evt, event_type)
+        return
+    try:
+        Thread(
+            target=_maybe_bridge_openclaw_runtime,
+            args=(evt, event_type),
+            daemon=True,
+        ).start()
     except Exception:
         return
 
@@ -338,14 +623,7 @@ class Handler(BaseHTTPRequestHandler):
             _quarantine_invalid(data, f"parse_error:{type(e).__name__}")
             return _json(self, 400, {"ok": False, "error": "invalid_event", "detail": str(e)[:200]})
 
-        # Store as a Spark queue event (POST_TOOL/USER_PROMPT mapping is adapter-defined)
-        # Here we just record it as a generic USER_PROMPT or POST_TOOL depending on kind.
-        if evt.kind.value == "message":
-            et = EventType.USER_PROMPT
-        elif evt.kind.value == "tool":
-            et = EventType.POST_TOOL
-        else:
-            et = EventType.LEARNING
+        et = _resolve_queue_event_type(evt)
 
         # Try to propagate working-directory hints for project inference.
         meta = (evt.payload or {}).get("meta") or {}
@@ -367,6 +645,8 @@ class Handler(BaseHTTPRequestHandler):
             tool_input=evt.payload.get("tool_input"),
             error=evt.payload.get("error"),
         )
+
+        _dispatch_openclaw_runtime_bridge(evt, et)
 
         return _json(self, 200, {"ok": bool(ok)})
 

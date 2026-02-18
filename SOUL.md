@@ -18,6 +18,7 @@
 - Prefer '1' over 'propagating full tracing metadata with every GraphQL mutation, deploy WebAssembly modules at your edge/CDN layer that:' *When: Detected from correction pattern (importance: medi* (100% reliable, 5 validations)
 - User prefers: the FULL range *When: Detected from correction pattern (importance: medi* (100% reliable, 5 validations)
 - When using Bash, remember: wrong answer because it sounded plausible destroys your entire learning loop. The cost difference is *When: Detected from correction pattern (importance: crit* (83% reliable, 20 validations)
+- Remember this because it is critical: prefer rollback-safe integration first. I am confused about contract drift and this is not clear. *When: signals: ['critical:explicit_remember', 'critical:* (100% reliable, 3 validations)
 ## ... *When: signals: ['preference', 'correction'], session: 37* (100% reliable, 4 validations)
 ## Context
 Domain: api_data_flow | Topic: rate limiting | Level: 3/15 (COMPARE â€” Tradeoff analysis)
