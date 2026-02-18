@@ -137,6 +137,7 @@ class ProcessingMetrics:
     backpressure_level: str = "healthy"
 
     errors: List[str] = field(default_factory=list)
+    distillation_debug: Dict[str, Any] = field(default_factory=dict)
 
     # The actual events processed this cycle.  Used by bridge_cycle to feed
     # downstream subsystems without re-reading the (now consumed) queue.
@@ -171,6 +172,7 @@ class ProcessingMetrics:
                 "backpressure_level": self.backpressure_level,
             },
             "errors": self.errors,
+            "distillation_debug": self.distillation_debug,
         }
 
 
@@ -554,13 +556,19 @@ def store_deep_learnings(
     session_workflows: Dict[str, Any],
     *,
     events_processed: int = 0,
-) -> int:
+) -> tuple[int, Dict[str, Any]]:
     """Store extracted learnings in the cognitive system.
 
     All insights pass through MetaRalph quality gate before storage.
-    Returns the count of insights actually stored.
+    Returns: (stored_count, debug_info)
     """
     stored = 0
+    debug: Dict[str, Any] = {
+        "attempted": 0,
+        "stored": 0,
+        "skipped": {},
+        "floor_applied": False,
+    }
 
     try:
         from lib.cognitive_learner import get_cognitive_learner, CognitiveCategory
@@ -570,17 +578,28 @@ def store_deep_learnings(
 
         def _gate_and_store(insight_text: str, category, context: str, confidence: float, source: str = "pipeline") -> bool:
             """Run insight through MetaRalph quality gate, then store if it passes."""
+            debug["attempted"] = int(debug.get("attempted", 0)) + 1
             roast_result = ralph.roast(insight_text, source=source)
             if roast_result.verdict == RoastVerdict.QUALITY:
                 # Use refined version if MetaRalph improved it
                 final_text = roast_result.refined_version or insight_text
-                return bool(learner.add_insight(
+                ok = bool(learner.add_insight(
                     category=category,
                     insight=final_text,
                     context=context,
                     confidence=confidence,
                     source="pipeline_macro",
                 ))
+                if ok:
+                    debug["stored"] = int(debug.get("stored", 0)) + 1
+                else:
+                    skipped = debug.setdefault("skipped", {})
+                    skipped["storage_rejected"] = int(skipped.get("storage_rejected", 0)) + 1
+                return ok
+
+            skipped = debug.setdefault("skipped", {})
+            reason = str(getattr(roast_result.verdict, "value", roast_result.verdict) or "gate_rejected")
+            skipped[reason] = int(skipped.get(reason, 0)) + 1
             return False
 
         # Tool effectiveness insights
@@ -672,11 +691,19 @@ def store_deep_learnings(
                 source="pipeline_macro",
             ):
                 stored += 1
+                debug["stored"] = int(debug.get("stored", 0)) + 1
+                debug["floor_applied"] = True
+            else:
+                skipped = debug.setdefault("skipped", {})
+                skipped["floor_storage_rejected"] = int(skipped.get("floor_storage_rejected", 0)) + 1
 
     except Exception as e:
+        skipped = debug.setdefault("skipped", {})
+        skipped["exception"] = int(skipped.get("exception", 0)) + 1
+        debug["error"] = str(e)[:160]
         log_debug("pipeline", "store_deep_learnings failed", e)
 
-    return stored
+    return stored, debug
 
 
 # ============= Main Processing Pipeline =============
@@ -854,13 +881,14 @@ def run_processing_cycle(
 
         # 7. Store deep learnings
         try:
-            stored = store_deep_learnings(
+            stored, distill_debug = store_deep_learnings(
                 tool_eff,
                 error_pats,
                 workflows,
                 events_processed=len(events),
             )
             metrics.insights_created = stored
+            metrics.distillation_debug = distill_debug
         except Exception as e:
             metrics.errors.append(f"store_learnings: {str(e)[:100]}")
             log_debug("pipeline", "store deep learnings failed", e)
