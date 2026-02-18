@@ -669,6 +669,7 @@ def store_deep_learnings(
                 insight=fallback_insight,
                 context=context,
                 confidence=0.55,
+                source="pipeline_macro",
             ):
                 stored += 1
 

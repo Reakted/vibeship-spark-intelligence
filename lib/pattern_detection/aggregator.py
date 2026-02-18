@@ -422,6 +422,7 @@ class PatternAggregator:
                 insight=pattern.suggested_insight,
                 context=f"Detected from {pattern.pattern_type.value} pattern (importance: {importance.tier.value})",
                 confidence=effective_confidence,
+                source="pattern_aggregator",
             )
 
             # Track importance distribution

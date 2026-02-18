@@ -161,6 +161,7 @@ def _process_decision(data: Dict, state: Dict) -> None:
             insight=f"Agent decided: {intent} (confidence={confidence:.1f})",
             context=reasoning,
             confidence=confidence,
+            source="feedback_loop",
         )
     except Exception as e:
         log_debug("feedback", "Failed to add decision insight", e)
@@ -192,6 +193,7 @@ def _process_outcome(data: Dict, state: Dict) -> None:
                 insight=lesson,
                 context=f"Outcome: {result}",
                 confidence=0.9 if success else 0.7,
+                source="feedback_loop",
             )
         except Exception as e:
             log_debug("feedback", "Failed to add outcome insight", e)
@@ -225,6 +227,7 @@ def _process_preference(data: Dict, state: Dict) -> None:
                 insight=f"Agent prefers: {liked}",
                 context="self-reported preference",
                 confidence=0.95,
+                source="feedback_loop",
             )
         if disliked:
             cog.add_insight(
@@ -232,6 +235,7 @@ def _process_preference(data: Dict, state: Dict) -> None:
                 insight=f"Agent avoids: {disliked}",
                 context="self-reported preference",
                 confidence=0.95,
+                source="feedback_loop",
             )
     except Exception as e:
         log_debug("feedback", "Failed to add preference insight", e)

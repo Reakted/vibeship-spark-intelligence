@@ -329,6 +329,7 @@ class CuriosityEngine:
                     insight=answer,
                     context=f"Answer to: {gap.question}",
                     confidence=0.8,
+                    source="curiosity_engine",
                 )
             except Exception:
                 pass

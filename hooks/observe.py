@@ -721,6 +721,10 @@ def main():
     if trace_id:
         data["trace_id"] = trace_id
 
+    # Ensure source attribution on ALL events (not just UserPromptSubmit)
+    if "source" not in data:
+        data["source"] = "claude_code"
+
     kwargs = {}
     if tool_name:
         kwargs["tool_name"] = tool_name

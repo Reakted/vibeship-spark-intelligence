@@ -328,7 +328,7 @@ def commit_learning(
             clean = clean[:MAX_CAPTURE_CHARS].rstrip()
         # Use a short context snippet so retrieval has something relevant.
         ctx = (context or clean)[:100]
-        cog.add_insight(category=category, insight=clean, context=ctx, confidence=0.7)
+        cog.add_insight(category=category, insight=clean, context=ctx, confidence=0.7, source="memory_capture")
 
         # Also store into layered memory banks for fast retrieval + future project scoping.
         try:

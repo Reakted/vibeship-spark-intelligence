@@ -889,6 +889,7 @@ class XEvolution:
                     insight=wisdom_insight,
                     context=wisdom_context,
                     confidence=event.get("confidence", 0.7),
+                    source="x_evolution",
                 )
                 promoted += 1
 

@@ -336,6 +336,7 @@ class HypothesisTracker:
                 insight=hypothesis.statement,
                 context=f"Validated hypothesis ({hypothesis.accuracy:.0%} accuracy over {hypothesis.sample_size} predictions)",
                 confidence=hypothesis.accuracy,
+                source="hypothesis_tracker",
             )
 
             hypothesis.state = HypothesisState.BELIEF

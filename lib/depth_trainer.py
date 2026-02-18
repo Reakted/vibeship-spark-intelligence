@@ -2071,6 +2071,7 @@ def _integrate_cognitive(result: TrainingResult) -> int:
                     ),
                     context=f"DEPTH training session {result.session_id}",
                     confidence=0.8,
+                    source="depth_trainer",
                 )
                 if insight:
                     stored += 1
@@ -2089,6 +2090,7 @@ def _integrate_cognitive(result: TrainingResult) -> int:
                     ),
                     context=f"Scored {step['score']}/10 on '{step['question'][:100]}'",
                     confidence=0.85,
+                    source="depth_trainer",
                 )
                 if insight:
                     stored += 1
@@ -2107,6 +2109,7 @@ def _integrate_cognitive(result: TrainingResult) -> int:
                 ),
                 context=f"Full {result.max_depth}-level DEPTH descent, session {result.session_id}",
                 confidence=0.9,
+                source="depth_trainer",
             )
             if insight:
                 stored += 1
@@ -2125,6 +2128,7 @@ def _integrate_cognitive(result: TrainingResult) -> int:
                 ),
                 context=f"DEPTH training, {result.total_score}/{result.max_depth*10}",
                 confidence=0.85,
+                source="depth_trainer",
             )
             if insight:
                 stored += 1
@@ -2150,6 +2154,7 @@ def _integrate_cognitive(result: TrainingResult) -> int:
                     ),
                     context=f"Over {len(same_topic)} sessions",
                     confidence=0.9,
+                    source="depth_trainer",
                 )
                 if insight:
                     stored += 1
@@ -2859,6 +2864,7 @@ async def _metacognitive_analysis(
             insight=summary,
             context=f"Metacognitive analysis of DEPTH training trajectory",
             confidence=0.95,
+            source="depth_trainer",
         )
     except Exception:
         pass
