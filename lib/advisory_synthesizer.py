@@ -435,6 +435,10 @@ def synthesize_programmatic(
         elif authority != "whisper":
             notes.append(entry)
 
+    # Sort by confidence descending so highest-signal items surface first
+    warnings.sort(key=lambda e: e["confidence"], reverse=True)
+    notes.sort(key=lambda e: e["confidence"], reverse=True)
+
     max_warnings = 1 if verbosity == "concise" else 2
     max_notes = 1 if verbosity == "concise" else (4 if verbosity == "structured" else 3)
 
@@ -479,7 +483,15 @@ def synthesize_programmatic(
             if verbosity == "concise":
                 sections.append(text)
             else:
-                sections.append(f"- {text}")
+                # Add source hint for non-obvious provenance
+                source_hint = ""
+                src = n.get("source", "")
+                if src and verbosity == "structured":
+                    # Short provenance tag helps user gauge relevance
+                    src_label = src.split(":")[-1].strip() if ":" in src else src
+                    if src_label and src_label not in ("unknown", ""):
+                        source_hint = f" [{src_label}]"
+                sections.append(f"- {text}{source_hint}")
 
     if ask_clarifying_question:
         sections.append("If this doesn’t match your intent, what outcome matters most for this step?")
