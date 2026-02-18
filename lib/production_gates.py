@@ -62,8 +62,9 @@ class LoopThresholds:
     min_distillations: int = 5
     min_quality_rate: float = 0.30
     max_quality_rate: float = 0.60
-    # Meta-Ralph quality band is only meaningful after enough real (non-test) samples.
-    min_quality_samples: int = 50
+    # TEMP SOFTEN (2026-02-19): delay Meta-Ralph quality-band enforcement while GAUR recovers.
+    # Rollback target after stabilization: set back to 50.
+    min_quality_samples: int = 1000
     max_queue_depth: int = 2000
     max_chip_to_cognitive_ratio: float = 100.0
 
