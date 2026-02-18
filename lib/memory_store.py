@@ -63,6 +63,14 @@ MEMORY_LEARNING_DEFAULTS: Dict[str, Any] = {
 _MEMORY_LEARNING_CFG_CACHE: Dict[str, Any] = dict(MEMORY_LEARNING_DEFAULTS)
 _MEMORY_LEARNING_CFG_MTIME: Optional[float] = None
 
+MEMORY_RETRIEVAL_GUARD_DEFAULTS: Dict[str, Any] = {
+    "enabled": True,
+    "base_score_floor": 0.22,
+    "max_total_boost": 0.42,
+}
+_MEMORY_RETRIEVAL_GUARD_CFG_CACHE: Dict[str, Any] = dict(MEMORY_RETRIEVAL_GUARD_DEFAULTS)
+_MEMORY_RETRIEVAL_GUARD_CFG_MTIME: Optional[float] = None
+
 
 def _safe_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
@@ -182,6 +190,44 @@ def _load_memory_learning_config(*, force: bool = False) -> Dict[str, Any]:
 
     _MEMORY_LEARNING_CFG_CACHE = dict(cfg)
     _MEMORY_LEARNING_CFG_MTIME = current_mtime
+    return dict(cfg)
+
+
+def _load_memory_retrieval_guard_config(*, force: bool = False) -> Dict[str, Any]:
+    global _MEMORY_RETRIEVAL_GUARD_CFG_MTIME
+    global _MEMORY_RETRIEVAL_GUARD_CFG_CACHE
+
+    current_mtime: Optional[float] = None
+    try:
+        if TUNEABLES_FILE.exists():
+            current_mtime = float(TUNEABLES_FILE.stat().st_mtime)
+    except Exception:
+        current_mtime = None
+
+    if not force and _MEMORY_RETRIEVAL_GUARD_CFG_MTIME == current_mtime:
+        return dict(_MEMORY_RETRIEVAL_GUARD_CFG_CACHE)
+
+    cfg = dict(MEMORY_RETRIEVAL_GUARD_DEFAULTS)
+    try:
+        if TUNEABLES_FILE.exists():
+            payload = json.loads(TUNEABLES_FILE.read_text(encoding="utf-8-sig"))
+            section = payload.get("memory_retrieval_guard") if isinstance(payload, dict) else None
+            if isinstance(section, dict):
+                cfg["enabled"] = _safe_bool(section.get("enabled"), cfg["enabled"])
+                cfg["base_score_floor"] = _safe_float(section.get("base_score_floor"), cfg["base_score_floor"])
+                cfg["max_total_boost"] = _safe_float(section.get("max_total_boost"), cfg["max_total_boost"])
+    except Exception:
+        pass
+
+    env_enabled = os.getenv("SPARK_MEMORY_RETRIEVAL_GUARD_ENABLED")
+    if env_enabled is not None:
+        cfg["enabled"] = _safe_bool(env_enabled, cfg["enabled"])
+
+    cfg["base_score_floor"] = _clamp01(cfg["base_score_floor"])
+    cfg["max_total_boost"] = max(0.0, float(cfg["max_total_boost"]))
+
+    _MEMORY_RETRIEVAL_GUARD_CFG_CACHE = dict(cfg)
+    _MEMORY_RETRIEVAL_GUARD_CFG_MTIME = current_mtime
     return dict(cfg)
 
 
@@ -1011,6 +1057,15 @@ def retrieve(
                     cos = _cosine(qvec, vec)
                     it["score"] = (0.6 * it["score"]) + (0.4 * cos)
 
+        guard_cfg = _load_memory_retrieval_guard_config()
+        guard_enabled = bool(guard_cfg.get("enabled", True))
+        base_floor = float(guard_cfg.get("base_score_floor") or 0.0)
+        max_total_boost = float(guard_cfg.get("max_total_boost") or 0.0)
+
+        for it in items:
+            it["base_score"] = float(it.get("score") or 0.0)
+            it["total_context_boost"] = 0.0
+
         emotion_cfg = _load_memory_emotion_config()
         active_state = _current_retrieval_emotion_state() if emotion_cfg.get("enabled") else None
         if emotion_cfg.get("enabled") and active_state:
@@ -1024,10 +1079,18 @@ def retrieve(
                     if state_match < min_state_sim:
                         state_match = 0.0
                     state_boost = state_weight * state_match
-                    if state_boost > 0.0:
+
+                    eligible = True
+                    if guard_enabled and float(it.get("base_score") or 0.0) < base_floor:
+                        eligible = False
+                    if guard_enabled and (float(it.get("total_context_boost") or 0.0) + state_boost) > max_total_boost:
+                        state_boost = max(0.0, max_total_boost - float(it.get("total_context_boost") or 0.0))
+
+                    if state_boost > 0.0 and eligible:
                         it["score"] += state_boost
+                        it["total_context_boost"] = float(it.get("total_context_boost") or 0.0) + state_boost
                     it["emotion_state_match"] = round(state_match, 4)
-                    it["emotion_score_boost"] = round(state_boost, 4)
+                    it["emotion_score_boost"] = round(state_boost if eligible else 0.0, 4)
 
         # Learning lane: calm but important learnings should still rank strongly.
         learning_cfg = _load_memory_learning_config()
@@ -1054,10 +1117,18 @@ def retrieve(
                     learning_boost = learning_weight * learning_signal
                     if is_calm_mode and bool(learn.get("calm_important")):
                         learning_boost += calm_bonus * learning_signal
-                    if learning_boost > 0.0:
+
+                    eligible = True
+                    if guard_enabled and float(it.get("base_score") or 0.0) < base_floor:
+                        eligible = False
+                    if guard_enabled and (float(it.get("total_context_boost") or 0.0) + learning_boost) > max_total_boost:
+                        learning_boost = max(0.0, max_total_boost - float(it.get("total_context_boost") or 0.0))
+
+                    if learning_boost > 0.0 and eligible:
                         it["score"] += learning_boost
+                        it["total_context_boost"] = float(it.get("total_context_boost") or 0.0) + learning_boost
                     it["learning_signal"] = round(learning_signal, 4)
-                    it["learning_score_boost"] = round(learning_boost, 4)
+                    it["learning_score_boost"] = round(learning_boost if eligible else 0.0, 4)
 
         items.sort(key=lambda i: i.get("score", 0.0), reverse=True)
 
