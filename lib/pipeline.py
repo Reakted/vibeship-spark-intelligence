@@ -377,6 +377,59 @@ def extract_tool_effectiveness(events: List[SparkEvent]) -> Dict[str, Any]:
     }
 
 
+def extract_micro_insights(events: List[SparkEvent]) -> List[Dict[str, Any]]:
+    """Extract targeted insights from individual events in low-volume cycles.
+
+    When event counts are too low for aggregation thresholds (tool needs 3+
+    uses, error patterns need 2+ occurrences), this function extracts useful
+    signal from individual high-value events like failures, user prompts,
+    and noteworthy tool patterns.
+
+    Returns a list of insight dicts suitable for _gate_and_store().
+    """
+    insights: List[Dict[str, Any]] = []
+
+    for event in events:
+        tool = (event.tool_name or "").strip()
+        error = (event.error or "").strip()
+
+        # Individual failure with error detail → targeted learning
+        if event.event_type == EventType.POST_TOOL_FAILURE and tool and error:
+            # Extract the actionable part of the error (first line, trimmed)
+            error_core = error.split("\n")[0][:120].strip()
+            if len(error_core) > 15:  # Skip trivially short errors
+                insights.append({
+                    "type": "single_failure",
+                    "tool": tool,
+                    "insight": f"{tool} failed: {error_core}",
+                    "confidence": 0.55,
+                    "category": "SELF_AWARENESS",
+                })
+
+        # Tool input patterns — detect large file operations that often signal complexity
+        tool_input = event.tool_input or {}
+        if tool == "Edit" and tool_input:
+            old_text = str(tool_input.get("old_string") or tool_input.get("oldText") or "")
+            new_text = str(tool_input.get("new_string") or tool_input.get("newText") or "")
+            # Large edit replacements (>500 chars changed) are noteworthy
+            if len(old_text) > 500 or len(new_text) > 500:
+                file_path = str(tool_input.get("file_path") or tool_input.get("path") or "?")
+                fname = Path(file_path).name if file_path != "?" else "?"
+                insights.append({
+                    "type": "large_edit",
+                    "tool": tool,
+                    "insight": (
+                        f"Large edit on {fname} ({len(old_text)}→{len(new_text)} chars). "
+                        f"Consider smaller incremental changes for safer refactoring."
+                    ),
+                    "confidence": 0.50,
+                    "category": "REASONING",
+                })
+
+    # Cap to avoid noise from busy micro-cycles
+    return insights[:3]
+
+
 def extract_error_patterns(events: List[SparkEvent]) -> Dict[str, Any]:
     """Extract recurring error patterns from failure events.
 
@@ -560,6 +613,7 @@ def store_deep_learnings(
     session_workflows: Dict[str, Any],
     *,
     events_processed: int = 0,
+    micro_insights: Optional[List[Dict[str, Any]]] = None,
 ) -> tuple[int, Dict[str, Any]]:
     """Store extracted learnings in the cognitive system.
 
@@ -670,6 +724,26 @@ def store_deep_learnings(
                         source="pipeline_macro",
                     ):
                         stored += 1
+
+        # Micro-insights: individual event signal for low-volume cycles
+        _CATEGORY_MAP = {
+            "SELF_AWARENESS": CognitiveCategory.SELF_AWARENESS,
+            "REASONING": CognitiveCategory.REASONING,
+            "META_LEARNING": CognitiveCategory.META_LEARNING,
+        }
+        for mi in (micro_insights or []):
+            mi_text = mi.get("insight", "")
+            mi_cat = _CATEGORY_MAP.get(mi.get("category", ""), CognitiveCategory.SELF_AWARENESS)
+            mi_conf = float(mi.get("confidence", 0.5))
+            mi_tool = mi.get("tool", "unknown")
+            if mi_text and _gate_and_store(
+                mi_text,
+                mi_cat,
+                f"micro:{mi.get('type', 'unknown')}:{mi_tool}",
+                mi_conf,
+                source="pipeline_micro",
+            ):
+                stored += 1
 
         # Distillation floor: ensure at least one durable insight when meaningful signal exists.
         tool_updates = int(tool_effectiveness.get("tools_tracked", 0) or 0)
@@ -931,6 +1005,13 @@ def run_processing_cycle(
             workflows = {"sessions_analyzed": 0, "workflow_insights": []}
             metrics.errors.append(f"session_workflows: {str(e)[:100]}")
 
+        # 6b. Extract micro-insights for low-volume cycles
+        micro = []
+        try:
+            micro = extract_micro_insights(events)
+        except Exception as e:
+            metrics.errors.append(f"micro_insights: {str(e)[:100]}")
+
         # 7. Store deep learnings
         try:
             stored, distill_debug = store_deep_learnings(
@@ -938,6 +1019,7 @@ def run_processing_cycle(
                 error_pats,
                 workflows,
                 events_processed=len(events),
+                micro_insights=micro,
             )
             metrics.insights_created = stored
             metrics.distillation_debug = distill_debug
