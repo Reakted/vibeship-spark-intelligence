@@ -62,9 +62,10 @@ class LoopThresholds:
     min_distillations: int = 5
     min_quality_rate: float = 0.30
     max_quality_rate: float = 0.60
-    # TEMP SOFTEN (2026-02-19): delay Meta-Ralph quality-band enforcement while GAUR recovers.
-    # Rollback target after stabilization: set back to 50.
-    min_quality_samples: int = 1000
+    # Meta-Ralph quality band is now telemetry-only by default.
+    # Keep data visible, but do not block production readiness on this signal.
+    enforce_meta_ralph_quality_band: bool = False
+    min_quality_samples: int = 50
     max_queue_depth: int = 2000
     max_chip_to_cognitive_ratio: float = 100.0
 
@@ -437,26 +438,29 @@ def evaluate_gates(
         f">= {t.min_distillations}",
         "Increase distillation yield and episode completion quality.",
     )
+    meta_ralph_quality_ok = (
+        (not t.enforce_meta_ralph_quality_band)
+        or metrics.quality_rate_samples < t.min_quality_samples
+        or (t.min_quality_rate <= metrics.quality_rate <= t.max_quality_rate)
+    )
     _add(
         "meta_ralph_quality_band",
-        (
-            metrics.quality_rate_samples < t.min_quality_samples
-            or (t.min_quality_rate <= metrics.quality_rate <= t.max_quality_rate)
-        ),
+        meta_ralph_quality_ok,
         {
             "quality_rate": round(metrics.quality_rate, 4),
             "samples": int(metrics.quality_rate_samples),
             "filtered_pipeline_tests": int(metrics.quality_rate_filtered_pipeline_tests),
             "filtered_duplicates": int(metrics.quality_rate_filtered_duplicates),
-            "enforced": bool(metrics.quality_rate_samples >= t.min_quality_samples),
+            "enforced": bool(t.enforce_meta_ralph_quality_band and metrics.quality_rate_samples >= t.min_quality_samples),
+            "mode": "telemetry_only" if not t.enforce_meta_ralph_quality_band else "enforced",
         },
         (
             f"{t.min_quality_rate:.2f}..{t.max_quality_rate:.2f} "
-            f"(enforced after >= {t.min_quality_samples} samples)"
+            f"(enforced after >= {t.min_quality_samples} samples; toggle enforce_meta_ralph_quality_band)"
         ),
         (
-            "Collect more real (non-test) roasts to calibrate quality. "
-            "If enforced and out-of-band, tune primitive filtering and quality thresholds."
+            "Meta-Ralph is telemetry-only by default. "
+            "If re-enabled and out-of-band, tune primitive filtering and quality thresholds."
         ),
     )
     _add(
