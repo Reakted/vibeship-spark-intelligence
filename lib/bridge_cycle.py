@@ -566,9 +566,14 @@ def run_bridge_cycle(
                 if observations:
                     eidos_update = distill_eidos(observations)
                     if eidos_update:
-                        stats["eidos_distillation"] = eidos_update
-                        _append_eidos_update(eidos_update)
-                        log_debug("bridge_worker", "EIDOS distillation complete", None)
+                        ok, reason = _is_valid_eidos_distillation(eidos_update)
+                        if ok:
+                            stats["eidos_distillation"] = eidos_update
+                            _append_eidos_update(eidos_update)
+                            log_debug("bridge_worker", "EIDOS distillation complete", None)
+                        else:
+                            stats["eidos_distillation_skipped"] = reason
+                            log_debug("bridge_worker", f"EIDOS distillation skipped ({reason})", None)
         except Exception as e:
             log_debug("bridge_worker", f"EIDOS distillation failed ({e})", None)
 
@@ -824,9 +829,42 @@ def _write_llm_advisory(advisory: str) -> None:
         log_debug("bridge_worker", f"Failed to write advisory: {e}", None)
 
 
+_EIDOS_NOISE_PATTERNS = [
+    "invalid api key",
+    "usage limit reached",
+    "rate limit",
+    "quota exceeded",
+    "authentication failed",
+    "insufficient credits",
+    "service unavailable",
+]
+
+
+def _is_valid_eidos_distillation(text: str) -> tuple[bool, str]:
+    t = (text or "").strip()
+    if len(t) < 24:
+        return False, "too_short"
+
+    low = t.lower()
+    for p in _EIDOS_NOISE_PATTERNS:
+        if p in low:
+            return False, f"noise:{p}"
+
+    # Require either sentence-like shape or lightweight list structure.
+    if not any(ch in t for ch in (".", "\n", ":", ";")):
+        return False, "not_structured"
+
+    return True, "ok"
+
+
 def _append_eidos_update(update: str) -> None:
     """Append EIDOS distillation to the EIDOS log."""
     try:
+        ok, reason = _is_valid_eidos_distillation(update)
+        if not ok:
+            log_debug("bridge_worker", f"Skipped EIDOS distillation ({reason})", None)
+            return
+
         eidos_file = Path.home() / ".spark" / "eidos_distillations.jsonl"
         import json
         from datetime import datetime
