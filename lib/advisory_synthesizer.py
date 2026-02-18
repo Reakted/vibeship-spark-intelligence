@@ -91,7 +91,8 @@ SYNTH_MODE = os.getenv("SPARK_SYNTH_MODE", "auto")
 SOUL_UPGRADE_PROMPT_ENABLED = os.getenv("SPARK_SOUL_UPGRADE_PROMPT", "0") in {"1", "true", "yes", "on"}
 
 # Max time for AI synthesis (fail fast - hooks must be quick)
-AI_TIMEOUT_S = float(os.getenv("SPARK_SYNTH_TIMEOUT", "3.0"))
+# MiniMax M2.5 extended thinking needs 5-15s; default bumped from 3.0 to 8.0
+AI_TIMEOUT_S = float(os.getenv("SPARK_SYNTH_TIMEOUT", "8.0"))
 PREFERRED_PROVIDER_ENV = os.getenv("SPARK_SYNTH_PREFERRED_PROVIDER", "")
 
 # Cache synthesized results (same inputs → same output)
@@ -706,9 +707,9 @@ def _query_minimax(prompt: str) -> Optional[str]:
                 json={
                     "model": MINIMAX_MODEL,
                     "messages": [{"role": "user", "content": prompt}],
-                    # MiniMax often emits a <think> block before the final answer; for JSON-only
-                    # prompts we give it a bit more budget so the structured output isn't truncated.
-                    "max_tokens": 420 if want_json else 200,
+                    # MiniMax M2.5 uses extended thinking that consumes ~1000 tokens
+                    # before the actual response; budget must accommodate both.
+                    "max_tokens": 2000 if want_json else 1500,
                     "temperature": 0.2 if want_json else 0.3,
                     **({"response_format": {"type": "json_object"}} if want_json else {}),
                 },

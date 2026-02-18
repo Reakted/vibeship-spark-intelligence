@@ -43,7 +43,7 @@ def _minimax_effect(
         return None
     base = os.getenv("SPARK_MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
     model = os.getenv("SPARK_MINIMAX_MODEL", "MiniMax-M2.5")
-    timeout_s = float(os.getenv("AUTO_SCORER_MINIMAX_TIMEOUT_S", "12"))
+    timeout_s = float(os.getenv("AUTO_SCORER_MINIMAX_TIMEOUT_S", "15"))  # M2.5 thinking can take 5-15s
     prompt = (
         "Classify advisory outcome effect using strict JSON only.\n"
         f"status={status}\n"
@@ -62,7 +62,7 @@ def _minimax_effect(
                 json={
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 220,
+                    "max_tokens": 1500,  # M2.5 thinking needs ~1000 tokens before response
                     "temperature": 0.1,
                 },
             )

@@ -15,7 +15,8 @@ Primary navigation hub: `docs/GLOSSARY.md`.
 
 ## Integrations
 
-- `docs/OPENCLAW_OPERATIONS.md`: **Start here** â€” session startup, how Spark works in OpenClaw, services, troubleshooting
+- `docs/MINIMAX_INTEGRATION.md`: **MiniMax M2.5** — setup, subagent patterns, all integration points, extended thinking handling, troubleshooting
+- `docs/OPENCLAW_OPERATIONS.md`: **Start here** — session startup, how Spark works in OpenClaw, services, troubleshooting
 - `docs/OPENCLAW_INTEGRATION.md`: Technical integration details (capture, context sync, notifications)
 - `docs/LLM_INTEGRATION.md`: Claude CLI LLM integration (advisory synthesis, EIDOS distillation, PowerShell bridge)
 
