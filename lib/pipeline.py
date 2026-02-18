@@ -101,6 +101,10 @@ try:
     FLOOR_EVENTS_THRESHOLD = max(1, min(200, int(os.getenv("SPARK_PIPELINE_MIN_INSIGHTS_EVENTS", "20") or 20)))
 except Exception:
     FLOOR_EVENTS_THRESHOLD = 20
+try:
+    FLOOR_SOFT_MIN_EVENTS = max(1, min(50, int(os.getenv("SPARK_PIPELINE_SOFT_MIN_INSIGHTS_EVENTS", "3") or 3)))
+except Exception:
+    FLOOR_SOFT_MIN_EVENTS = 3
 
 # Processing health metrics file
 PIPELINE_STATE_FILE = Path.home() / ".spark" / "pipeline_state.json"
@@ -667,10 +671,20 @@ def store_deep_learnings(
                     ):
                         stored += 1
 
-        # Distillation floor for high-volume cycles: ensure at least one durable insight.
+        # Distillation floor: ensure at least one durable insight when meaningful signal exists.
+        tool_updates = int(tool_effectiveness.get("tools_tracked", 0) or 0)
+        error_count = len(error_patterns.get("error_patterns", []))
+        workflow_count = len(session_workflows.get("workflow_insights", []))
+        has_signal = (tool_updates > 0) or (error_count > 0) or (workflow_count > 0)
+
+        floor_gate = (
+            events_processed >= FLOOR_EVENTS_THRESHOLD
+            or (events_processed >= FLOOR_SOFT_MIN_EVENTS and has_signal)
+        )
+
         if (
             MIN_INSIGHTS_FLOOR > 0
-            and events_processed >= FLOOR_EVENTS_THRESHOLD
+            and floor_gate
             and stored < MIN_INSIGHTS_FLOOR
         ):
             fallback_insight = (
