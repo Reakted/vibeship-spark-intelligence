@@ -14,7 +14,7 @@ import json
 import subprocess
 import os
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from lib.diagnostics import log_debug
 
 # Rate limiting: track calls to avoid hammering
@@ -311,41 +311,149 @@ GOOD advisory examples:
     )
 
 
+def _strip_json_fence(text: str) -> str:
+    t = (text or "").strip()
+    if t.startswith("```"):
+        lines = t.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        t = "\n".join(lines).strip()
+    return t
+
+
+def _ask_distillation_model(prompt: str, *, timeout_s: int = 45) -> Optional[str]:
+    preferred = (os.getenv("SPARK_EIDOS_PROVIDER") or "minimax").strip().lower()
+
+    # Try provider chain first (MiniMax-preferred for structured distillation).
+    try:
+        from lib.advisory_synthesizer import _query_provider  # type: ignore
+
+        chain: List[str] = []
+        for p in [preferred, "gemini", "openai", "anthropic", "ollama"]:
+            if p and p not in chain:
+                chain.append(p)
+
+        for provider in chain:
+            resp = _query_provider(provider, prompt)
+            if resp and resp.strip():
+                return resp.strip()
+    except Exception:
+        pass
+
+    # Fallback to Claude CLI path.
+    return ask_claude(
+        prompt,
+        system_prompt="Return only valid JSON.",
+        max_tokens=1200,
+        timeout_s=timeout_s,
+    )
+
+
+def _normalize_distillation_payload(raw: str) -> Optional[Dict[str, Any]]:
+    txt = _strip_json_fence(raw)
+    try:
+        data = json.loads(txt)
+    except Exception:
+        return None
+
+    insights = data.get("insights") if isinstance(data, dict) else None
+    if not isinstance(insights, list):
+        return None
+
+    out: List[Dict[str, Any]] = []
+    for it in insights[:6]:
+        if not isinstance(it, dict):
+            continue
+        decision = str(it.get("decision") or "drop").strip().lower()
+        if decision not in {"keep", "drop"}:
+            decision = "drop"
+
+        confidence = it.get("confidence", 0.0)
+        try:
+            confidence = float(confidence)
+        except Exception:
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+
+        item = {
+            "insight_type": str(it.get("insight_type") or "pattern").strip()[:40],
+            "confidence": round(confidence, 3),
+            "evidence": str(it.get("evidence") or "").strip()[:500],
+            "action": str(it.get("action") or "").strip()[:500],
+            "usage_context": str(it.get("usage_context") or "").strip()[:240],
+            "decision": decision,
+        }
+        if item["action"] and item["evidence"]:
+            out.append(item)
+
+    if not out:
+        return None
+
+    kept = [x for x in out if x["decision"] == "keep"]
+    final = kept if kept else out[:3]
+    return {
+        "schema": "spark.eidos.v1",
+        "insights": final[:3],
+        "meta": {
+            "provider": (os.getenv("SPARK_EIDOS_PROVIDER") or "minimax").strip().lower(),
+            "count": len(final[:3]),
+        },
+    }
+
+
 def distill_eidos(
     raw_observations: list,
     current_eidos: Optional[str] = None,
 ) -> Optional[str]:
-    """Distill raw observations into EIDOS identity updates.
+    """Distill raw observations into structured EIDOS updates.
 
-    EIDOS = the agent's evolving self-model. This function takes raw
-    observations about behavior patterns and distills them into
-    identity-level insights.
+    Returns JSON string with schema spark.eidos.v1 and insight entries ready
+    for downstream advisory use.
     """
     if not raw_observations:
         return None
 
-    obs_text = "\n".join(f"- {o}" for o in raw_observations[:20])
+    obs_text = "\n".join(f"- {o}" for o in raw_observations[:24])
 
-    prompt = f"""You are updating an AI agent's self-model (EIDOS) based on observed behavior patterns.
+    prompt = f"""You are distilling Spark behavior observations into a structured advisory-ready format.
 
 OBSERVATIONS:
 {obs_text}
 
-{f"CURRENT SELF-MODEL:\n{current_eidos[:500]}" if current_eidos else ""}
+{f"CURRENT SELF-MODEL:\n{current_eidos[:700]}" if current_eidos else ""}
 
-Extract 1-3 identity-level insights about the agent's:
-- Strengths and weaknesses observed
-- Behavioral tendencies (good and bad)
-- Growth areas
+Return ONLY valid JSON with this exact shape:
+{{
+  "insights": [
+    {{
+      "insight_type": "pattern|failure|strength|workflow|communication",
+      "confidence": 0.0,
+      "evidence": "short concrete evidence from observations",
+      "action": "specific action to improve behavior",
+      "usage_context": "where this should be used (situation/context)",
+      "decision": "keep|drop"
+    }}
+  ]
+}}
 
-Be honest and specific. These feed back into the agent's self-awareness."""
+Rules:
+- 1 to 3 insights maximum
+- keep only insights that are specific, actionable, and reusable
+- if observation is noisy/error-like or vague, mark decision=drop
+- do not include any text outside JSON
+"""
 
-    return ask_claude(
-        prompt,
-        system_prompt="Output only the insights as a numbered list. Be concise and honest.",
-        max_tokens=500,
-        timeout_s=30,
-    )
+    raw = _ask_distillation_model(prompt, timeout_s=45)
+    if not raw:
+        return None
+
+    payload = _normalize_distillation_payload(raw)
+    if not payload:
+        return None
+
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def interpret_patterns(events_summary: str) -> Optional[str]:

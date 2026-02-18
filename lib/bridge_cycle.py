@@ -840,6 +840,19 @@ _EIDOS_NOISE_PATTERNS = [
 ]
 
 
+def _parse_structured_eidos(text: str) -> dict[str, Any] | None:
+    try:
+        obj = json.loads((text or "").strip())
+    except Exception:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    insights = obj.get("insights")
+    if not isinstance(insights, list) or not insights:
+        return None
+    return obj
+
+
 def _is_valid_eidos_distillation(text: str) -> tuple[bool, str]:
     t = (text or "").strip()
     if len(t) < 24:
@@ -849,6 +862,13 @@ def _is_valid_eidos_distillation(text: str) -> tuple[bool, str]:
     for p in _EIDOS_NOISE_PATTERNS:
         if p in low:
             return False, f"noise:{p}"
+
+    structured = _parse_structured_eidos(t)
+    if structured is not None:
+        kept = [it for it in (structured.get("insights") or []) if isinstance(it, dict) and str(it.get("decision", "keep")).lower() == "keep"]
+        if not kept:
+            return False, "all_dropped"
+        return True, "ok_structured"
 
     # Require either sentence-like shape or lightweight list structure.
     if not any(ch in t for ch in (".", "\n", ":", ";")):
@@ -866,12 +886,32 @@ def _append_eidos_update(update: str) -> None:
             return
 
         eidos_file = Path.home() / ".spark" / "eidos_distillations.jsonl"
-        import json
         from datetime import datetime
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "distillation": update,
-        }
+
+        structured = _parse_structured_eidos(update)
+        if structured is not None:
+            kept = [
+                it for it in (structured.get("insights") or [])
+                if isinstance(it, dict) and str(it.get("decision", "keep")).lower() == "keep"
+            ]
+            summary_parts = []
+            for it in kept[:3]:
+                action = str(it.get("action") or "").strip()
+                context = str(it.get("usage_context") or "").strip()
+                if action:
+                    summary_parts.append(f"{action} ({context})" if context else action)
+            entry = {
+                "timestamp": datetime.now().isoformat(),
+                "schema": structured.get("schema") or "spark.eidos.v1",
+                "insights": kept[:3],
+                "distillation_summary": " | ".join(summary_parts)[:1200],
+            }
+        else:
+            entry = {
+                "timestamp": datetime.now().isoformat(),
+                "distillation": update,
+            }
+
         with open(eidos_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception as e:
