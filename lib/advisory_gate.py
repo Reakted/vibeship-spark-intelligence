@@ -35,12 +35,14 @@ class AuthorityLevel:
     BLOCK = "block"         # EIDOS blocks action (already exists)
 
 # Score thresholds for authority assignment
+# NOTE threshold lowered 0.50→0.42 to let useful pipeline insights pass more
+# consistently. Noisy primitives are blocked by _is_primitive_noise() instead.
 AUTHORITY_THRESHOLDS = {
     AuthorityLevel.BLOCK: 0.95,     # Only proven critical safety issues
     AuthorityLevel.WARNING: 0.80,   # High confidence + proven failure history
-    AuthorityLevel.NOTE: 0.50,      # Moderate confidence + relevant
-    AuthorityLevel.WHISPER: 0.35,   # Low confidence or tangential
-    # Below 0.35 → SILENT
+    AuthorityLevel.NOTE: 0.42,      # Moderate confidence + relevant
+    AuthorityLevel.WHISPER: 0.30,   # Low confidence or tangential
+    # Below 0.30 → SILENT
 }
 
 # ============= Gate Configuration =============
@@ -444,6 +446,12 @@ def _evaluate_single(
     phase_multiplier = phase_boosts.get(category, 1.0)
     adjusted_score = base_score * phase_multiplier
 
+    # ---- Score Adjustment: Emotional priority from pipeline distillation ----
+    # Bridge emotional salience into gate scoring (capped +15% to avoid dominance).
+    ep = float(getattr(advice, "emotional_priority", 0.0) or 0.0)
+    if ep > 0.0:
+        adjusted_score *= (1.0 + min(0.15, ep * 0.15))
+
     # ---- Score Adjustment: Negative advisory boost ----
     # Advice about what NOT to do is more valuable than advice about what to do
     if _is_negative_advisory(text):
@@ -623,6 +631,44 @@ def _infer_category(insight_key: str, source: str) -> str:
     return source or "unknown"
 
 
+def _is_primitive_noise(text: str) -> bool:
+    """Detect primitive/noisy insights that should stay SILENT even with relaxed thresholds.
+
+    These are low-information insights that add no actionable value:
+    generic tool labels, operational metrics, or content-free statements.
+    """
+    tl = text.lower().strip()
+    # Very short text is almost always noise
+    if len(tl) < 15:
+        return True
+    # Pure tool-name / telemetry patterns
+    _NOISE_PATTERNS = [
+        r"^(?:bash|edit|read|write|task|tool)\s*→?\s*(?:bash|edit|read|write|task|tool)$",
+        r"^\d+\s*(?:calls?|invocations?|runs?|times?)\b",
+        r"^(?:okay|ok|got it|sure|yes|no|fine|done|thanks)\.?$",
+        r"^(?:success|error|failure)\s*(?:rate|count|ratio)\b",
+        r"\btool[_\s-]*\d+[_\s-]*error\b",
+        r"^for\s+\w+\s+tasks?,?\s*use\s+standard\s+approach",
+    ]
+    for pat in _NOISE_PATTERNS:
+        if re.search(pat, tl):
+            return True
+    return False
+
+
+def _has_actionable_content(text: str) -> bool:
+    """Quick check: does this advisory contain actionable guidance?
+
+    Used as a micro-boost signal in authority assignment so that
+    substantive advice is less likely to be gated as WHISPER/SILENT.
+    """
+    tl = text.lower()
+    return bool(re.search(
+        r"\b(?:check|verify|ensure|use|avoid|prefer|run|test|validate|consider|try|set|add|remove|read before)\b",
+        tl,
+    ))
+
+
 def _assign_authority(
     score: float,
     confidence: float,
@@ -632,6 +678,10 @@ def _assign_authority(
     """Assign authority level based on score, confidence, and content."""
     # Block level is handled by EIDOS, not here
 
+    # Hard floor: primitive noise stays SILENT regardless of score
+    if _is_primitive_noise(text):
+        return AuthorityLevel.SILENT
+
     # Warning: high score + proven pattern
     if score >= AUTHORITY_THRESHOLDS[AuthorityLevel.WARNING]:
         if _is_caution(text) or _is_negative_advisory(text):
@@ -640,6 +690,12 @@ def _assign_authority(
         return AuthorityLevel.NOTE
 
     if score >= AUTHORITY_THRESHOLDS[AuthorityLevel.NOTE]:
+        return AuthorityLevel.NOTE
+
+    # Actionable-content micro-boost: if the score is close to NOTE threshold
+    # and the text contains actionable guidance, promote to NOTE.
+    note_threshold = AUTHORITY_THRESHOLDS[AuthorityLevel.NOTE]
+    if score >= (note_threshold - 0.08) and _has_actionable_content(text):
         return AuthorityLevel.NOTE
 
     if score >= AUTHORITY_THRESHOLDS[AuthorityLevel.WHISPER]:
