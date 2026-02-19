@@ -216,11 +216,10 @@ def process_validation_events(limit: int = 200) -> Dict[str, int]:
         return {"processed": 0, "validated": 0, "contradicted": 0, "surprises": 0}
 
     cog = get_cognitive_learner()
-    candidates = {
-        k: v
-        for k, v in cog.insights.items()
-        if v.category in (CognitiveCategory.USER_UNDERSTANDING, CognitiveCategory.COMMUNICATION)
-    }
+    # Validate all insight categories, not just preference/communication.
+    # Reasoning, wisdom, meta_learning, context, and self_awareness insights
+    # also benefit from validation against user prompts.
+    candidates = {k: v for k, v in cog.insights.items()}
 
     stats = {"processed": 0, "validated": 0, "contradicted": 0, "surprises": 0}
 
@@ -242,15 +241,23 @@ def process_validation_events(limit: int = 200) -> Dict[str, int]:
         if not tokens:
             continue
 
-        # Only scan when there's a hint of preference language.
         token_set = set(tokens)
-        if not (token_set & POS_TRIGGERS or token_set & NEG_TRIGGERS):
-            continue
+        has_pref_language = bool(token_set & POS_TRIGGERS or token_set & NEG_TRIGGERS)
 
         for key, insight in candidates.items():
+            # For user_understanding/communication: require preference language
+            if insight.category in (CognitiveCategory.USER_UNDERSTANDING, CognitiveCategory.COMMUNICATION):
+                if not has_pref_language:
+                    continue
             matched, polarity = _match_insight(tokens, insight.insight)
-            if not matched or not polarity:
+            if not matched:
                 continue
+            # For non-preference insights, keyword match with no polarity
+            # is a soft positive validation (topic relevance).
+            if not polarity:
+                if insight.category in (CognitiveCategory.USER_UNDERSTANDING, CognitiveCategory.COMMUNICATION):
+                    continue  # preference insights need explicit polarity
+                polarity = "pos"
             _apply_validation(key, insight, polarity, text, stats=stats)
 
     if stats["validated"] or stats["contradicted"]:
