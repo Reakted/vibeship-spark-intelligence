@@ -160,15 +160,20 @@ def apply_gate_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
             warnings.append("invalid_advice_repeat_cooldown_s")
 
     if "emit_whispers" in cfg:
-        text = str(cfg.get("emit_whispers") or "").strip().lower()
-        if text in {"1", "true", "yes", "on"}:
-            EMIT_WHISPERS = True
-            applied.append("emit_whispers")
-        elif text in {"0", "false", "no", "off"}:
-            EMIT_WHISPERS = False
+        raw_emit = cfg.get("emit_whispers")
+        if isinstance(raw_emit, bool):
+            EMIT_WHISPERS = raw_emit
             applied.append("emit_whispers")
         else:
-            warnings.append("invalid_emit_whispers")
+            text = str(raw_emit).strip().lower()
+            if text in {"1", "true", "yes", "on"}:
+                EMIT_WHISPERS = True
+                applied.append("emit_whispers")
+            elif text in {"0", "false", "no", "off"}:
+                EMIT_WHISPERS = False
+                applied.append("emit_whispers")
+            else:
+                warnings.append("invalid_emit_whispers")
 
     warning_threshold = _clamp_float(
         cfg.get("warning_threshold", AUTHORITY_THRESHOLDS.get(AuthorityLevel.WARNING, 0.8)),
