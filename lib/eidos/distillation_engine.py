@@ -231,6 +231,50 @@ class DistillationEngine:
 
         return ""
 
+    @staticmethod
+    def _is_quality_distillation(statement: str, dtype: DistillationType) -> bool:
+        """Reject tautological, generic, or low-quality distillation statements."""
+        s = statement.strip()
+        if len(s) < 30:
+            return False
+
+        low = s.lower()
+
+        # Reject known tautology phrases
+        _TAUTOLOGY_PHRASES = [
+            "try a different approach",
+            "step back and reconsider",
+            "try something else",
+            "try another approach",
+            "consider alternatives",
+            "without progress",
+            "when repeated",
+            "always validate assumptions",
+            "always verify",
+            "be careful when",
+        ]
+        for phrase in _TAUTOLOGY_PHRASES:
+            if phrase in low:
+                return False
+
+        # Reject "When X, try: Y" where X ≈ Y (>60% word overlap)
+        if "try:" in low and "when " in low:
+            parts = low.split("try:", 1)
+            if len(parts) == 2:
+                when_words = set(parts[0].replace("when ", "").replace(",", "").split())
+                try_words = set(parts[1].split())
+                if when_words and try_words:
+                    overlap = len(when_words & try_words) / max(len(when_words), len(try_words))
+                    if overlap > 0.6:
+                        return False
+
+        # Reject statements that are mostly file paths or tool names
+        path_chars = sum(1 for c in s if c in r'\/:.')
+        if path_chars > len(s) * 0.3:
+            return False
+
+        return True
+
     def generate_distillations(
         self,
         episode: Episode,
@@ -287,7 +331,13 @@ class DistillationEngine:
             if playbook:
                 candidates.append(playbook)
 
-        return candidates
+        # Quality gate: reject tautological or generic distillations
+        return [c for c in candidates if self._is_quality_distillation(c.statement, c.type)]
+
+    _GENERIC_GOALS = {
+        "continue", "continue please", "yes", "ok", "go", "do it",
+        "proceed", "next", "go ahead", "keep going", "sure",
+    }
 
     def _generate_playbook(
         self,
@@ -295,10 +345,20 @@ class DistillationEngine:
         steps: List[Step]
     ) -> Optional[DistillationCandidate]:
         """Generate a playbook from successful episode."""
+        # Reject generic goals
+        goal_clean = (episode.goal or "").strip().lower().rstrip(".!?")
+        if len(goal_clean) < 10 or goal_clean in self._GENERIC_GOALS:
+            return None
+
         # Get successful steps
         success_steps = [s for s in steps if s.evaluation == Evaluation.PASS]
 
         if len(success_steps) < 2:
+            return None
+
+        # Reject playbooks where all steps use the same decision (e.g., "TaskUpdate" 5x)
+        unique_decisions = set(s.decision[:60] for s in success_steps[:5])
+        if len(unique_decisions) < 2:
             return None
 
         # Build step-by-step

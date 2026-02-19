@@ -1117,11 +1117,12 @@ class MetaRalph:
             self._load_state()
         # Create record if it doesn't exist (for tool-level outcomes)
         if learning_id not in self.outcome_records:
+            effective_source = source or "unattributed"
             self.outcome_records[learning_id] = OutcomeRecord(
                 learning_id=learning_id,
                 learning_content=learning_id,  # Use ID as content for tool-level
                 retrieved_at=datetime.now().isoformat(),
-                source=source or "auto_created",
+                source=effective_source,
                 trace_id=trace_id,
                 insight_key=insight_key,
             )
@@ -1132,7 +1133,7 @@ class MetaRalph:
         # Propagate insight_key if not already set (critical for feedback loop)
         if insight_key and not rec.insight_key:
             rec.insight_key = insight_key
-        if source and rec.source == "auto_created":
+        if source and rec.source in ("auto_created", "unattributed"):
             rec.source = source
         outcome_now = datetime.now().isoformat()
         rec.acted_on = True
@@ -1250,6 +1251,9 @@ class MetaRalph:
         """Update stored learning outcome stats for dedupe and tuning."""
         outcome = self._normalize_outcome(record.outcome)
         if not record.learning_content:
+            return
+        # Skip effectiveness stats for unattributed records — they inflate scores
+        if record.source in ("unattributed", "auto_created"):
             return
         h = self._hash_learning(record.learning_content)
         entry = self.learnings_stored.get(h)

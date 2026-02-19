@@ -414,14 +414,26 @@ def main() -> int:
     ap.add_argument("--window-hours", type=float, default=12.0, help="Lookback window in hours (float allowed)")
     ap.add_argument("--out-dir", default="docs/reports", help="Output directory for markdown report")
     ap.add_argument("--json", action="store_true", help="Print JSON summary only")
+    ap.add_argument("--min-gap-hours", type=float, default=6.0, help="Skip if a report younger than this exists")
     args = ap.parse_args()
+
+    # Gap guard: skip if a recent report already exists
+    out_dir = Path(args.out_dir)
+    if args.min_gap_hours > 0 and out_dir.exists():
+        import glob as _glob
+        existing = sorted(_glob.glob(str(out_dir / "*_advisory_self_review.md")))
+        if existing:
+            newest_age_h = (time.time() - Path(existing[-1]).stat().st_mtime) / 3600
+            if newest_age_h < args.min_gap_hours:
+                print(f"Skipped: recent report exists ({newest_age_h:.1f}h old, min gap {args.min_gap_hours}h)")
+                return 0
 
     summary = generate_summary(window_hours=max(1.0 / 60.0, float(args.window_hours)))
     if args.json:
         print(json.dumps(summary, indent=2))
         return 0
 
-    out_path = write_report(summary, Path(args.out_dir))
+    out_path = write_report(summary, out_dir)
     print(f"Advisory self-review written: {out_path}")
     return 0
 

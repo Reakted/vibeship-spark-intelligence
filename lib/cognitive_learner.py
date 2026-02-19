@@ -326,6 +326,7 @@ class CognitiveInsight:
             "source": self.source,
             "action_domain": self.action_domain,
             "emotion_state": self.emotion_state or {},
+            "reliability": round(self.reliability, 4),
         }
     
     @classmethod

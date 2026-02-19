@@ -845,6 +845,7 @@ def _write_llm_advisory(advisory: str) -> None:
 
 
 _EIDOS_NOISE_PATTERNS = [
+    # API/infra errors
     "invalid api key",
     "usage limit reached",
     "rate limit",
@@ -852,6 +853,18 @@ _EIDOS_NOISE_PATTERNS = [
     "authentication failed",
     "insufficient credits",
     "service unavailable",
+    # Tautologies and generic advice
+    "try a different approach",
+    "step back and",
+    "try something else",
+    "try another approach",
+    "when repeated",
+    "without progress",
+    "always validate",
+    "always verify",
+    "be careful",
+    "consider alternatives",
+    "consider other options",
 ]
 
 
@@ -905,10 +918,23 @@ def _append_eidos_update(update: str) -> None:
 
         structured = _parse_structured_eidos(update)
         if structured is not None:
-            kept = [
-                it for it in (structured.get("insights") or [])
-                if isinstance(it, dict) and str(it.get("decision", "keep")).lower() == "keep"
-            ]
+            kept = []
+            for it in (structured.get("insights") or []):
+                if not isinstance(it, dict):
+                    continue
+                if str(it.get("decision", "keep")).lower() != "keep":
+                    continue
+                action = str(it.get("action") or "").strip()
+                # Reject short/empty actions and tautology patterns
+                if len(action) < 15:
+                    continue
+                action_low = action.lower()
+                if any(p in action_low for p in _EIDOS_NOISE_PATTERNS):
+                    continue
+                kept.append(it)
+            if not kept:
+                log_debug("bridge_worker", "All EIDOS insights filtered by quality gate", None)
+                return
             summary_parts = []
             for it in kept[:3]:
                 action = str(it.get("action") or "").strip()

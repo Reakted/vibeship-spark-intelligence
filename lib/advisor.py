@@ -4186,7 +4186,7 @@ class SparkAdvisor:
                     # the recent advice log when callers don't provide a trace_id.
                     trace_id=trace_id or derived_trace,
                     insight_key=ik,
-                    source=src,
+                    source=src or "advisor_unlinked",
                 )
         except Exception:
             pass  # Don't break outcome flow if tracking fails

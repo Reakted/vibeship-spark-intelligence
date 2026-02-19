@@ -395,7 +395,8 @@ class TestAdvisoryReviewTask(unittest.TestCase):
 
     def test_advisory_review_task_success(self):
         with patch.object(sched, "load_scheduler_config", return_value={"advisory_review_window_hours": 12}), \
-             patch("spark_scheduler.subprocess.run") as mock_run:
+             patch("spark_scheduler.subprocess.run") as mock_run, \
+             patch("glob.glob", return_value=[]):  # bypass file-based gap guard
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout="Advisory self-review written: docs/reports/x.md\n",
