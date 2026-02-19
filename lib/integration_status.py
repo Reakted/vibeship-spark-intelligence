@@ -76,7 +76,7 @@ def check_recent_events(minutes: int = 60) -> Tuple[bool, str]:
                     ts = event.get("timestamp") or event.get("ts", 0)
                     if ts > cutoff:
                         recent_count += 1
-                except:
+                except (json.JSONDecodeError, ValueError):
                     continue
 
         if recent_count > 0:
@@ -162,7 +162,7 @@ def check_pre_tool_events(minutes: int = 60) -> Tuple[bool, str]:
                             pre_count += 1
                         elif et in ("post_tool", "post_tool_failure"):
                             post_count += 1
-                except:
+                except (json.JSONDecodeError, ValueError):
                     continue
 
         if pre_count > 0 and post_count > 0:

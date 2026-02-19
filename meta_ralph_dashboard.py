@@ -68,9 +68,9 @@ def load_jsonl(path: Path, limit: int = 500) -> List[Dict]:
                 if line.strip():
                     try:
                         items.append(json.loads(line))
-                    except:
+                    except (json.JSONDecodeError, ValueError):
                         continue
-    except:
+    except OSError:
         return []
     return items[-limit:]
 

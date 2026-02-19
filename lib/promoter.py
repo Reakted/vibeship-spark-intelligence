@@ -19,11 +19,14 @@ Promotion criteria:
 """
 
 import json
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any
 from dataclasses import dataclass
+
+log = logging.getLogger(__name__)
 
 from .cognitive_learner import CognitiveInsight, CognitiveCategory, get_cognitive_learner
 from .project_profile import load_profile
@@ -460,26 +463,28 @@ class Promoter:
     
     def _ensure_section_exists(self, file_path: Path, section: str) -> str:
         """Ensure the target section exists in the file. Returns file content."""
-        if not file_path.exists():
-            # Create file with basic structure
-            content = f"""# {file_path.stem}
+        try:
+            if not file_path.exists():
+                content = f"""# {file_path.stem}
 
 {section}
 
 *Auto-promoted insights from Spark*
 
 """
-            file_path.write_text(_clean_text_for_write(content), encoding="utf-8")
+                file_path.write_text(_clean_text_for_write(content), encoding="utf-8")
+                return content
+
+            content = file_path.read_text(encoding="utf-8")
+
+            if section not in content:
+                content += f"\n\n{section}\n\n*Auto-promoted insights from Spark*\n\n"
+                file_path.write_text(_clean_text_for_write(content), encoding="utf-8")
+
             return content
-        
-        content = file_path.read_text(encoding="utf-8")
-        
-        if section not in content:
-            # Add section at the end
-            content += f"\n\n{section}\n\n*Auto-promoted insights from Spark*\n\n"
-            file_path.write_text(_clean_text_for_write(content), encoding="utf-8")
-        
-        return content
+        except OSError as e:
+            log.warning("Failed to ensure section in %s: %s", file_path, e)
+            return ""
     
     def _get_budget(self, file_path: Path) -> int:
         budget = self.adapter_budgets.get(file_path.name, {})

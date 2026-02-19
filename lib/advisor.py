@@ -18,6 +18,8 @@ KISS Principle: Single file, simple API, maximum impact.
 """
 
 import json
+import logging
+import threading
 import time
 import hashlib
 import os
@@ -824,6 +826,9 @@ def _tail_jsonl(path: Path, count: int) -> List[str]:
 # We compact at most once per TTL per path.
 _COMPACT_TTL_S = 30.0
 _LAST_COMPACT_TS: Dict[str, float] = {}
+_COMPACT_LOCK = threading.Lock()
+
+_advisor_log = logging.getLogger("spark.advisor")
 
 
 def _append_jsonl_capped(path: Path, entry: Dict[str, Any], max_lines: int) -> None:
@@ -843,21 +848,22 @@ def _append_jsonl_capped(path: Path, entry: Dict[str, Any], max_lines: int) -> N
 
         now = time.time()
         key = str(path)
-        last = float(_LAST_COMPACT_TS.get(key, 0.0) or 0.0)
-        if (now - last) < _COMPACT_TTL_S:
-            return
+        with _COMPACT_LOCK:
+            last = float(_LAST_COMPACT_TS.get(key, 0.0) or 0.0)
+            if (now - last) < _COMPACT_TTL_S:
+                return
 
-        # Only compact when we likely exceeded the cap.
-        probe = _tail_jsonl(path, max_lines + 1)
-        if len(probe) <= max_lines:
+            # Only compact when we likely exceeded the cap.
+            probe = _tail_jsonl(path, max_lines + 1)
+            if len(probe) <= max_lines:
+                _LAST_COMPACT_TS[key] = now
+                return
+
+            # Rewrite to the last max_lines.
+            path.write_text("\n".join(probe[-max_lines:]) + "\n", encoding="utf-8")
             _LAST_COMPACT_TS[key] = now
-            return
-
-        # Rewrite to the last max_lines.
-        path.write_text("\n".join(probe[-max_lines:]) + "\n", encoding="utf-8")
-        _LAST_COMPACT_TS[key] = now
-    except Exception:
-        pass
+    except Exception as e:
+        _advisor_log.debug("JSONL append/compact failed for %s: %s", path, e)
 
 
 def record_recent_delivery(

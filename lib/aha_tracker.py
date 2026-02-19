@@ -17,6 +17,7 @@ Surprise detection:
 """
 
 import json
+import logging
 import hashlib
 from datetime import datetime
 from pathlib import Path
@@ -109,8 +110,8 @@ class AhaTracker:
                 data = json.loads(AHA_FILE.read_text(encoding='utf-8'))
                 self.pending_surface = data.get("pending_surface", [])
                 return data
-            except:
-                pass
+            except (json.JSONDecodeError, OSError) as e:
+                logging.getLogger(__name__).warning("Failed to load AHA file: %s", e)
         return {
             "moments": [],
             "lessons": [],

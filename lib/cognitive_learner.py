@@ -77,6 +77,28 @@ def _is_low_signal_struggle_task(task: str) -> bool:
     return any(token in t for token in noisy_tokens)
 
 
+def _is_injection_or_garbage(text: str) -> bool:
+    """Detect prompt injection attempts and garbled/truncated content."""
+    t = (text or "").strip().lower()
+    if not t:
+        return True
+    # Quality test injection pattern
+    if "quality_test" in t:
+        return True
+    # Instruction injection ("remember this because it is critical")
+    if "remember this because" in t and ("avoid x" in t or "prefer z" in t):
+        return True
+    # HTTP error codes masquerading as wisdom
+    if len(t) < 30 and any(t.startswith(code) for code in ("429 ", "403 ", "500 ", "404 ")):
+        return True
+    # Truncated mid-word (ends with incomplete token)
+    import re
+    alpha_only = re.sub(r'[^a-zA-Z]', '', t)
+    if len(alpha_only) < 8:
+        return True
+    return False
+
+
 def _is_auto_evidence_line(text: str) -> bool:
     t = (text or "").strip().lower()
     if not t:
@@ -620,6 +642,8 @@ class CognitiveLearner:
 
     def learn_struggle_area(self, task_type: str, failure_reason: str):
         """Learn what types of tasks I struggle with."""
+        if _is_injection_or_garbage(failure_reason):
+            return None
         normalized_task = _normalize_struggle_text(task_type)
         key = self._generate_key(
             CognitiveCategory.SELF_AWARENESS,
@@ -670,6 +694,8 @@ class CognitiveLearner:
     def learn_user_preference(self, preference_type: str, preference_value: str,
                               evidence: str):
         """Learn about user preferences."""
+        if _is_injection_or_garbage(preference_value):
+            return None
         key = self._generate_key(CognitiveCategory.USER_UNDERSTANDING, f"pref:{preference_type}")
         if key in self.insights:
             self._touch_validation(self.insights[key], validated_delta=1)
@@ -739,6 +765,8 @@ class CognitiveLearner:
 
     def learn_principle(self, principle: str, examples: List[str]):
         """Learn a general principle that applies across contexts."""
+        if _is_injection_or_garbage(principle):
+            return None
         key = self._generate_key(CognitiveCategory.WISDOM, f"principle:{principle}")
         self.insights[key] = CognitiveInsight(
             category=CognitiveCategory.WISDOM,
@@ -752,6 +780,8 @@ class CognitiveLearner:
 
     def learn_assumption_failure(self, assumption: str, reality: str, context: str):
         """Learn when an assumption proved wrong."""
+        if _is_injection_or_garbage(assumption) or _is_injection_or_garbage(reality):
+            return None
         key = self._generate_key(CognitiveCategory.REASONING, f"bad_assumption:{assumption}")
         self.insights[key] = CognitiveInsight(
             category=CognitiveCategory.REASONING,
@@ -1364,14 +1394,15 @@ class CognitiveLearner:
                     session_id=session_id,
                     trace_id=trace_id
                 )
-            except Exception:
-                pass  # Don't fail if exposure tracking unavailable
+            except Exception as e:
+                logging.getLogger(__name__).debug("Exposure tracking unavailable: %s", e)
 
         # Index for semantic retrieval (best-effort)
         try:
             from lib.semantic_retriever import index_insight
             index_insight(key, insight, context)
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).debug("Semantic indexing unavailable: %s", e)
             pass  # Don't block writes if semantic indexing fails
 
         return self.insights[key]
