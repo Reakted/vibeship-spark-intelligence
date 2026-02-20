@@ -14,7 +14,7 @@
   "semantic": {
     "enabled": true,
     "min_similarity": 0.5,
-    "min_fusion_score": "0.50",
+    "min_fusion_score": 0.50,
     "weight_recency": 0.1,
     "weight_outcome": 0.35,
     "mmr_lambda": 0.5,
@@ -96,7 +96,7 @@
   "advisory_gate": {
     "max_emit_per_call": 1,
     "tool_cooldown_s": 30,
-    "advice_repeat_cooldown_s": "300",
+    "advice_repeat_cooldown_s": 300,
     "warning_threshold": 0.68,
     "note_threshold": 0.38,
     "whisper_threshold": 0.27,
@@ -203,7 +203,7 @@
     }
   },
   "meta_ralph": {
-    "quality_threshold": "4.5",
+    "quality_threshold": 4.5,
     "needs_work_threshold": 2,
     "needs_work_close_delta": 0.5,
     "min_outcome_samples": 5,
