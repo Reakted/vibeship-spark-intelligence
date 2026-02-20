@@ -140,6 +140,28 @@ def _chips_disabled() -> bool:
     }
 
 
+def _premium_tools_enabled() -> bool:
+    return str(os.environ.get("SPARK_PREMIUM_TOOLS", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _chips_enabled() -> bool:
+    if _chips_disabled():
+        return False
+    if not _premium_tools_enabled():
+        return False
+    return str(os.environ.get("SPARK_CHIPS_ENABLED", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _chip_domain_match(chip_id: str, intent_text: str, intent_family: str, tool_name: str) -> float:
     chip = str(chip_id or "").strip().lower()
     text = f"{intent_text} {intent_family} {tool_name}".strip().lower()
@@ -241,13 +263,27 @@ def _collect_cognitive(limit: int = 6) -> List[Dict[str, Any]]:
             continue
         if _is_noise_evidence(text):
             continue
+
+        # Read embedded advisory quality if available
+        adv_q = row.get("advisory_quality") or {}
+        if isinstance(adv_q, dict) and adv_q.get("suppressed"):
+            continue  # Skip insights suppressed by distillation transformer
+
+        # Use unified_score from transformer when available, fallback to reliability
+        confidence = float(row.get("reliability") or row.get("confidence") or 0.5)
+        if isinstance(adv_q, dict) and adv_q.get("unified_score"):
+            unified = float(adv_q["unified_score"])
+            # Blend: transformer score weighted higher than raw reliability
+            confidence = max(confidence, 0.60 * unified + 0.40 * confidence)
+
         evidence.append(
             {
                 "source": "cognitive",
                 "id": str(row.get("key") or row.get("insight_key") or text[:48]),
                 "text": text,
-                "confidence": float(row.get("reliability") or row.get("confidence") or 0.5),
+                "confidence": confidence,
                 "created_at": float(row.get("timestamp") or row.get("created_at") or 0.0),
+                "meta": {"advisory_quality": adv_q} if adv_q else {},
             }
         )
     return evidence
@@ -574,7 +610,15 @@ def build_memory_bundle(
         text = str((row or {}).get("text") or "").strip()
         if not text:
             continue
+        # Skip suppressed items from any source
+        meta = row.get("meta") or {}
+        adv_q = meta.get("advisory_quality") or {}
+        if isinstance(adv_q, dict) and adv_q.get("suppressed"):
+            continue
         relevance = _intent_relevance_score(intent_tokens, text)
+        # Boost relevance with advisory quality structure match
+        if isinstance(adv_q, dict) and adv_q.get("unified_score"):
+            relevance += float(adv_q["unified_score"]) * 0.15
         scored.append(
             (
                 relevance,

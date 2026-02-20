@@ -1,93 +1,47 @@
-# Spark OSS Core Boundary (What Ships Here)
+# Spark OSS Boundary (Public + Premium)
 
-Date: 2026-02-15
-Repo: spark-oss (private for now)
+This page defines what ships in the open repo by default and what requires premium flags.
 
-This document is the exact boundary for the Spark OSS Core distribution: what is included, what is intentionally excluded, and why.
+## 1) What is included in OSS core
 
-## 1) Product Intent
+Included by default:
+- Event capture and ingest (`sparkd`, queue, event schema)
+- Learning and memory stores (`cognitive_learner`, patterns, outcomes)
+- Guardrails and advisory runtime (`advisory_*`, `eidos`, `sparkd` hooks)
+- Output adapters for local agent workflows (`SPARK_CONTEXT.md`, `SPARK_ADVISORY.md`, `SPARK_NOTIFICATIONS.md`)
+- OpenClaw + Cursor/Claude adapters
+- Chip module files and schema
 
-Spark OSS Core should feel like "self-evolving intelligence" for coding agents:
-- it captures real work signals
-- learns durable preferences/patterns
-- distills reusable rules (EIDOS)
-- surfaces actionable context back into your agent workspace
+## 2) What is disabled by default
 
-It should NOT be a general-purpose automation platform for public influence, mass action, or high-dual-use behavior.
+Spark OSS keeps the following surfaces inert unless explicitly enabled:
+- X/social automation and research surfaces
+- `convo`, `niche`, and `engagement` advisory branches
+- Chip runtime merge/processing and engagement pulse loop
+- Any direct social intent routing inside advisory retrieval
 
-## 2) Included In OSS Core (Ships)
+The repo still contains the chips module and files, but OSS runs with no usable runtime exposure for those premium surfaces.
 
-Core runtime and learning loops:
-- Event ingest + queue: `sparkd.py`, `lib/queue.py`, `lib/events.py`, `lib/ingest_validation.py`
-- Bridge cycle + context writing: `bridge_worker.py`, `lib/bridge_cycle.py`, `lib/context_sync.py`, `lib/output_adapters/`
-- Learning + memory stores: `lib/cognitive_learner.py`, `lib/memory_*`, `lib/pattern_detection/`, `lib/outcomes/`
-- Guardrails and deterministic enforcement (must remain OSS): `lib/eidos/`, `hooks/observe.py`
-- Advisory engine + gating: `lib/advisory_engine.py`, `lib/advisory_gate.py`, `lib/advisor.py`
+## 3) Launch flags
 
-Local integrations:
-- Claude Code hook capture: `hooks/observe.py`
-- OpenClaw tailer capture: `adapters/openclaw_tailer.py`
-- Workspace outputs for agents: `SPARK_CONTEXT.md`, `SPARK_ADVISORY.md`, `SPARK_NOTIFICATIONS.md` (via `lib/output_adapters/`)
+Use both flags for chip/runtime-capable behavior:
+- `SPARK_PREMIUM_TOOLS=1`
+- `SPARK_CHIPS_ENABLED=1`
 
-Chips (safe default set):
-- Keep a small set of coding-focused chips under `chips/` (examples + coding/workflow oriented)
-- Chip runtime remains in `lib/chips/`
+To keep chips permanently off in OSS, use:
+- `SPARK_ADVISORY_DISABLE_CHIPS=1`
 
-Docs that explain safety posture and release:
-- `docs/RESPONSIBLE_PUBLIC_RELEASE.md`
-- `docs/security/THREAT_MODEL.md`
-- `docs/security/SECRETS_AND_RELEASE_CHECKLIST.md`
-- `docs/research/AGI_GUARDRAILS_IMMUTABILITY.md`
-- OSS definition: `docs/OSS_PRODUCT_DEFINITION.md`, `docs/OSS_SWOT.md`, `docs/OSS_ROADMAP.md`, `docs/OSS_SCHEMAS.md`
+Default (safe) launch posture:
+- `SPARK_PREMIUM_TOOLS` not set
+- `SPARK_CHIPS_ENABLED` not set
+- `SPARK_ADVISORY_DISABLE_CHIPS` unset (or set to any truthy value for hard-off)
 
-## 3) Excluded From OSS Core (Moved Out)
+## 4) Explicitly excluded from OSS default
 
-These are intentionally excluded because they raise dual-use risk and/or blur product scope.
+- Moltbook integration/runtime
+- DEPTH/Forge training and benchmark suites
+- Other high-risk social tooling not needed for coding intelligence loops
+- Archive/reporting folders, local runtime traces, and benchmark/analysis outputs are removed from the public tree for launch hygiene
+- Removed launch directories: `benchmarks/`, `trace_hud/`, `logs/`, `build/`, `dist/`, `.spark/`, and local cache/runtime artifacts
 
-Social network / agent-social automation:
-- Moltbook integration and CLI (removed from this repo)
-
-X/Twitter automation and trend pipelines:
-- X-specific runtime modules (removed from this repo)
-- X posting/reply/scheduled research scripts (removed from this repo)
-
-Training suites and premium benchmark systems:
-- DEPTH/Forge training runners and related code paths (moved out; premium/private)
-
-High-risk capability surfaces:
-- Anything that enables mass messaging, autonomous posting, or wide-scale external influence by default
-
-## 4) Safety Defaults In OSS Core
-
-Threat model: hostile actors can fork. Therefore OSS Core focuses on:
-- safe-by-default official distribution
-- guardrails enforced at a real choke point (pre-tool check)
-- reduced "sharp tool" surfaces in the default package
-
-Implemented guardrails (examples):
-- EIDOS pre-tool guardrails run on `PreToolUse` via `hooks/observe.py`
-- High-risk tool usage blocks in `lib/eidos/guardrails.py` (destructive shell patterns, pipe-to-shell, likely-secret file reads)
-- Optional strict enforcement mode: `SPARK_EIDOS_ENFORCE_BLOCK=1` (host-dependent)
-
-## 5) Open Core / Premium Compatibility (How We Grow)
-
-OSS core stays:
-- auditable
-- capability-poor by default (no high-dual-use automations)
-- stable contracts (schemas + plugin interfaces)
-
-Premium value stays in:
-- curated content packs (chips, benchmark suites)
-- hosted services (capability brokerage, attestation, audits)
-
-See: `docs/OPEN_CORE_FREEMIUM_MODEL.md`.
-
-## 6) What This Cannot Prevent (Honest Limits)
-
-- A hostile fork can remove guardrails and run privately.
-- AGPL helps visibility for hosted forks (they must provide source to users), but cannot force runtime posture.
-
-Therefore:
-- the "official" build must remain safe-by-default
-- high-risk capabilities should live behind external services or premium modules
-
+These excluded surfaces are tracked in `docs/OPEN_CORE_FREEMIUM_MODEL.md` and are intentionally marked for premium/private packaging.

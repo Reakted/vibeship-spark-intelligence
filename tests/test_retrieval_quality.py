@@ -152,7 +152,7 @@ SCENARIOS: List[Scenario] = [
     Scenario(
         name="edit_html_dashboard",
         tool_name="Edit",
-        tool_input={"file_path": "dashboard/social_intel/index.html", "old_string": "<div class='card'>", "new_string": "<div class='card health-card'>"},
+        tool_input={"file_path": "docs/claude_code.md", "old_string": "<div class='card'>", "new_string": "<div class='card health-card'>"},
         task_context="Updating dashboard card styling",
         category="code_editing",
         relevance_keywords=["dashboard", "css", "card", "style", "html", "edit", "read", "verify", "file"],

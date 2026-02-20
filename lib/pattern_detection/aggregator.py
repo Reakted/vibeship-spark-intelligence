@@ -111,6 +111,11 @@ class PatternAggregator:
         self._store = get_store()
         self._events_since_distillation = 0
 
+        # Session → active step_id mapping.
+        # When a user message creates a Step, we store its step_id here
+        # so subsequent tool-use events in the same session can be linked.
+        self._session_step_ids: Dict[str, str] = {}
+
         # Importance scoring stats
         self._importance_stats = {
             "critical": 0,
@@ -146,6 +151,7 @@ class PatternAggregator:
 
         # === EIDOS INTEGRATION: Handle user requests ===
         event_type = event.get("type", "")
+        session_id = event.get("session_id", "")
         trace_id = event.get("trace_id")
         if not trace_id:
             payload = event.get("payload") or {}
@@ -153,8 +159,33 @@ class PatternAggregator:
                 trace_id = payload.get("trace_id")
         step_id = event.get("step_id")
 
+        # Auto-resolve step_id from session tracking when not in event.
+        # This bridges the gap: user_message creates a Step with a step_id,
+        # but subsequent tool-use events don't carry it.  We propagate it
+        # via the session → step_id mapping.
+        if not step_id and session_id:
+            step_id = self._session_step_ids.get(session_id)
+
         # If user message, wrap in Step envelope
         if event_type == "user_message" and event.get("content"):
+            # Auto-complete previous step for this session (implicit SUCCESS).
+            # If the user sent a new message, the previous action was
+            # satisfactory enough that they moved on.
+            prev_step_id = self._session_step_ids.get(session_id)
+            if prev_step_id and prev_step_id in self._request_tracker.pending:
+                completed = self._request_tracker.on_outcome(
+                    step_id=prev_step_id,
+                    result="User moved to next request (implicit success)",
+                    success=True,
+                )
+                if completed:
+                    self._eidos_stats["steps_completed"] += 1
+                    try:
+                        self._store.save_step(completed)
+                        self._eidos_stats["steps_persisted"] += 1
+                    except Exception:
+                        self._eidos_stats["step_persist_failures"] += 1
+
             step = self._request_tracker.on_user_message(
                 message=event["content"],
                 episode_id=event.get("episode_id", "default"),
@@ -162,11 +193,18 @@ class PatternAggregator:
                     "project": event.get("project"),
                     "phase": event.get("phase"),
                     "prior_actions": event.get("prior_actions", []),
-                    "session_id": event.get("session_id"),
+                    "session_id": session_id,
                 },
                 trace_id=trace_id
             )
             event["step_id"] = step.step_id
+            # Track this session's active step_id
+            if session_id:
+                self._session_step_ids[session_id] = step.step_id
+                # Bound the mapping to prevent unbounded growth
+                if len(self._session_step_ids) > MAX_TRACKED_SESSIONS:
+                    oldest = next(iter(self._session_step_ids))
+                    del self._session_step_ids[oldest]
             self._eidos_stats["steps_created"] += 1
             try:
                 self._store.save_step(step)
@@ -178,8 +216,8 @@ class PatternAggregator:
         elif event_type == "action_complete" and step_id:
             self._request_tracker.on_action_taken(
                 step_id=step_id,
-                decision=event.get("action", ""),
-                tool_used=event.get("tool", ""),
+                decision=event.get("action") or event.get("tool_name") or "",
+                tool_used=event.get("tool") or event.get("tool_name") or "",
                 alternatives_considered=event.get("alternatives"),
             )
 
@@ -187,13 +225,16 @@ class PatternAggregator:
         elif event_type in ("success", "failure", "user_feedback") and step_id:
             completed = self._request_tracker.on_outcome(
                 step_id=step_id,
-                result=event.get("result", ""),
+                result=event.get("result") or event.get("error") or "",
                 success=event_type != "failure",
                 validation_evidence=event.get("evidence", ""),
                 user_feedback=event.get("feedback"),
             )
             if completed:
                 self._eidos_stats["steps_completed"] += 1
+                # Clear session tracking since step is done
+                if session_id and self._session_step_ids.get(session_id) == step_id:
+                    del self._session_step_ids[session_id]
                 try:
                     self._store.save_step(completed)
                     self._eidos_stats["steps_persisted"] += 1
@@ -265,6 +306,7 @@ class PatternAggregator:
             oldest_session_id = next(iter(self._session_patterns))
             self._session_patterns.pop(oldest_session_id, None)
             self._recent_pattern_keys.pop(oldest_session_id, None)
+            self._session_step_ids.pop(oldest_session_id, None)
 
         while len(self._recent_pattern_keys) > MAX_TRACKED_SESSIONS:
             oldest_session_id = next(iter(self._recent_pattern_keys))

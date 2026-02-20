@@ -57,13 +57,13 @@ except Exception:
     AGREEMENT_MIN_SOURCES = 2
 
 # Max advice items to emit per tool call (prevent flooding)
-MAX_EMIT_PER_CALL = 1
+MAX_EMIT_PER_CALL = 2
 
 # Cooldown: don't emit for same tool within N seconds
-TOOL_COOLDOWN_S = 90
+TOOL_COOLDOWN_S = 30
 
 # Don't repeat the same advice within N seconds
-ADVICE_REPEAT_COOLDOWN_S = 1800  # 30 minutes
+ADVICE_REPEAT_COOLDOWN_S = 300  # 5 minutes
 
 # Whether WHISPER-level advice should be emitted at all.
 # Default: off (whispers are high-noise in real operations).
@@ -250,6 +250,12 @@ def _load_gate_config(path: Optional[Path] = None) -> Dict[str, Any]:
 _BOOT_GATE_CFG = _load_gate_config()
 if _BOOT_GATE_CFG:
     apply_gate_config(_BOOT_GATE_CFG)
+
+try:
+    from .tuneables_reload import register_reload as _gate_register
+    _gate_register("advisory_gate", apply_gate_config, label="advisory_gate.apply_config")
+except ImportError:
+    pass
 
 
 @dataclass

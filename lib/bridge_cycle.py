@@ -179,6 +179,15 @@ def run_bridge_cycle(
     import os
     os.environ.setdefault("SPARK_EMBED_BACKEND", "tfidf")
 
+    # --- Hot-reload tuneables if file changed ---
+    try:
+        from lib.tuneables_reload import check_and_reload
+        check_and_reload()
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
     stats: Dict[str, Any] = {
         "timestamp": time.time(),
         "context_updated": False,
@@ -414,6 +423,14 @@ def run_bridge_cycle(
             stats["errors"].append("cognitive_signals")
             log_debug("bridge_worker", "cognitive signal extraction failed", e)
 
+        # --- Wisdom promotion (upgrade high-confidence insights) ---
+        try:
+            wisdom_stats = cognitive.promote_to_wisdom()
+            if wisdom_stats.get("promoted", 0) > 0:
+                stats["wisdom_promotions"] = wisdom_stats["promoted"]
+        except Exception:
+            pass
+
         # --- Opportunity scanner (self-evolution loop) ---
         def _scan_opportunities() -> Dict[str, Any]:
             scan_session = "default"
@@ -597,7 +614,7 @@ def run_bridge_cycle(
 
             opp_stats = stats.get("opportunity_scanner") or {}
             opp_promotions = (opp_stats.get("promoted_candidates") or []) if isinstance(opp_stats, dict) else []
-            if counter % 10 == 0 and (patterns_found > 0 or opp_promotions):
+            if counter % 5 == 0 and (patterns_found > 0 or opp_promotions):
                 # Gather behavioral observations
                 observations = []
                 if stats.get("llm_advisory"):
@@ -693,7 +710,6 @@ _INSIGHT_NOISE_PATTERNS = [
     "Strong reasoning on",       # depth forge benchmark scores
     "Weak reasoning on",         # depth forge benchmark scores
     "reasoning on '",            # depth forge benchmark scores
-    "mcp__x-twitter__",          # Twitter API error struggles
     "depth forge",               # depth forge benchmarks
     "Profile: ",                 # benchmark profile strings like *#%####%##
     "Strongest at depths",       # depth forge metrics
@@ -701,7 +717,6 @@ _INSIGHT_NOISE_PATTERNS = [
     "DEPTH meta-analysis",       # depth forge meta-analysis
     "grade A", "grade B", "grade C", "grade D", "grade F",  # benchmark grades
     "free-tier",                 # polluted insight from old data
-    "content strategy on X",     # X/Twitter strategy noise
     "lets push git",             # raw user transcript fragments
     "remember: Do it",           # raw user transcript fragments
     "testing pipeline flow",     # generic test noise

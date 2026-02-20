@@ -30,6 +30,16 @@ from .policy import SafetyPolicy
 
 log = logging.getLogger("spark.chips")
 
+PREMIUM_ONLY_CHIP_IDS = {
+    "moltbook",
+    "social-convo",
+    "engagement-pulse",
+    "x-social",
+    "x_social",
+    "market-intel",
+    "niche-intel",
+}
+
 # Storage for chip insights
 CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
 OBSERVER_POLICY_FILE = Path.home() / ".spark" / "chip_observer_policy.json"
@@ -126,6 +136,14 @@ class ChipRuntime:
             for token in raw_blocked.split(",")
             if token.strip()
         }
+        self.premium_tools_enabled = os.getenv("SPARK_PREMIUM_TOOLS", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not self.premium_tools_enabled:
+            self.blocked_chip_ids.update(PREMIUM_ONLY_CHIP_IDS)
         raw_observer_blocklist = str(os.getenv("SPARK_CHIP_TELEMETRY_OBSERVERS", "")).strip()
         if raw_observer_blocklist:
             self.telemetry_observer_blocklist = {

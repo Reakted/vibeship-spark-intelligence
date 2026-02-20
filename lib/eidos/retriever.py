@@ -172,6 +172,8 @@ class StructuralRetriever:
         Retrieve distillations matching an intent string.
 
         Simpler interface for when you don't have a full Step.
+        Searches all distillation types: policies, heuristics,
+        sharp edges, and anti-patterns.
 
         Args:
             intent: The intent to match against
@@ -190,11 +192,29 @@ class StructuralRetriever:
                     results.append(p)
                     seen_ids.add(p.distillation_id)
 
-        # Heuristics for this intent
+        # Heuristics for this intent (now does raw keyword + category matching)
         for h in self._get_heuristics(intent):
             if h.distillation_id not in seen_ids:
                 results.append(h)
                 seen_ids.add(h.distillation_id)
+
+        # Sharp edges — extract tool/domain from intent and match
+        intent_keywords = self._extract_keywords(intent)
+        all_edges = self.store.get_distillations_by_type(
+            DistillationType.SHARP_EDGE, limit=30
+        )
+        for edge in all_edges:
+            if edge.distillation_id in seen_ids:
+                continue
+            # Match if any trigger appears in intent
+            if self._matches_trigger(intent, edge.triggers):
+                results.append(edge)
+                seen_ids.add(edge.distillation_id)
+                continue
+            # Match if intent keywords overlap with edge domains/statement
+            if self._has_keyword_overlap(intent, edge.statement, min_overlap=2):
+                results.append(edge)
+                seen_ids.add(edge.distillation_id)
 
         # Anti-patterns
         for a in self._get_anti_patterns(intent, ""):
@@ -290,31 +310,54 @@ class StructuralRetriever:
         return edges[:10]
 
     def _get_heuristics(self, intent: str) -> List[Distillation]:
-        """Get heuristics matching the intent."""
-        # Extract intent category
+        """Get heuristics matching the intent.
+
+        Uses two search strategies:
+        1. Normalized category search (e.g. "bug_fixing")
+        2. Raw keyword trigger search (e.g. "auth", "token")
+        This ensures domain-specific triggers are not lost during normalization.
+        """
         intent_key = self._normalize_intent(intent)
+        seen_ids: set = set()
+        heuristics: List[Distillation] = []
 
-        # Search by trigger
-        heuristics = self.store.get_distillations_by_trigger(intent_key, limit=10)
+        def _add(items: List[Distillation]) -> None:
+            for h in items:
+                if h.distillation_id not in seen_ids and h.type == DistillationType.HEURISTIC:
+                    heuristics.append(h)
+                    seen_ids.add(h.distillation_id)
 
-        # Also search by domain
-        domain_heuristics = self.store.get_distillations_by_domain(intent_key, limit=10)
-        for h in domain_heuristics:
-            if h not in heuristics:
-                heuristics.append(h)
+        # Strategy 1: Search by normalized category
+        _add(self.store.get_distillations_by_trigger(intent_key, limit=10))
+        _add(self.store.get_distillations_by_domain(intent_key, limit=10))
 
-        # Filter to heuristic type
-        return [h for h in heuristics if h.type == DistillationType.HEURISTIC][:10]
+        # Strategy 2: Search by raw intent keywords (finds domain-specific triggers)
+        intent_words = self._extract_keywords(intent)
+        for word in intent_words[:6]:  # Cap at 6 keyword searches
+            if word != intent_key and len(word) >= 3:
+                _add(self.store.get_distillations_by_trigger(word, limit=5))
+
+        # Strategy 3: Check all heuristics against intent triggers
+        if len(heuristics) < 3:
+            all_heuristics = self.store.get_distillations_by_type(
+                DistillationType.HEURISTIC, limit=30
+            )
+            for h in all_heuristics:
+                if h.distillation_id not in seen_ids and self._matches_trigger(intent, h.triggers):
+                    heuristics.append(h)
+                    seen_ids.add(h.distillation_id)
+
+        return heuristics[:10]
 
     def _get_anti_patterns(self, intent: str, hypothesis: str) -> List[Distillation]:
         """Get anti-patterns for the context.
 
-        Uses stricter matching than heuristics: requires 4+ keyword overlap
-        (not 2) and filters out common tool words that would match everything.
+        Matches against both normalized category and raw intent keywords.
+        Uses stricter keyword overlap (4+) for statement matching to avoid
+        false positives, but trigger matching uses the raw intent.
         """
         intent_key = self._normalize_intent(intent)
 
-        # Get anti-patterns matching intent
         all_anti = self.store.get_distillations_by_type(
             DistillationType.ANTI_PATTERN,
             limit=30
@@ -322,8 +365,13 @@ class StructuralRetriever:
 
         relevant = []
         for anti in all_anti:
-            # Check triggers (exact match is fine)
+            # Check anti_triggers against normalized intent
             if self._matches_trigger(intent_key, anti.anti_triggers):
+                relevant.append(anti)
+                continue
+
+            # Check anti_triggers against raw intent (catches domain words)
+            if self._matches_trigger(intent, anti.anti_triggers):
                 relevant.append(anti)
                 continue
 
@@ -407,6 +455,23 @@ class StructuralRetriever:
         words2 = set(re.findall(r'\b[a-z]+\b', text2.lower())) - stop_words
 
         return len(words1 & words2) >= min_overlap
+
+    def _extract_keywords(self, text: str) -> List[str]:
+        """Extract meaningful keywords from text, removing stop words."""
+        stop = {
+            "the", "a", "an", "and", "or", "but", "if", "then", "so", "to",
+            "of", "in", "on", "for", "with", "by", "is", "are", "was", "were",
+            "be", "been", "being", "user", "request", "when", "that", "this",
+            "from", "where", "how", "what", "which", "will", "not", "can",
+        } | _TOOL_STOP_WORDS
+        words = re.findall(r'\b[a-z][a-z0-9_]+\b', text.lower())
+        seen: set = set()
+        result: List[str] = []
+        for w in words:
+            if w not in stop and w not in seen:
+                result.append(w)
+                seen.add(w)
+        return result
 
     def _normalize_intent(self, intent: str) -> str:
         """Normalize intent for matching."""

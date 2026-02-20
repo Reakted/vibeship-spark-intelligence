@@ -2,7 +2,7 @@
  * Spark brand theme — Vibeship design system.
  *
  * Pulled directly from the Pulse dashboard (vibeship-spark-pulse)
- * and Neural dashboard (social_intel/index.html) CSS variables.
+ * and Neural dashboard CSS variables.
  *
  * Fonts: JetBrains Mono (data) + Instrument Serif (headings)
  * loaded via @import in IntelligenceFunnel.tsx

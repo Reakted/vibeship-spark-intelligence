@@ -13,6 +13,9 @@ Chips now perform best as **evidence infrastructure**:
 
 This playbook defines how chips should be authored and evaluated so they match that role.
 
+Spark OSS default keeps chip runtime disabled. Set `SPARK_CHIPS_ENABLED=1`
+before using these runbooks in premium environments.
+
 ## Core Position
 
 Chips are not primarily free-form advice generators.
@@ -140,7 +143,7 @@ Example:
 ```bash
 python scripts/run_chip_schema_experiments.py \
   --plan benchmarks/data/chip_schema_experiment_plan_v1.json \
-  --chips social-convo,engagement-pulse,x_social \
+  --chips spark-core,marketing,game-dev \
   --events-per-chip 24 \
   --promotion-baseline-id A_schema_baseline \
   --promotion-candidate-id B_schema_evidence2 \
@@ -159,7 +162,7 @@ Example:
 ```bash
 python scripts/run_chip_schema_experiments.py \
   --plan benchmarks/data/chip_schema_mode_variations_v1.json \
-  --chips social-convo,engagement-pulse,x_social \
+  --chips spark-core,marketing,game-dev \
   --events-per-chip 24 \
   --promotion-baseline-id M0_baseline_schema_safe \
   --promotion-candidate-id M1_two_evidence_balanced \
@@ -171,7 +174,7 @@ Merge-activation pass (recommended after trigger tightening):
 ```bash
 python scripts/run_chip_schema_experiments.py \
   --plan benchmarks/data/chip_schema_merge_activation_plan_v1.json \
-  --chips social-convo,engagement-pulse,x_social \
+  --chips spark-core,marketing,game-dev \
   --events-per-chip 24 \
   --promotion-baseline-id R0_baseline_safe \
   --promotion-candidate-id R3_two_evidence_relaxed_merge \
@@ -186,7 +189,7 @@ Multi-seed robustness pass (recommended before promotion):
 ```bash
 python scripts/run_chip_schema_multiseed.py \
   --plan benchmarks/data/chip_schema_mode_variations_v1.json \
-  --chips social-convo,engagement-pulse,x_social \
+  --chips spark-core,marketing,game-dev \
   --events-per-chip 24 \
   --seed-start 20260213 \
   --seed-count 7 \

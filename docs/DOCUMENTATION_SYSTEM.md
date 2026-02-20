@@ -24,10 +24,7 @@ This file defines the mandatory system for keeping docs clean, non-contradictory
 - Integration and subsystem docs (OpenClaw, advisory, retrieval, observability, security, support).
 
 4. Point-in-time reports
-- `docs/reports/` (evidence snapshots, not policy truth).
-
-5. Archive
-- `docs/archive/` (historical reference only).
+- internal launch evidence snapshots (historical files are retained in non-public release bundles).
 
 If a lower layer conflicts with a higher layer, update or archive the lower layer.
 
@@ -53,8 +50,8 @@ Use:
 - Do not list every historical report.
 
 3. Keep reports structured
-- Current highlights live in `docs/reports/LATEST.md`.
-- Historical runs stay in dated files and `docs/archive/docs/reports_self_review/`.
+- Keep current highlights in release notes or gated evidence bundles.
+- Historical run evidence is retained outside public docs in private release bundles.
 
 4. Archive stale documents
 - Archive when a doc is superseded, duplicated, or no longer operationally used.
@@ -71,16 +68,15 @@ Archive candidates:
 - repetitive generated reports no longer used for daily operation.
 
 Archive method:
-1. Move file to `docs/archive/...` (preserve relative category where possible).
+1. Move file to a gated release-archive location (not in public OSS docs).
 2. Add a one-line pointer in the active replacement doc if needed.
-3. Record the change in a short report note under `docs/reports/`.
+3. Record the change in the private archive changelog.
 
 ## Reports Retention Policy
 
-- Keep current-facing summary in `docs/reports/LATEST.md`.
-- Keep historical evidence in date-stamped files.
-- Move repetitive run artifacts (for example repeated self-reviews) into tracked archive folders under `docs/archive/docs/`.
-- Keep only recent quick-access runs at `docs/reports/` root when useful.
+- Keep current-facing summary in release notes or gated evidence bundle.
+- Keep historical evidence in private release bundles.
+- Keep repetitive run artifacts under a gated internal archive location.
 
 ## Cross-Repo Sync (Spark Consciousness)
 
@@ -92,7 +88,7 @@ For any contract/interface touching both repos:
 Minimum cross-repo references to keep aligned:
 - `docs/architecture/CONSCIOUSNESS_INTELLIGENCE_ALIGNMENT_TASK_SYSTEM.md`
 - `docs/CONSCIOUSNESS_BRIDGE_V1.md`
-- `docs/reports/LATEST.md` (latest integration verification pointer)
+- latest integration verification pointer in the private release bundle for cross-repo contracts
 
 ## Operating Cadence
 

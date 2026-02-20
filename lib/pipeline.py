@@ -71,6 +71,26 @@ def _load_pipeline_config() -> None:
 
 _load_pipeline_config()
 
+
+def reload_pipeline_from(cfg: Dict[str, Any]) -> None:
+    """Hot-reload pipeline batch size from coordinator-supplied 'values' section."""
+    global DEFAULT_BATCH_SIZE
+    if not isinstance(cfg, dict):
+        return
+    if "queue_batch_size" in cfg:
+        try:
+            batch = int(cfg["queue_batch_size"])
+            DEFAULT_BATCH_SIZE = max(MIN_BATCH_SIZE, min(MAX_BATCH_SIZE, batch))
+        except (ValueError, TypeError):
+            pass
+
+
+try:
+    from lib.tuneables_reload import register_reload as _pipeline_register
+    _pipeline_register("values", reload_pipeline_from, label="pipeline.reload_from")
+except ImportError:
+    pass
+
 # Backpressure thresholds
 QUEUE_HEALTHY = 200       # Below this, normal processing
 QUEUE_ELEVATED = 500      # Increase batch size

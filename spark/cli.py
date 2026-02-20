@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Spark CLI - Command-line interface for Spark
 
@@ -118,14 +118,9 @@ def _get_chips_router():
     from lib.chips import get_router
     return get_router()
 
-# Moltbook imports (lazy to avoid startup cost if not used)
-def _get_moltbook_client():
-    from adapters.moltbook.client import MoltbookClient, is_registered
-    return MoltbookClient(), is_registered
-
-def _get_moltbook_agent():
-    from adapters.moltbook.agent import SparkMoltbookAgent
-    return SparkMoltbookAgent()
+def _premium_tools_enabled() -> bool:
+    """Return True only when premium integration surfaces are explicitly enabled."""
+    return os.getenv("SPARK_PREMIUM_TOOLS", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _configure_output():
@@ -150,7 +145,7 @@ def cmd_status(args):
     # Cognitive learner stats
     cognitive = get_cognitive_learner()
     cognitive_stats = cognitive.get_stats()
-    print("📚 Cognitive Insights")
+    print("ðŸ“š Cognitive Insights")
     print(f"   Total: {cognitive_stats['total_insights']}")
     print(f"   Avg Reliability: {cognitive_stats['avg_reliability']:.0%}")
     print(f"   Promoted: {cognitive_stats['promoted_count']}")
@@ -162,8 +157,8 @@ def cmd_status(args):
     # Mind bridge stats
     bridge = get_mind_bridge()
     bridge_stats = bridge.get_stats()
-    print("🧠 Mind Bridge")
-    print(f"   Mind Available: {'✓ Yes' if bridge_stats['mind_available'] else '✗ No'}")
+    print("ðŸ§  Mind Bridge")
+    print(f"   Mind Available: {'âœ“ Yes' if bridge_stats['mind_available'] else 'âœ— No'}")
     print(f"   Synced to Mind: {bridge_stats['synced_count']}")
     print(f"   Offline Queue: {bridge_stats['offline_queue_size']}")
     print(f"   Last Sync: {bridge_stats['last_sync'] or 'Never'}")
@@ -171,7 +166,7 @@ def cmd_status(args):
     
     # Queue stats
     queue_stats = get_queue_stats()
-    print("📋 Event Queue")
+    print("ðŸ“‹ Event Queue")
     print(f"   Events: {queue_stats['event_count']}")
     print(f"   Size: {queue_stats['size_mb']} MB")
     print(f"   Needs Rotation: {'Yes' if queue_stats['needs_rotation'] else 'No'}")
@@ -189,7 +184,7 @@ def cmd_status(args):
     try:
         profile = load_profile(Path.cwd())
         score = completion_score(profile)
-        print("🎯 Project Intelligence")
+        print("ðŸŽ¯ Project Intelligence")
         print(f"   Domain: {profile.get('domain')}  Phase: {profile.get('phase')}")
         print(f"   Completion Score: {score['score']}/100")
         print(f"   Done: {profile.get('done') or 'not set'}")
@@ -199,7 +194,7 @@ def cmd_status(args):
 
     # Worker heartbeat
     hb_age = bridge_heartbeat_age_s()
-    print("âš™ Workers")
+    print("Ã¢Å¡â„¢ Workers")
     if hb_age is None:
         print("   bridge_worker: Unknown (no heartbeat)")
     else:
@@ -213,14 +208,14 @@ def cmd_status(args):
     last_stats = vstate.get("last_stats") or {}
     if last_ts:
         age_s = max(0, int(time.time() - float(last_ts)))
-        print("✅ Validation Loop")
+        print("âœ… Validation Loop")
         print(f"   Last Run: {age_s}s ago")
         print(
             f"   Last Stats: +{last_stats.get('validated', 0)} / -{last_stats.get('contradicted', 0)} "
             f"(surprises {last_stats.get('surprises', 0)})"
         )
     else:
-        print("✅ Validation Loop")
+        print("âœ… Validation Loop")
         print("   Last Run: Never")
     print()
 
@@ -231,7 +226,7 @@ def cmd_status(args):
     pkpis = pstate.get("kpis") or {}
     if plast_ts:
         age_s = max(0, int(time.time() - float(plast_ts)))
-        print("🧭 Prediction Loop")
+        print("ðŸ§­ Prediction Loop")
         print(f"   Last Run: {age_s}s ago")
         print(
             f"   Last Stats: preds {plast_stats.get('predictions', 0)}, "
@@ -248,14 +243,14 @@ def cmd_status(args):
                 f"validated/100 {pkpis.get('validated_per_100_predictions', 0):.1f}"
             )
     else:
-        print("🧭 Prediction Loop")
+        print("ðŸ§­ Prediction Loop")
         print("   Last Run: Never")
     print()
     
     # Markdown writer stats
     writer = get_markdown_writer()
     writer_stats = writer.get_stats()
-    print("📝 Markdown Output")
+    print("ðŸ“ Markdown Output")
     print(f"   Directory: {writer_stats['learnings_dir']}")
     print(f"   Learnings Written: {writer_stats['learnings_count']}")
     print(f"   Errors Written: {writer_stats['errors_count']}")
@@ -264,7 +259,7 @@ def cmd_status(args):
     # Promoter stats
     promoter = get_promoter()
     promo_stats = promoter.get_promotion_status()
-    print("📤 Promotions")
+    print("ðŸ“¤ Promotions")
     print(f"   Ready for Promotion: {promo_stats['ready_for_promotion']}")
     print(f"   Already Promoted: {promo_stats['promoted_count']}")
     if promo_stats['by_target']:
@@ -276,18 +271,18 @@ def cmd_status(args):
     # Aha tracker stats
     aha = get_aha_tracker()
     aha_stats = aha.get_stats()
-    print("💡 Surprises (Aha Moments)")
+    print("ðŸ’¡ Surprises (Aha Moments)")
     print(f"   Total Captured: {aha_stats['total_captured']}")
     print(f"   Unexpected Successes: {aha_stats['unexpected_successes']}")
     print(f"   Unexpected Failures: {aha_stats['unexpected_failures']}")
     print(f"   Lessons Extracted: {aha_stats['lessons_extracted']}")
     if aha_stats['pending_surface'] > 0:
-        print(f"   ⚠️  Pending to Show: {aha_stats['pending_surface']}")
+        print(f"   âš ï¸  Pending to Show: {aha_stats['pending_surface']}")
     print()
     
     # Voice/personality stats
     voice_stats = voice.get_stats()
-    print("🎭 Personality")
+    print("ðŸŽ­ Personality")
     print(f"   Age: {voice_stats['age_days']} days")
     print(f"   Interactions: {voice_stats['interactions']}")
     print(f"   Opinions Formed: {voice_stats['opinions_formed']}")
@@ -372,10 +367,10 @@ def cmd_learnings(args):
     insights.sort(key=lambda x: x.created_at, reverse=True)
     
     limit = args.limit or 10
-    print(f"\n📚 Recent Cognitive Insights (showing {min(limit, len(insights))} of {len(insights)})\n")
+    print(f"\nðŸ“š Recent Cognitive Insights (showing {min(limit, len(insights))} of {len(insights)})\n")
     
     for insight in insights[:limit]:
-        status = "✓ Promoted" if insight.promoted else f"{insight.reliability:.0%} reliable"
+        status = "âœ“ Promoted" if insight.promoted else f"{insight.reliability:.0%} reliable"
         print(f"[{insight.category.value}] {insight.insight}")
         print(f"   {status} | {insight.times_validated} validations | {insight.created_at[:10]}")
         print()
@@ -439,40 +434,40 @@ def cmd_decay(args):
 
 def cmd_health(args):
     """Health check."""
-    print("\n🏥 Health Check\n")
+    print("\nðŸ¥ Health Check\n")
     
     # Check cognitive learner
     try:
         cognitive = get_cognitive_learner()
-        print("✓ Cognitive Learner: OK")
+        print("âœ“ Cognitive Learner: OK")
     except Exception as e:
-        print(f"✗ Cognitive Learner: {e}")
+        print(f"âœ— Cognitive Learner: {e}")
     
     # Check Mind connection
     bridge = get_mind_bridge()
     if bridge._check_mind_health():
-        print("✓ Mind API: OK")
+        print("âœ“ Mind API: OK")
     else:
-        print("✗ Mind API: Not available (will queue offline)")
+        print("âœ— Mind API: Not available (will queue offline)")
     
     # Check queue
     try:
         stats = get_queue_stats()
-        print(f"✓ Event Queue: OK ({stats['event_count']} events)")
+        print(f"âœ“ Event Queue: OK ({stats['event_count']} events)")
     except Exception as e:
-        print(f"✗ Event Queue: {e}")
+        print(f"âœ— Event Queue: {e}")
     
     # Check bridge worker heartbeat
     hb_age = bridge_heartbeat_age_s()
     if hb_age is None:
-        print("âš  bridge_worker: No heartbeat (start bridge_worker)")
+        print("Ã¢Å¡Â  bridge_worker: No heartbeat (start bridge_worker)")
     else:
-        print(f"âœ“ bridge_worker: heartbeat {int(hb_age)}s ago")
+        print(f"Ã¢Å“â€œ bridge_worker: heartbeat {int(hb_age)}s ago")
 
     # Check learnings dir
     writer = get_markdown_writer()
     if writer.learnings_dir.exists():
-        print(f"✓ Learnings Dir: OK ({writer.learnings_dir})")
+        print(f"âœ“ Learnings Dir: OK ({writer.learnings_dir})")
     else:
         print(f"? Learnings Dir: Will be created on first write")
     
@@ -545,7 +540,7 @@ def cmd_events(args):
     limit = args.limit or 20
     events = read_recent_events(limit)
     
-    print(f"\n📋 Recent Events (showing {len(events)} of {count_events()})\n")
+    print(f"\nðŸ“‹ Recent Events (showing {len(events)} of {count_events()})\n")
     
     for event in events:
         tool_str = f" [{event.tool_name}]" if event.tool_name else ""
@@ -637,7 +632,7 @@ def cmd_opportunities(args):
 
 
 def cmd_capture(args):
-    """Portable memory capture: scan → suggest → accept/reject."""
+    """Portable memory capture: scan â†’ suggest â†’ accept/reject."""
     if args.scan or (not args.list and not args.accept and not args.reject):
         stats = process_recent_memory_events(limit=80)
         print("[SPARK] Memory capture scan")
@@ -649,7 +644,7 @@ def cmd_capture(args):
 
     if args.accept:
         ok = capture_accept(args.accept)
-        print("✓ Accepted" if ok else "✗ Not found / not pending")
+        print("âœ“ Accepted" if ok else "âœ— Not found / not pending")
     return
 
 
@@ -1200,7 +1195,7 @@ def cmd_surprises(args):
     if args.insights:
         # Show insights/analysis
         insights = aha.get_insights()
-        print("\n💡 Surprise Analysis\n")
+        print("\nðŸ’¡ Surprise Analysis\n")
         for key, value in insights.items():
             if key != "recommendations":
                 print(f"   {key}: {value}")
@@ -1215,7 +1210,7 @@ def cmd_surprises(args):
         # Surface pending surprises
         pending = aha.surface_all_pending()
         if pending:
-            print("\n💡 Surfacing Surprises:\n")
+            print("\nðŸ’¡ Surfacing Surprises:\n")
             for s in pending:
                 print(s)
                 print()
@@ -1227,7 +1222,7 @@ def cmd_surprises(args):
     limit = args.limit or 10
     surprises = aha.get_recent_surprises(limit)
     
-    print(f"\n💡 Recent Surprises (showing {len(surprises)})\n")
+    print(f"\nðŸ’¡ Recent Surprises (showing {len(surprises)})\n")
     
     for s in surprises:
         print(s.format_visible())
@@ -1249,7 +1244,7 @@ def cmd_voice(args):
     
     if args.opinions:
         opinions = voice.get_strong_opinions() if args.strong else voice.get_opinions()
-        print(f"\n🎭 Spark's Opinions ({len(opinions)} total)\n")
+        print(f"\nðŸŽ­ Spark's Opinions ({len(opinions)} total)\n")
         for o in opinions:
             strength = "strongly" if o.strength > 0.8 else "tends to"
             print(f"   [{o.topic}] {strength} prefer {o.preference}")
@@ -1260,7 +1255,7 @@ def cmd_voice(args):
     
     if args.growth:
         moments = voice.get_recent_growth(args.limit or 5)
-        print(f"\n📈 Growth Moments ({len(moments)})\n")
+        print(f"\nðŸ“ˆ Growth Moments ({len(moments)})\n")
         for m in moments:
             print(f"   Before: {m.before}")
             print(f"   After: {m.after}")
@@ -1270,7 +1265,7 @@ def cmd_voice(args):
     
     # Default: show status
     stats = voice.get_stats()
-    print("\n🎭 Spark Voice Status\n")
+    print("\nðŸŽ­ Spark Voice Status\n")
     print(f"   {voice.get_status_voice()}")
     print()
     print(f"   Age: {stats['age_days']} days")
@@ -1331,22 +1326,22 @@ def cmd_bridge(args):
     
     if args.update:
         update_spark_context(query=args.query)
-        print("✓ Updated SPARK_CONTEXT.md with active learnings")
+        print("âœ“ Updated SPARK_CONTEXT.md with active learnings")
     elif args.promote:
         count = auto_promote_insights()
         if count > 0:
-            print(f"✓ Promoted {count} high-value insights to MEMORY.md")
+            print(f"âœ“ Promoted {count} high-value insights to MEMORY.md")
         else:
             print("No insights ready for promotion yet")
     elif args.status:
         status = bridge_status()
         print(f"\n  Bridge Status")
-        print(f"  {'─' * 30}")
+        print(f"  {'â”€' * 30}")
         print(f"  High-value insights: {status['high_value_insights']}")
         print(f"  Lessons learned: {status['lessons_learned']}")
         print(f"  Strong opinions: {status['strong_opinions']}")
-        print(f"  Context file: {'✓' if status['context_exists'] else '✗'}")
-        print(f"  Memory file: {'✓' if status['memory_exists'] else '✗'}")
+        print(f"  Context file: {'âœ“' if status['context_exists'] else 'âœ—'}")
+        print(f"  Memory file: {'âœ“' if status['memory_exists'] else 'âœ—'}")
         print()
     else:
         # Default: show active context
@@ -1385,11 +1380,11 @@ def cmd_importance(args):
             score = scorer.score(args.text, context={"source": args.source} if args.source else None)
 
         tier_colors = {
-            "critical": "🔴",
-            "high": "🟠",
-            "medium": "🟡",
-            "low": "⚪",
-            "ignore": "⚫",
+            "critical": "ðŸ”´",
+            "high": "ðŸŸ ",
+            "medium": "ðŸŸ¡",
+            "low": "âšª",
+            "ignore": "âš«",
         }
 
         print(f"\n{'=' * 60}")
@@ -1441,11 +1436,11 @@ def cmd_importance(args):
         for text, expected in examples:
             score = scorer.score(text)
             tier_colors = {
-                "critical": "🔴",
-                "high": "🟠",
-                "medium": "🟡",
-                "low": "⚪",
-                "ignore": "⚫",
+                "critical": "ðŸ”´",
+                "high": "ðŸŸ ",
+                "medium": "ðŸŸ¡",
+                "low": "âšª",
+                "ignore": "âš«",
             }
             print(f"\n  {tier_colors[score.tier.value]} [{score.tier.value.upper():8}] ({score.score:.2f})")
             print(f"    \"{text[:60]}{'...' if len(text) > 60 else ''}\"")
@@ -1778,10 +1773,10 @@ def cmd_eidos(args):
         print(f"{'=' * 60}")
         for ep in episodes:
             status_icon = {
-                "success": "✓",
-                "failure": "✗",
+                "success": "âœ“",
+                "failure": "âœ—",
                 "partial": "~",
-                "escalated": "↑",
+                "escalated": "â†‘",
                 "in_progress": "..."
             }.get(ep.outcome.value, "?")
             print(f"\n  [{status_icon}] {ep.goal[:60]}")
@@ -1805,12 +1800,12 @@ def cmd_eidos(args):
         print(f"{'=' * 60}")
         for d in distillations:
             type_icon = {
-                "heuristic": "→",
-                "sharp_edge": "⚠",
-                "anti_pattern": "✗",
-                "playbook": "📋",
-                "policy": "📜"
-            }.get(d.type.value, "•")
+                "heuristic": "â†’",
+                "sharp_edge": "âš ",
+                "anti_pattern": "âœ—",
+                "playbook": "ðŸ“‹",
+                "policy": "ðŸ“œ"
+            }.get(d.type.value, "â€¢")
             print(f"\n  [{type_icon}] {d.statement[:70]}")
             print(f"      Confidence: {d.confidence:.2f} | Used: {d.times_used} | Helped: {d.times_helped}")
             if d.domains:
@@ -1840,14 +1835,14 @@ def cmd_eidos(args):
         print(f"{'=' * 60}")
         for s in steps:
             eval_icon = {
-                "pass": "✓",
-                "fail": "✗",
+                "pass": "âœ“",
+                "fail": "âœ—",
                 "partial": "~",
                 "unknown": "?"
             }.get(s.evaluation.value, "?")
             print(f"\n  [{eval_icon}] {s.intent[:50]}")
             print(f"      Decision: {s.decision[:50]}")
-            print(f"      Confidence: {s.confidence_before:.2f} → {s.confidence_after:.2f}")
+            print(f"      Confidence: {s.confidence_before:.2f} â†’ {s.confidence_after:.2f}")
             if s.lesson:
                 print(f"      Lesson: {s.lesson[:50]}")
         print()
@@ -1860,10 +1855,10 @@ def cmd_eidos(args):
     print(f"{'=' * 60}")
     print(f"""
   EIDOS forces learning through:
-  • Decision packets (not just logs)
-  • Prediction → Outcome → Evaluation loops
-  • Memory binding (retrieval required)
-  • Distillation (experience → rules)
+  â€¢ Decision packets (not just logs)
+  â€¢ Prediction â†’ Outcome â†’ Evaluation loops
+  â€¢ Memory binding (retrieval required)
+  â€¢ Distillation (experience â†’ rules)
 
   Current State:
     Episodes: {stats['episodes']}
@@ -2237,7 +2232,7 @@ def cmd_memory(args):
             fallback=args.fallback,
             restart=not args.no_restart,
         )
-        print("✓ Applied memorySearch:")
+        print("âœ“ Applied memorySearch:")
         print(applied)
         print("\nNext: run `clawdbot memory index --agent main` (or use `spark memory --status`).")
         return
@@ -2249,132 +2244,6 @@ def cmd_memory_migrate(args):
     """Backfill JSONL memory banks into the SQLite memory store."""
     stats = migrate_memory()
     print(json.dumps(stats, indent=2))
-
-
-def cmd_moltbook(args):
-    """Moltbook agent commands - social network for AI agents."""
-    from adapters.moltbook.client import MoltbookClient, is_registered, MoltbookError
-    from adapters.moltbook.agent import SparkMoltbookAgent, AGENT_NAME, AGENT_BIO
-    from adapters.moltbook.heartbeat import HeartbeatDaemon
-
-    if args.action == "register":
-        if is_registered():
-            print("[SPARK] Already registered on Moltbook.")
-            print("        Use 'spark moltbook status' to check your profile.")
-            return
-
-        name = args.name or AGENT_NAME
-        description = args.description or AGENT_BIO
-
-        print(f"[SPARK] Registering '{name}' on Moltbook...")
-        try:
-            client = MoltbookClient()
-            result = client.register(name, description)
-            print("\n✓ Registration initiated!")
-            print(f"\n  Agent ID: {result.get('agent_id')}")
-            print(f"  Claim URL: {result.get('claim_url')}")
-            print(f"\n  Verification Code: {result.get('verification_code')}")
-            print("\n  Next Steps:")
-            print("  1. Post the verification code on Twitter/X")
-            print("  2. Run 'spark moltbook status' to check verification")
-            print("  3. Once verified, run 'spark moltbook heartbeat' to start engaging")
-        except MoltbookError as e:
-            print(f"[SPARK] Registration failed: {e}")
-
-    elif args.action == "status":
-        if not is_registered():
-            print("[SPARK] Not registered on Moltbook. Run 'spark moltbook register' first.")
-            return
-
-        try:
-            agent = SparkMoltbookAgent()
-            status = agent.get_status()
-
-            print("\n🌐 Moltbook Agent Status\n")
-            print(f"  Name: {status['name']}")
-            print(f"  Karma: {status['karma']}")
-            print(f"  Posts: {status['total_posts']}")
-            print(f"  Comments: {status['total_comments']}")
-            print(f"  Votes: {status['total_votes']}")
-            print(f"  Pending Insights: {status['pending_insights']}")
-            wait_m = int(status.get("time_until_post", 0) // 60)
-            can_post = "Yes" if status.get("can_post") else f"No (wait {wait_m}m)"
-            print(f"  Can Post: {can_post}")
-
-            if status['last_heartbeat']:
-                from datetime import datetime
-                last = datetime.fromtimestamp(status['last_heartbeat'])
-                print(f"  Last Heartbeat: {last.strftime('%Y-%m-%d %H:%M')}")
-            print()
-
-        except MoltbookError as e:
-            print(f"[SPARK] Status check failed: {e}")
-
-    elif args.action == "heartbeat":
-        if not is_registered():
-            print("[SPARK] Not registered on Moltbook. Run 'spark moltbook register' first.")
-            return
-
-        print("[SPARK] Running Moltbook heartbeat...")
-        try:
-            agent = SparkMoltbookAgent()
-            result = agent.heartbeat()
-            print(f"\n✓ Heartbeat complete")
-            print(f"  Actions: {len(result.get('actions', []))}")
-            print(f"  Karma Delta: {result.get('karma_delta', 0):+d}")
-            print(f"  Opportunities Found: {result.get('opportunities_found', 0)}")
-
-            for action in result.get("actions", []):
-                print(f"  - {action['type']}: {action.get('submolt', 'n/a')}")
-            print()
-
-        except MoltbookError as e:
-            print(f"[SPARK] Heartbeat failed: {e}")
-
-    elif args.action == "queue":
-        if not args.insight:
-            print("[SPARK] Use --insight to specify the insight to queue")
-            return
-
-        agent = SparkMoltbookAgent()
-        agent.queue_insight(
-            insight=args.insight,
-            insight_type=args.type or "observation",
-            submolt=args.submolt or "spark-insights",
-        )
-        print(f"✓ Queued insight for next heartbeat")
-
-    elif args.action == "daemon":
-        if args.stop:
-            HeartbeatDaemon.stop()
-        elif args.status_check:
-            if HeartbeatDaemon.is_running():
-                print("[SPARK] Moltbook heartbeat daemon is running")
-            else:
-                print("[SPARK] Moltbook heartbeat daemon is not running")
-        else:
-            if HeartbeatDaemon.is_running():
-                print("[SPARK] Daemon already running. Use 'spark moltbook daemon --stop' to stop.")
-                return
-            daemon = HeartbeatDaemon(interval_hours=args.interval or 4)
-            if args.once:
-                daemon.start(daemon_mode=False)
-            else:
-                daemon.start(daemon_mode=True)
-
-    elif args.action == "subscribe":
-        if not is_registered():
-            print("[SPARK] Not registered on Moltbook. Run 'spark moltbook register' first.")
-            return
-
-        agent = SparkMoltbookAgent()
-        submolts = args.submolts if args.submolts else None
-        agent.subscribe_to_submolts(submolts)
-        print("✓ Subscribed to submolts")
-
-    else:
-        print("Unknown action. Use: register, status, heartbeat, queue, daemon, subscribe")
-
 
 
 def cmd_chips(args):
@@ -2622,7 +2491,7 @@ def cmd_timeline(args):
     # Show timeline
     timeline = growth.get_timeline(args.limit or 10)
     if timeline:
-        print("\n📅 Timeline\n")
+        print("\nðŸ“… Timeline\n")
         for item in timeline:
             date = item['timestamp'][:10]
             print(f"   [{date}] {item['title']}")
@@ -2631,7 +2500,7 @@ def cmd_timeline(args):
     # Show delta if requested
     if args.delta:
         delta = growth.get_growth_delta(args.delta)
-        print(f"\n📊 Change over last {args.delta}h:")
+        print(f"\nðŸ“Š Change over last {args.delta}h:")
         print(f"   Insights: +{delta.get('insights_delta', 0)}")
         print(f"   Reliability: {delta.get('reliability_delta', 0):+.0%}")
         print(f"   Aha moments: +{delta.get('aha_delta', 0)}")
@@ -2672,7 +2541,7 @@ def cmd_learn(args):
         confidence=args.reliability
     )
     
-    print(f"\n✓ Learned [{category.value}]: {insight.insight}")
+    print(f"\nâœ“ Learned [{category.value}]: {insight.insight}")
     print(f"  Reliability: {insight.reliability:.0%}")
     if args.context:
         print(f"  Context: {args.context}")
@@ -3167,23 +3036,6 @@ Examples:
     chips_parser.add_argument("--phase", choices=["discovery", "prototype", "polish", "launch"],
                               help="Filter questions by phase (for questions)")
 
-    # moltbook - AI agent social network
-    moltbook_parser = subparsers.add_parser("moltbook", help="Moltbook agent - social network for AI agents")
-    moltbook_parser.add_argument("action", nargs="?", default="status",
-                                 choices=["register", "status", "heartbeat", "queue", "daemon", "subscribe"],
-                                 help="Action to perform")
-    moltbook_parser.add_argument("--name", help="Agent name (for register)")
-    moltbook_parser.add_argument("--description", help="Agent description (for register)")
-    moltbook_parser.add_argument("--insight", help="Insight text (for queue)")
-    moltbook_parser.add_argument("--type", choices=["observation", "learning", "pattern", "question"],
-                                 help="Insight type (for queue)")
-    moltbook_parser.add_argument("--submolt", help="Target submolt (for queue)")
-    moltbook_parser.add_argument("--submolts", nargs="+", help="Submolts to subscribe to (for subscribe)")
-    moltbook_parser.add_argument("--interval", type=float, help="Hours between heartbeats (for daemon)")
-    moltbook_parser.add_argument("--once", action="store_true", help="Run daemon once then exit")
-    moltbook_parser.add_argument("--stop", action="store_true", help="Stop running daemon")
-    moltbook_parser.add_argument("--status-check", action="store_true", help="Check if daemon is running")
-
     args = parser.parse_args()
 
     if not args.command:
@@ -3239,7 +3091,6 @@ Examples:
         "memory": cmd_memory,
         "memory-migrate": cmd_memory_migrate,
         "chips": cmd_chips,
-        "moltbook": cmd_moltbook,
         "project": None,
     }
 

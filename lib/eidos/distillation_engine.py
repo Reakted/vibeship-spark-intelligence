@@ -235,7 +235,7 @@ class DistillationEngine:
     def _is_quality_distillation(statement: str, dtype: DistillationType) -> bool:
         """Reject tautological, generic, or low-quality distillation statements."""
         s = statement.strip()
-        if len(s) < 30:
+        if len(s) < 20:
             return False
 
         low = s.lower()
@@ -331,6 +331,12 @@ class DistillationEngine:
             if playbook:
                 candidates.append(playbook)
 
+        # 5. Generate POLICY from constraint-like decisions
+        if len(steps) >= 5:
+            policy = self._generate_policy(episode, steps)
+            if policy:
+                candidates.append(policy)
+
         # Quality gate: reject tautological or generic distillations
         return [c for c in candidates if self._is_quality_distillation(c.statement, c.type)]
 
@@ -376,6 +382,41 @@ class DistillationEngine:
             source_steps=[s.step_id for s in success_steps],
             confidence=0.6,
             rationale="Successful step sequence"
+        )
+
+    _CONSTRAINT_WORDS = {"always", "must", "never", "ensure", "require", "mandatory", "forbidden", "prohibit"}
+
+    def _generate_policy(
+        self,
+        episode: Episode,
+        steps: List[Step]
+    ) -> Optional[DistillationCandidate]:
+        """Generate a POLICY from constraint-like decisions.
+
+        Policies capture recurring operating constraints (always/must/never/ensure).
+        Requires 2+ constraint-bearing steps in an episode with 5+ total steps.
+        """
+        constraint_steps = []
+        for step in steps:
+            decision_lower = (step.decision or "").lower()
+            if any(w in decision_lower for w in self._CONSTRAINT_WORDS):
+                constraint_steps.append(step)
+
+        if len(constraint_steps) < 2:
+            return None
+
+        # Pick the constraint with highest confidence
+        best = max(constraint_steps, key=lambda s: s.confidence_after)
+        statement = f"Policy: {best.decision[:150]}"
+
+        return DistillationCandidate(
+            type=DistillationType.POLICY,
+            statement=statement,
+            domains=self._extract_domains(episode, steps),
+            triggers=self._extract_triggers(constraint_steps),
+            source_steps=[s.step_id for s in constraint_steps],
+            confidence=min(0.7, best.confidence_after),
+            rationale=f"Constraint pattern from {len(constraint_steps)} steps in: {episode.goal[:50]}"
         )
 
     def _extract_domains(self, episode: Episode, steps: List[Step]) -> List[str]:

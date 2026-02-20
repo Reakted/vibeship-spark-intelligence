@@ -65,10 +65,10 @@
         "max_items": 40
       }
     },
-    "confidence_floor": 0.9,
-    "min_age_hours": 2.0,
+    "confidence_floor": 0.95,
+    "min_age_hours": 6.0,
     "auto_interval_s": 3600,
-    "threshold": 0.5
+    "threshold": 0.80
   },
   "synthesizer": {
     "mode": "auto",
@@ -81,7 +81,7 @@
   "advisory_engine": {
     "enabled": true,
     "max_ms": 4000,
-    "include_mind": false,
+    "include_mind": true,
     "prefetch_queue_enabled": false,
     "prefetch_inline_enabled": true,
     "prefetch_inline_max_jobs": 1,
@@ -124,7 +124,7 @@
     "max_advice_items": 5,
     "mind_max_stale_s": 86400,
     "mind_stale_allow_if_empty": false,
-    "mind_min_salience": 0.55,
+    "mind_min_salience": 0.30,
     "replay_enabled": true,
     "replay_min_strict": 5,
     "replay_min_delta": 0.25,
@@ -189,21 +189,11 @@
         "support_boost_weight": 0.08,
         "reliability_weight": 0.04,
         "semantic_intent_min": 0.02
-      },
-      "x_social": {
-        "semantic_limit": 11,
-        "max_queries": 4,
-        "agentic_query_limit": 4,
-        "lexical_weight": 0.32,
-        "intent_coverage_weight": 0.08,
-        "support_boost_weight": 0.08,
-        "reliability_weight": 0.04,
-        "semantic_intent_min": 0.02
       }
     }
   },
   "meta_ralph": {
-    "quality_threshold": 4.5,
+    "quality_threshold": 3.8,
     "needs_work_threshold": 2,
     "needs_work_close_delta": 0.5,
     "min_outcome_samples": 5,
@@ -222,6 +212,9 @@
   },
   "scheduler": {
     "enabled": true
+  },
+  "sync": {
+    "mode": "all"
   },
   "source_roles": {
     "_doc": "Defines each source's PRIMARY job. Distillers are NOT advisory sources â€” measure them on pattern quality, not helpfulness.",
@@ -258,10 +251,7 @@
       ]
     },
     "disabled_from_advisory": {
-      "_doc": "Sources removed from advisory pipeline â€” zero or near-zero value as advisors",
-      "mind": {
-        "reason": "0% effective across 26K+ outcomes, 8 auto-tune cycles confirmed. Mind is a storage layer, not an advisor."
-      }
+      "_doc": "Sources removed from advisory pipeline. Mind re-enabled 2026-02-21 (was circular: disabled -> 0% -> stays disabled)."
     }
   },
   "auto_tuner": {
@@ -275,7 +265,7 @@
       "semantic": 0.35,
       "self_awareness": 0.353,
       "trigger": 0.401,
-      "mind": 0.0,
+      "mind": 0.2,
       "eidos": 0.85,
       "convo": 0.8,
       "prefetch": 0.4,
@@ -436,7 +426,8 @@
     "enabled": true
   },
   "memory_capture": {
-    "enabled": true
+    "enabled": true,
+    "auto_save_threshold": 0.65
   },
   "production_gates": {
     "enforce_meta_ralph_quality_band": true,

@@ -22,7 +22,7 @@ from lib.chips.registry import get_registry
 CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
 MERGE_STATE_FILE = Path.home() / ".spark" / "chip_merge_state.json"
 TUNEABLES_FILE = Path.home() / ".spark" / "tuneables.json"
-LOW_QUALITY_COOLDOWN_S = 30 * 60  # 30 min (was 4h — too aggressive, starved merges)
+LOW_QUALITY_COOLDOWN_S = 10 * 60  # 10 min (was 30min — still too slow for merge cycles)
 MAX_REJECTED_TRACKING = 2000
 DUPLICATE_CHURN_RATIO = 0.8
 DUPLICATE_CHURN_MIN_PROCESSED = 10
@@ -98,7 +98,6 @@ CHIP_TO_CATEGORY = {
     "game-dev": CognitiveCategory.REASONING,
     "marketing": CognitiveCategory.CONTEXT,
     "vibecoding": CognitiveCategory.WISDOM,
-    "moltbook": CognitiveCategory.REASONING,
     "biz-ops": CognitiveCategory.CONTEXT,
     "bench-core": CognitiveCategory.SELF_AWARENESS,
     "bench_core": CognitiveCategory.SELF_AWARENESS,
@@ -297,23 +296,6 @@ def _field_based_learning_statement(chip_id: str, captured_data: Dict[str, Any])
         return ""
 
     cid = str(chip_id or "").strip().lower().replace("_", "-")
-    if cid in {"engagement-pulse", "x-social", "x_social"}:
-        topic = _format_value(fields.get("topic") or fields.get("category") or "")
-        likes = _format_value(fields.get("likes") or "")
-        replies = _format_value(fields.get("replies") or "")
-        retweets = _format_value(fields.get("retweets") or "")
-        parts = []
-        if topic:
-            parts.append(f"topic={topic}")
-        if likes:
-            parts.append(f"likes={likes}")
-        if replies:
-            parts.append(f"replies={replies}")
-        if retweets:
-            parts.append(f"retweets={retweets}")
-        if parts:
-            return f"Use social engagement evidence ({', '.join(parts)}) to prioritize messaging experiments."
-
     if cid in {"social-convo", "social-conversation"}:
         ranking = _format_value(fields.get("trigger_ranking") or "")
         q_vs_s = _format_value(fields.get("question_vs_statement") or "")

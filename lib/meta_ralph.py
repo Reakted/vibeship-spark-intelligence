@@ -132,6 +132,69 @@ def _load_meta_ralph_config() -> None:
 _load_meta_ralph_config()
 
 
+def reload_meta_ralph_from(cfg: Dict[str, Any]) -> None:
+    """Reload meta_ralph tuneables from a validated section dict.
+
+    Called by tuneables_reload coordinator when meta_ralph section changes.
+    """
+    if not isinstance(cfg, dict):
+        return
+    global QUALITY_THRESHOLD, NEEDS_WORK_THRESHOLD, NEEDS_WORK_CLOSE_DELTA
+    global MIN_OUTCOME_SAMPLES, MIN_TUNEABLE_SAMPLES, MIN_NEEDS_WORK_SAMPLES
+    global MIN_SOURCE_SAMPLES, ATTRIBUTION_WINDOW_S, STRICT_ATTRIBUTION_REQUIRE_TRACE
+    global INSIGHT_WARMUP_WEAK_SAMPLES, INSIGHT_MIN_STRICT_SAMPLES
+    global INSIGHT_STRICT_QUALITY_FLOOR, INSIGHT_SUPPRESSION_RETEST_AFTER_S
+    global QUALITY_WINDOW_TRACE_REPEAT_CAP
+    global QUALITY_WINDOW_EXCLUDE_TRACE_PREFIXES, QUALITY_WINDOW_EXCLUDE_TEXT_PREFIXES
+    if "quality_threshold" in cfg:
+        QUALITY_THRESHOLD = int(cfg["quality_threshold"])
+    if "needs_work_threshold" in cfg:
+        NEEDS_WORK_THRESHOLD = int(cfg["needs_work_threshold"])
+    if "needs_work_close_delta" in cfg:
+        NEEDS_WORK_CLOSE_DELTA = float(cfg["needs_work_close_delta"])
+    if "min_outcome_samples" in cfg:
+        MIN_OUTCOME_SAMPLES = int(cfg["min_outcome_samples"])
+    if "min_tuneable_samples" in cfg:
+        MIN_TUNEABLE_SAMPLES = int(cfg["min_tuneable_samples"])
+    if "min_needs_work_samples" in cfg:
+        MIN_NEEDS_WORK_SAMPLES = int(cfg["min_needs_work_samples"])
+    if "min_source_samples" in cfg:
+        MIN_SOURCE_SAMPLES = int(cfg["min_source_samples"])
+    if "attribution_window_s" in cfg:
+        ATTRIBUTION_WINDOW_S = int(cfg["attribution_window_s"])
+    if "strict_attribution_require_trace" in cfg:
+        STRICT_ATTRIBUTION_REQUIRE_TRACE = bool(cfg["strict_attribution_require_trace"])
+    if "insight_warmup_weak_samples" in cfg:
+        INSIGHT_WARMUP_WEAK_SAMPLES = int(cfg["insight_warmup_weak_samples"])
+    if "insight_min_strict_samples" in cfg:
+        INSIGHT_MIN_STRICT_SAMPLES = int(cfg["insight_min_strict_samples"])
+    if "insight_strict_quality_floor" in cfg:
+        INSIGHT_STRICT_QUALITY_FLOOR = float(cfg["insight_strict_quality_floor"])
+    if "insight_suppression_retest_after_s" in cfg:
+        INSIGHT_SUPPRESSION_RETEST_AFTER_S = int(cfg["insight_suppression_retest_after_s"])
+    if "quality_rate_trace_repeat_cap" in cfg:
+        QUALITY_WINDOW_TRACE_REPEAT_CAP = max(1, int(cfg["quality_rate_trace_repeat_cap"]))
+    if "quality_rate_exclude_trace_prefixes" in cfg:
+        raw = cfg["quality_rate_exclude_trace_prefixes"]
+        if isinstance(raw, list):
+            QUALITY_WINDOW_EXCLUDE_TRACE_PREFIXES = [
+                str(item).strip().lower() for item in raw if str(item).strip()
+            ]
+    if "quality_rate_exclude_text_prefixes" in cfg:
+        raw = cfg["quality_rate_exclude_text_prefixes"]
+        if isinstance(raw, list):
+            QUALITY_WINDOW_EXCLUDE_TEXT_PREFIXES = [
+                str(item).strip().lower() for item in raw if str(item).strip()
+            ]
+
+
+try:
+    from .tuneables_reload import register_reload as _register_reload
+    _register_reload("meta_ralph", reload_meta_ralph_from, label="meta_ralph.reload_from")
+except ImportError:
+    pass
+
+
 class QualityDimension(Enum):
     """Concrete scoring dimensions - not fuzzy "useful vs primitive"."""
     ACTIONABILITY = "actionability"    # Can I act on this?

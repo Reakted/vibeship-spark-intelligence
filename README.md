@@ -94,11 +94,16 @@ spark status
 
 ## Documentation
 
-Primary navigation hub: `docs/DOCS_INDEX.md`
+Primary navigation hub: `docs/LAUNCH_DOCUMENTATION_MAP.md`
 
 If you use:
 - Claude Code: `docs/claude_code.md`
 - Cursor/VS Code: `docs/cursor.md`
+
+For launch operators:
+- `docs/launch/LAUNCH_SCOPE_AND_GATES.md`
+- `docs/launch/POST_LAUNCH_MONITORING.md`
+- `docs/RESPONSIBLE_PUBLIC_RELEASE.md`
 
 ## Related Repos
 

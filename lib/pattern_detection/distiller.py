@@ -96,8 +96,9 @@ class PatternDistiller:
             return False
         if enable in {"1", "true", "yes", "on"}:
             return True
-        # Default: disabled to avoid telemetry-heavy distillations.
-        return False
+        # Default: enabled.  The memory gate and primitive filter already
+        # block telemetry-heavy items, so tool patterns are safe to distill.
+        return True
 
     def distill_from_steps(self, steps: List[Step]) -> List[Distillation]:
         """
@@ -246,6 +247,9 @@ class PatternDistiller:
         elif success_rate <= (1 - self.min_confidence):
             # Create ANTI_PATTERN from failure pattern
             return self._create_anti_pattern_candidate(intent_key, failures, 1 - success_rate)
+        elif total >= 4 and 0.30 <= success_rate <= 0.70:
+            # Mixed pattern: inconsistent results → SHARP_EDGE
+            return self._create_sharp_edge_from_mixed(intent_key, steps, success_rate)
 
         # No clear pattern
         return None
@@ -336,6 +340,45 @@ class PatternDistiller:
         return DistillationCandidate(
             distillation=distillation,
             source_steps=failures,
+        )
+
+    def _create_sharp_edge_from_mixed(
+        self,
+        intent_key: str,
+        steps: List[Step],
+        success_rate: float
+    ) -> DistillationCandidate:
+        """Create a SHARP_EDGE from mixed success/failure patterns.
+
+        When a pattern has 4+ samples but inconsistent results (30-70% success),
+        this indicates context-dependent behavior worth documenting.
+        """
+        intent_desc = intent_key.replace("intent:", "").replace("_", " ")
+        successes = [s for s in steps if s.evaluation == Evaluation.PASS]
+        failures = [s for s in steps if s.evaluation == Evaluation.FAIL]
+
+        pct = int(success_rate * 100)
+        statement = (
+            f"Inconsistent results for {intent_desc}: "
+            f"{pct}% success across {len(successes) + len(failures)} attempts. "
+            f"Context matters — verify assumptions before proceeding."
+        )
+
+        distillation = Distillation(
+            distillation_id="",
+            type=DistillationType.SHARP_EDGE,
+            statement=statement[:250],
+            domains=["inconsistency", intent_desc],
+            triggers=[intent_key, "mixed_results"],
+            source_steps=[s.step_id for s in steps[:10]],
+            confidence=0.5,
+        )
+
+        self._stats["candidates_generated"] += 1
+
+        return DistillationCandidate(
+            distillation=distillation,
+            source_steps=steps,
         )
 
     def _extract_reasoning(self, lessons: List[str]) -> Optional[str]:

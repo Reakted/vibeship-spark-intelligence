@@ -21,6 +21,7 @@ Premium should be:
 - curated content packs (chip bundles, benchmark suites, domain matrices)
 - hosted services (when you need strong gating, compute, or proprietary datasets)
 - operational tooling (dashboards, managed deployments, collaboration workflows)
+- social-tooling surfaces (social networks/research surfaces), kept opt-in behind `SPARK_PREMIUM_TOOLS=1`.
 
 Avoid positioning premium as "the safety layer". Safety must exist in the OSS core.
 
@@ -63,4 +64,3 @@ See:
 What it does provide:
 - a safe, audited default path users actually adopt
 - a clear upgrade path for premium capabilities without weakening the core
-

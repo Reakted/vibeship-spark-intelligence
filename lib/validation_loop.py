@@ -41,10 +41,15 @@ POS_TRIGGERS = {
     "prefer", "like", "love", "want", "need", "please", "use", "using", "require",
     "should", "must", "explain", "examples", "example", "brief", "short", "detailed",
     "step", "steps", "walk", "show",
+    # Implicit validation words (added 2026-02-21 pipeline audit)
+    "good", "great", "perfect", "works", "better", "best", "correct", "right",
+    "always", "keep", "continue", "thanks", "exactly", "yes",
 }
 
 NEG_TRIGGERS = {
     "no", "not", "never", "avoid", "dont", "stop", "without", "hate", "dislike",
+    # Implicit contradiction words (added 2026-02-21 pipeline audit)
+    "wrong", "bad", "broken", "fix", "change", "instead", "rather", "redo", "failed",
 }
 
 NEG_PREF_WORDS = {"hate", "dislike", "don't like", "dont like", "avoid", "never"}

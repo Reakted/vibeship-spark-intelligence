@@ -34,10 +34,10 @@ from .chip_merger import merge_chip_insights
 
 
 # ============= Configuration =============
-DEFAULT_PROMOTION_THRESHOLD = 0.7  # 70% reliability default
-DEFAULT_MIN_VALIDATIONS = 3  # Require at least 3 validations by default
-DEFAULT_CONFIDENCE_FLOOR = 0.90  # Fast-track: promote high-confidence insights without validation gate
-DEFAULT_MIN_AGE_HOURS = 2.0  # Fast-track: insights must be at least 2 hours old
+DEFAULT_PROMOTION_THRESHOLD = 0.80  # 80% reliability default (raised from 0.7 to reduce noise)
+DEFAULT_MIN_VALIDATIONS = 5  # Require at least 5 validations (raised from 3)
+DEFAULT_CONFIDENCE_FLOOR = 0.95  # Fast-track: promote high-confidence insights without validation gate (raised from 0.90)
+DEFAULT_MIN_AGE_HOURS = 6.0  # Fast-track: insights must be at least 6 hours old (raised from 2.0)
 PROJECT_SECTION = "## Project Intelligence"
 PROJECT_START = "<!-- SPARK_PROJECT_START -->"
 PROJECT_END = "<!-- SPARK_PROJECT_END -->"

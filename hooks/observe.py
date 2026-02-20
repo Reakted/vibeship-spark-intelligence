@@ -456,6 +456,16 @@ def main():
             )
             if emitted_text:
                 log_debug("observe", f"Advisory engine emitted for {tool_name}: {len(emitted_text)} chars", None)
+                # Record advice for implicit outcome tracking
+                try:
+                    from lib.implicit_outcome_tracker import get_implicit_tracker
+                    get_implicit_tracker().record_advice(
+                        tool_name=tool_name,
+                        advice_texts=[emitted_text[:500]],
+                        tool_input=tool_input,
+                    )
+                except Exception:
+                    pass
             elapsed_ms = (time.time() * 1000.0) - pretool_start_ms
             if elapsed_ms > PRETOOL_BUDGET_MS:
                 log_debug("observe", f"OBS_PRETOOL_BUDGET_EXCEEDED:{tool_name}:{elapsed_ms:.1f}ms>{PRETOOL_BUDGET_MS:.0f}ms", None)
@@ -518,6 +528,13 @@ def main():
         trace_id = _resolve_post_trace_id(session_id, tool_name, trace_id)
         check_for_surprise(session_id, tool_name, success=True)
         learn_from_success(tool_name, tool_input, {})
+
+        # Implicit outcome tracking: record success
+        try:
+            from lib.implicit_outcome_tracker import get_implicit_tracker
+            get_implicit_tracker().record_outcome(tool_name=tool_name, success=True, tool_input=tool_input)
+        except Exception:
+            pass
 
         # Advisory Engine: record outcome for implicit feedback loop
         try:
@@ -610,6 +627,16 @@ def main():
         )
         check_for_surprise(session_id, tool_name, success=False, error=str(error))
         learn_from_failure(tool_name, error, tool_input)
+
+        # Implicit outcome tracking: record failure
+        try:
+            from lib.implicit_outcome_tracker import get_implicit_tracker
+            get_implicit_tracker().record_outcome(
+                tool_name=tool_name, success=False,
+                tool_input=tool_input, error_text=str(error)[:200],
+            )
+        except Exception:
+            pass
 
         # Record failure for recovery detection (used by PostToolUse handler)
         record_session_failure(session_id, tool_name)

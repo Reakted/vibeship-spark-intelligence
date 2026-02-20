@@ -34,6 +34,13 @@ MULTIFILE_COMPONENTS = (
     "context.yaml",
 )
 
+CHIP_ENABLED_VALUES = {"1", "true", "yes", "on"}
+
+
+def chips_enabled() -> bool:
+    """Return True only when chips runtime is explicitly enabled."""
+    return os.getenv("SPARK_CHIPS_ENABLED", "").strip().lower() in CHIP_ENABLED_VALUES
+
 
 @dataclass
 class ChipObserver:
@@ -159,6 +166,27 @@ class ChipLoader:
         self._metrics: Dict[str, LoadMetrics] = {}
         preferred = (preferred_format or os.getenv("SPARK_CHIP_PREFERRED_FORMAT", "multifile")).lower()
         self.preferred_format = preferred if preferred in {"single", "multifile", "hybrid"} else "multifile"
+        self._disabled = not chips_enabled()
+        self._warned_disabled = False
+
+    def _check_enabled(self, operation: str = "chip operations") -> bool:
+        """Short-circuit runtime behavior when chips are disabled by default."""
+        if self._disabled:
+            if not self._warned_disabled:
+                log.warning(
+                    "Chips runtime is disabled in Spark OSS default mode. Set SPARK_CHIPS_ENABLED=1 "
+                    "to enable chip processing."
+                )
+                self._warned_disabled = True
+            log.debug("Skipping %s because SPARK_CHIPS_ENABLED is not enabled", operation)
+            return False
+        return True
+
+    def refresh_enabled_state(self) -> None:
+        """Refresh cached enabled state from environment."""
+        self._disabled = not chips_enabled()
+        if not self._disabled:
+            self._warned_disabled = False
 
     def get_metrics(self, chip_id: str) -> Optional[LoadMetrics]:
         """Get load metrics for a chip, if available."""
@@ -258,6 +286,10 @@ class ChipLoader:
 
     def load_chip(self, path: Path) -> Optional[Chip]:
         """Load a chip from supported formats (single, multifile, hybrid)."""
+        self.refresh_enabled_state()
+        if not self._check_enabled("load_chip"):
+            return None
+
         path = Path(path)
         try:
             data, source_path, metrics = self._load_raw_chip_data(path)
@@ -412,6 +444,10 @@ class ChipLoader:
 
     def discover_chips(self) -> List[Chip]:
         """Discover all chips in the chips directory."""
+        self.refresh_enabled_state()
+        if not self._check_enabled("discover_chips"):
+            return []
+
         if not self.chips_dir.exists():
             log.warning(f"Chips directory not found: {self.chips_dir}")
             return []
@@ -451,6 +487,10 @@ class ChipLoader:
 
         Improvement #10: Chips Auto-Activation.
         """
+        self.refresh_enabled_state()
+        if not self._check_enabled("get_active_chips"):
+            return []
+
         if threshold is None:
             try:
                 from ..metalearning.strategist import get_strategist

@@ -167,6 +167,21 @@ def _load_eidos_config() -> Dict[str, Any]:
 _EIDOS_CFG = _load_eidos_config()
 
 
+def reload_eidos_from(cfg: Dict[str, Any]) -> None:
+    """Hot-reload EIDOS budget tuneables from coordinator-supplied dict."""
+    global _EIDOS_CFG
+    if not isinstance(cfg, dict):
+        return
+    _EIDOS_CFG = dict(cfg)
+
+
+try:
+    from ..tuneables_reload import register_reload as _eidos_register
+    _eidos_register("eidos", reload_eidos_from, label="eidos.models.reload_from")
+except ImportError:
+    pass
+
+
 def default_budget() -> "Budget":
     """Create a Budget with tuneable-aware defaults.
 

@@ -3,6 +3,26 @@
 **Chips teach Spark *what* to learn, not just *how* to learn.**
 Navigation hub: `docs/GLOSSARY.md`
 
+## Open-Source Launch Behavior
+
+Spark OSS ships the chip architecture, but chip processing is disabled by default.
+To keep the default launch minimal and safe, set:
+
+```bash
+set SPARK_PREMIUM_TOOLS=1
+set SPARK_CHIPS_ENABLED=1
+```
+
+This enables chip runtime for premium-capable deployments. In OSS default, either
+`SPARK_PREMIUM_TOOLS` or `SPARK_CHIPS_ENABLED` is missing, so chip loading and
+advice contributions are disabled.
+
+Premium social/tooling surfaces are not enabled at OSS default:
+
+```bash
+set SPARK_PREMIUM_TOOLS=1
+```
+
 ```
 +------------------+     +------------------+     +------------------+
 |   spark-core     |     |   marketing      |     |   your-domain    |
@@ -49,6 +69,9 @@ Format preference can be controlled with `SPARK_CHIP_PREFERRED_FORMAT` (default:
 ## Quick Start
 
 ```bash
+# Enable chips (premium)
+set SPARK_CHIPS_ENABLED=1
+
 # List installed chips
 spark chips list
 
@@ -248,7 +271,7 @@ questions:
       - tool_effectiveness
 ```
 
-## Built-in Chips
+## Built-in Chips (premium runtime enabled via SPARK_CHIPS_ENABLED)
 
 ### spark-core (Coding Intelligence)
 
@@ -268,6 +291,9 @@ questions:
 - Which tools work best
 - Common error patterns and fixes
 - User coding preferences
+
+In the OSS default launch mode, these chips are present in code but not usable until
+you enable chips with `SPARK_CHIPS_ENABLED=1`.
 
 ## Creating Your Own Chip
 
@@ -423,7 +449,6 @@ lib/chips/
   router.py                # Event-to-chip matching
   runtime.py               # Observer execution + quality gate
   scoring.py               # Insight scoring
-  evolution.py             # Trigger quality evolution
   store.py                 # Per-chip insight storage
 
 ~/.spark/chips/

@@ -36,7 +36,7 @@ DEFAULT_SOURCE_BUDGETS = {
     "sync_context": 40,
 }
 DEFAULT_SOURCE_BUDGET = 30
-DEFAULT_TOTAL_PREDICTION_BUDGET = 180
+DEFAULT_TOTAL_PREDICTION_BUDGET = 50
 
 
 POSITIVE_OUTCOME = {
@@ -248,6 +248,15 @@ def build_predictions(max_age_s: float = 6 * 3600) -> int:
         pred_id = _hash_id(key or "", text, source)
         if pred_id in existing:
             continue
+        # In-cycle dedup: skip if >80% token overlap with already-batched prediction
+        text_norm = _normalize(text)
+        is_dupe = False
+        for prev in preds:
+            if _token_overlap(text_norm, _normalize(prev.get("text", ""))) > 0.80:
+                is_dupe = True
+                break
+        if is_dupe:
+            continue
         source_cap = int(source_budgets.get(source, default_source_budget))
         if source_counts.get(source, 0) >= source_cap:
             continue
@@ -458,9 +467,9 @@ def _load_auto_link_config() -> Tuple[bool, float, int, float]:
         "no",
         "off",
     }
-    interval_s = 300.0
-    limit = 80
-    min_similarity = 0.25
+    interval_s = 60.0
+    limit = 200
+    min_similarity = 0.20
 
     raw_interval = os.environ.get("SPARK_PREDICTION_AUTO_LINK_INTERVAL_S")
     if raw_interval:
@@ -492,6 +501,33 @@ def _token_overlap(a: str, b: str) -> float:
     if not a_t or not b_t:
         return 0.0
     return len(a_t & b_t) / max(1, len(a_t | b_t))
+
+
+def _cleanup_expired_predictions(max_age_s: float = 7 * 24 * 3600) -> int:
+    """Remove predictions older than max_age_s or past their expires_at to prevent unbounded growth."""
+    if not PREDICTIONS_FILE.exists():
+        return 0
+    now = time.time()
+    kept: List[Dict] = []
+    removed = 0
+    for pred in _load_jsonl(PREDICTIONS_FILE, limit=25000):
+        expires = float(pred.get("expires_at") or 0.0)
+        created = float(pred.get("created_at") or 0.0)
+        if expires and now > expires:
+            removed += 1
+            continue
+        if created and (now - created) > max_age_s:
+            removed += 1
+            continue
+        kept.append(pred)
+    if removed > 0:
+        tmp = PREDICTIONS_FILE.with_suffix(".jsonl.tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            for row in kept:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        tmp.replace(PREDICTIONS_FILE)
+        log_debug("prediction", f"Cleaned {removed} expired predictions, kept {len(kept)}", None)
+    return removed
 
 
 def _cosine(a: List[float], b: List[float]) -> float:
@@ -780,6 +816,12 @@ def process_prediction_cycle(limit: int = 200) -> Dict[str, int]:
         stats.update({k: match_stats.get(k, 0) for k in ("matched", "validated", "contradicted", "surprises")})
     except Exception as e:
         log_debug("prediction", "match_predictions failed", e)
+    try:
+        removed = _cleanup_expired_predictions()
+        if removed:
+            stats["expired_cleaned"] = removed
+    except Exception as e:
+        log_debug("prediction", "cleanup_expired failed", e)
     return stats
 
 

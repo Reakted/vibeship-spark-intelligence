@@ -225,7 +225,7 @@ def _make_id(session_id: str, text: str) -> str:
 # Core processing
 # -----------------------------
 
-AUTO_SAVE_THRESHOLD = 0.82
+AUTO_SAVE_THRESHOLD = 0.65
 SUGGEST_THRESHOLD = 0.55
 
 

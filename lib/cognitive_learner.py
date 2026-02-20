@@ -317,8 +317,9 @@ class CognitiveInsight:
     promoted_to: Optional[str] = None
     last_validated_at: Optional[str] = None
     source: str = ""  # adapter that captured this: "openclaw", "cursor", "windsurf", "claude", "depth_forge", etc.
-    action_domain: str = ""  # pre-retrieval filter domain: "code", "x_social", "depth_training", "user_context", "system", "general"
+    action_domain: str = ""  # pre-retrieval filter domain: "code", "depth_training", "user_context", "system", "general"
     emotion_state: Dict[str, Any] = field(default_factory=dict)
+    advisory_quality: Dict[str, Any] = field(default_factory=dict)  # Embedded quality dimensions from distillation_transformer
 
     @property
     def reliability(self) -> float:
@@ -348,6 +349,7 @@ class CognitiveInsight:
             "source": self.source,
             "action_domain": self.action_domain,
             "emotion_state": self.emotion_state or {},
+            "advisory_quality": self.advisory_quality or {},
             "reliability": round(self.reliability, 4),
         }
     
@@ -376,6 +378,7 @@ class CognitiveInsight:
             source=data.get("source", ""),
             action_domain=data.get("action_domain", ""),
             emotion_state=data.get("emotion_state", {}) if isinstance(data.get("emotion_state"), dict) else {},
+            advisory_quality=data.get("advisory_quality", {}) if isinstance(data.get("advisory_quality"), dict) else {},
         )
 
 
@@ -383,7 +386,6 @@ def classify_action_domain(insight_text: str, category: str = "", source: str = 
     """Classify an insight into an action domain for pre-retrieval filtering.
 
     Domains:
-        x_social       - X/Twitter engagement, voice, social media
         depth_training  - DEPTH training logs and reasoning exercises
         user_context    - Verbatim user quotes and preferences
         code            - Code patterns, tool advice, engineering
@@ -395,18 +397,15 @@ def classify_action_domain(insight_text: str, category: str = "", source: str = 
     src = str(source or "").lower()
     cat = str(category or "").lower()
 
-    # X/Social domain
-    if any(tag in src for tag in ("x_research", "x_social", "engagement", "social-convo", "xresearch")):
-        return "x_social"
-    if any(text.startswith(p) for p in ("[X Strategy]", "[Chip:x_social]", "[Chip:engagement", "[Chip:social")):
-        return "x_social"
-    if re.search(r"^\[(?:vibe_coding|bittensor|openclaw_moltbook|ai agents)\]", text, re.IGNORECASE):
-        return "x_social"
-    if re.search(r"^RT @\w+:", text):
-        return "x_social"
-    if any(kw in text_lower for kw in ("tweet", "engagement", "likes", "followers", "x strategy", "reply thread")):
-        if any(kw in text_lower for kw in ("voice", "tone", "social", "hook", "viral")):
-            return "x_social"
+    def _premium_tools_enabled() -> bool:
+        return str(os.environ.get("SPARK_PREMIUM_TOOLS", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+    # No dedicated social/X/Twitter advisory domain in OSS launch.
 
     # DEPTH training domain
     if text.startswith("[DEPTH:") or "Strong " in text and " reasoning:" in text:
@@ -1378,6 +1377,18 @@ class CognitiveLearner:
         if self._is_noise_insight(insight):
             return None
 
+        # Compute advisory quality dimensions for storage
+        adv_quality_dict: Dict[str, Any] = {}
+        try:
+            from lib.distillation_transformer import transform_for_advisory
+            adv_quality = transform_for_advisory(insight, source=source)
+            adv_quality_dict = adv_quality.to_dict()
+            # Suppress insights that won't be useful as advisory
+            if adv_quality.suppressed:
+                return None
+        except Exception:
+            pass  # Don't block insight storage if transformer fails
+
         # Generate key from first few words of insight
         key_part = insight[:40].replace(" ", "_").lower()
         key = self._generate_key(category, key_part)
@@ -1393,6 +1404,9 @@ class CognitiveLearner:
                 existing.evidence = existing.evidence[-10:]
             if emotion_state:
                 existing.emotion_state = emotion_state
+            # Refresh advisory quality on validation
+            if adv_quality_dict:
+                existing.advisory_quality = adv_quality_dict
         else:
             domain = classify_action_domain(insight, category=category.value, source=source)
             self.insights[key] = CognitiveInsight(
@@ -1404,6 +1418,7 @@ class CognitiveLearner:
                 source=source,
                 action_domain=domain,
                 emotion_state=emotion_state,
+                advisory_quality=adv_quality_dict,
             )
 
         self._save_insights()
@@ -1868,6 +1883,48 @@ class CognitiveLearner:
             self._save_insights(drop_keys=removed_keys)
 
         return merged_counts
+
+    def promote_to_wisdom(self) -> Dict[str, int]:
+        """Promote high-confidence insights to WISDOM category.
+
+        Scans insights with 10+ validations and 85%+ reliability.
+        Skips already-wisdom insights and Spark-internal meta-learning noise.
+        """
+        stats = {"scanned": 0, "promoted": 0}
+        changed = False
+
+        for key, insight in list(self.insights.items()):
+            stats["scanned"] += 1
+
+            # Already wisdom
+            if insight.category == CognitiveCategory.WISDOM:
+                continue
+
+            # Skip meta-learning about Spark internals
+            low = insight.insight.lower()
+            if any(marker in low for marker in [
+                "[system gap]", "auto-tuner", "tuneables", "meta-ralph",
+                "bridge_cycle", "cognitive_learner", "pipeline health",
+            ]):
+                continue
+
+            # Check thresholds
+            total = insight.times_validated + insight.times_contradicted
+            if insight.times_validated < 10 or total < 10:
+                continue
+            reliability = insight.times_validated / total if total else 0
+            if reliability < 0.85:
+                continue
+
+            # Promote
+            insight.category = CognitiveCategory.WISDOM
+            changed = True
+            stats["promoted"] += 1
+
+        if changed:
+            self._save_insights()
+
+        return stats
 
 
 # ============= Singleton =============

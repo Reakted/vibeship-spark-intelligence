@@ -164,14 +164,6 @@ DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
                 "reliability_weight": 0.02,
                 "semantic_intent_min": 0.01,
             },
-            "x_social": {
-                "semantic_limit": 9,
-                "lexical_weight": 0.28,
-                "intent_coverage_weight": 0.06,
-                "support_boost_weight": 0.05,
-                "reliability_weight": 0.03,
-                "semantic_intent_min": 0.02,
-            },
         },
     },
     "2": {
@@ -224,16 +216,6 @@ DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
                 "semantic_limit": 11,
                 "lexical_weight": 0.34,
                 "intent_coverage_weight": 0.06,
-                "support_boost_weight": 0.08,
-                "reliability_weight": 0.04,
-                "semantic_intent_min": 0.02,
-            },
-            "x_social": {
-                "semantic_limit": 11,
-                "max_queries": 4,
-                "agentic_query_limit": 4,
-                "lexical_weight": 0.32,
-                "intent_coverage_weight": 0.08,
                 "support_boost_weight": 0.08,
                 "reliability_weight": 0.04,
                 "semantic_intent_min": 0.02,
@@ -294,16 +276,6 @@ DEFAULT_RETRIEVAL_PROFILES: Dict[str, Dict[str, Any]] = {
                 "reliability_weight": 0.05,
                 "semantic_intent_min": 0.02,
             },
-            "x_social": {
-                "semantic_limit": 13,
-                "max_queries": 5,
-                "agentic_query_limit": 5,
-                "lexical_weight": 0.34,
-                "intent_coverage_weight": 0.10,
-                "support_boost_weight": 0.10,
-                "reliability_weight": 0.05,
-                "semantic_intent_min": 0.02,
-            },
         },
     },
 }
@@ -342,29 +314,8 @@ DEFAULT_HIGH_RISK_HINTS = (
     "session",
     "memory retrieval",
 )
-X_SOCIAL_MARKERS = (
-    "x_social",
-    "x-social",
-    "twitter",
-    "tweet",
-    "retweet",
-    "quote tweet",
-    "timeline",
-    "engagement",
-    "multiplier granted",
-    "fomo",
-    "wallet",
-    "social network",
-    "social networks",
-    "cryptographic proof",
-    "ai identity",
-    "human larping",
-    "engagement bait",
-    "tao subnet",
-    "mac mini + ai",
-)
+X_SOCIAL_MARKERS: Tuple[str, ...] = ()
 RETRIEVAL_DOMAIN_MARKERS: Dict[str, Tuple[str, ...]] = {
-    "x_social": X_SOCIAL_MARKERS,
     "memory": (
         "memory",
         "retrieval",
@@ -474,9 +425,6 @@ RETRIEVAL_TOOL_DOMAIN_HINTS: Dict[str, str] = {
     "search_files": "coding",
     "pytest": "testing",
     "test": "testing",
-    "x_post": "x_social",
-    "x_reply": "x_social",
-    "x_research": "x_social",
 }
 RETRIEVAL_DOMAIN_PROFILE_KEYS = {
     "mode",
@@ -583,10 +531,6 @@ def _norm_retrieval_domain(value: Any) -> str:
     if not text:
         return "general"
     aliases = {
-        "xsocial": "x_social",
-        "social": "x_social",
-        "social_media": "x_social",
-        "x": "x_social",
         "ui": "ui_design",
         "ux": "ui_design",
     }
@@ -744,6 +688,22 @@ def _load_advisor_config() -> None:
 
 
 _load_advisor_config()
+
+
+def _reload_advisor_from(cfg: Dict[str, Any]) -> None:
+    """Hot-reload advisor tuneables from coordinator-supplied dict.
+
+    Ignores the cfg dict and re-reads from file, because _load_advisor_config
+    reads multiple sections (advisor, advisory_preferences, retrieval).
+    """
+    _load_advisor_config()
+
+
+try:
+    from lib.tuneables_reload import register_reload as _advisor_register
+    _advisor_register("advisor", _reload_advisor_from, label="advisor.reload_from")
+except ImportError:
+    pass
 
 
 def reload_advisor_config() -> Dict[str, Any]:
@@ -942,6 +902,9 @@ class Advice:
     # Emotional priority metadata from pipeline distillation (0.0-1.0).
     # Bridges emotional salience into final ranking without dominating it.
     emotional_priority: float = 0.0
+    # Embedded advisory quality dimensions from distillation_transformer.
+    # When present, used directly by _rank_score() instead of re-computing.
+    advisory_quality: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -1366,12 +1329,7 @@ class SparkAdvisor:
         if not combined:
             return "general"
 
-        if _premium_tools_enabled() and self._is_x_social_query(combined):
-            return "x_social"
-
         for domain, markers in RETRIEVAL_DOMAIN_MARKERS.items():
-            if domain == "x_social":
-                continue
             if any(marker in combined for marker in markers):
                 return domain
         hinted = RETRIEVAL_TOOL_DOMAIN_HINTS.get(tool)
@@ -1831,8 +1789,6 @@ class SparkAdvisor:
         domain_filtered: Dict[str, Any] = {}
         for key, insight in insights.items():
             action_domain = getattr(insight, "action_domain", "") or "general"
-            if not _premium_tools_enabled() and action_domain == "x_social":
-                continue
             if action_domain in allowed_domains:
                 domain_filtered[key] = insight
         # Fallback: if domain filtering is too aggressive (<20 items), include all
@@ -2412,9 +2368,6 @@ class SparkAdvisor:
         advice: List[Advice] = []
         filtered_low_match = 0
         filtered_domain_mismatch = 0
-        social_query = _premium_tools_enabled() and (
-            active_domain == "x_social" or self._is_x_social_query(context)
-        )
         for r in ranked_rows[:semantic_limit]:
             if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(r.insight_text):
                 continue
@@ -2427,7 +2380,7 @@ class SparkAdvisor:
             if support_count > 1:
                 confidence = min(0.98, confidence + min(0.12, 0.04 * float(support_count - 1)))
             source = "trigger" if str(getattr(r, "source_type", "") or "") == "trigger" else semantic_source
-            if (not social_query) and self._is_x_social_insight(str(getattr(r, "insight_text", "") or "")):
+            if self._is_x_social_insight(str(getattr(r, "insight_text", "") or "")):
                 filtered_domain_mismatch += 1
                 continue
             semantic_sim = float(getattr(r, "semantic_sim", 0.0) or 0.0)
@@ -2454,6 +2407,12 @@ class SparkAdvisor:
             else:
                 reason = base_reason or "Semantic route (embeddings primary)"
 
+            # Propagate advisory_quality from cognitive insight if available
+            _adv_q = {}
+            if r.insight_key and r.insight_key in insights:
+                _cog = insights[r.insight_key]
+                _adv_q = getattr(_cog, "advisory_quality", None) or {}
+
             advice.append(
                 Advice(
                     advice_id=self._generate_advice_id(
@@ -2465,6 +2424,7 @@ class SparkAdvisor:
                     source=source,
                     context_match=context_match,
                     reason=reason,
+                    advisory_quality=_adv_q,
                 )
             )
 
@@ -2548,18 +2508,10 @@ class SparkAdvisor:
         return [f"{t} failure pattern and fix" for t in facets]
 
     def _is_x_social_query(self, text: str) -> bool:
-        body = str(text or "").strip().lower()
-        if not body:
-            return False
-        if not _premium_tools_enabled():
-            return False
-        return any(marker in body for marker in X_SOCIAL_MARKERS)
+        return False
 
     def _is_x_social_insight(self, text: str) -> bool:
-        body = str(text or "").strip().lower()
-        if not body:
-            return False
-        return any(marker in body for marker in X_SOCIAL_MARKERS)
+        return False
 
     def _intent_terms(self, text: str) -> set:
         tokens = {t for t in re.findall(r"[a-z0-9_]+", str(text or "").lower()) if len(t) >= 3}
@@ -2588,22 +2540,8 @@ class SparkAdvisor:
         return any(marker in lowered for marker in _METADATA_TELEMETRY_HINTS)
 
     def _filter_cross_domain_advice(self, advice_list: List[Advice], context: str) -> List[Advice]:
-        """Drop cross-domain social advice when the current query is not social."""
-        if not _premium_tools_enabled():
-            return [
-                item
-                for item in advice_list
-                if not self._is_x_social_insight(getattr(item, "text", ""))
-            ]
-
-        if self._is_x_social_query(context):
-            return list(advice_list)
-        out: List[Advice] = []
-        for item in advice_list:
-            if self._is_x_social_insight(getattr(item, "text", "")):
-                continue
-            out.append(item)
-        return out
+        """No dedicated social-domain cross-filter is enabled in OSS launch."""
+        return list(advice_list)
 
     def _lexical_overlap_score(self, query: str, text: str) -> float:
         """Simple lexical overlap score [0..1] for hybrid rerank."""
@@ -2724,6 +2662,7 @@ class SparkAdvisor:
                 source="cognitive",
                 context_match=context_match,
                 reason=reason,
+                advisory_quality=getattr(insight, "advisory_quality", None) or {},
             ))
 
         return advice
@@ -3077,27 +3016,20 @@ class SparkAdvisor:
         if not chip or not text:
             return 0.0
 
-        social_query = self._is_x_social_query(text)
         coding_query = any(t in text for t in ("code", "refactor", "test", "debug", "python", "module"))
         marketing_query = any(t in text for t in ("marketing", "campaign", "conversion", "audience", "brand"))
         memory_query = any(t in text for t in ("memory", "retrieval", "cross-session", "stale", "distillation"))
 
-        social_chip = any(t in chip for t in ("social", "x_", "x-", "engagement"))
         coding_chip = any(t in chip for t in ("vibecoding", "api-design", "game_dev"))
         marketing_chip = any(t in chip for t in ("marketing", "market-intel", "biz-ops"))
 
         bonus = 0.0
-        if social_query and social_chip:
-            bonus += 0.15
         if coding_query and coding_chip:
             bonus += 0.12
         if marketing_query and marketing_chip:
             bonus += 0.12
         if memory_query and coding_chip:
             bonus += 0.06
-
-        if not social_query and social_chip:
-            bonus -= 0.08
         return bonus
 
     def _get_surprise_advice(self, tool_name: str, context: str) -> List[Advice]:
@@ -3849,7 +3781,7 @@ class SparkAdvisor:
             if alpha_ratio < 0.4:
                 not_observation = 0.1
         # X social tags
-        if re.match(r"^\[(vibe_coding|bittensor|openclaw_moltbook|ai agents|X Strategy)\]", text):
+        if re.match(r"^\[(vibe_coding|bittensor|ai agents|X Strategy)\]", text):
             not_observation = 0.1
         # Ship it / launch artifact
         if text_stripped.startswith("Ship it:"):
@@ -3940,6 +3872,10 @@ class SparkAdvisor:
         text = str(getattr(advice, "text", "") or "").strip()
         if not text:
             return True
+        # Drop advice suppressed by distillation transformer
+        adv_q = getattr(advice, "advisory_quality", None) or {}
+        if isinstance(adv_q, dict) and adv_q.get("suppressed"):
+            return True
         if self._is_low_signal_struggle_text(text):
             return True
         if self._is_transcript_artifact(text):
@@ -3974,7 +3910,7 @@ class SparkAdvisor:
         "engagement": 1.15,     # Engagement pulse predictions
         "niche": 1.1,           # Niche intelligence network
         "cognitive": 1.0,       # Standard cognitive insights
-        "mind": 1.0,            # Mind memories
+        "mind": 1.15,           # Mind memories (boosted 2026-02-21 pipeline audit)
         "bank": 0.9,            # Memory banks (less curated)
         "chip": 1.15,           # Domain-specific chip intelligence
         "semantic": 1.05,       # Semantic retrieval of cognitive insights
@@ -3999,8 +3935,13 @@ class SparkAdvisor:
         # Source quality boost (Task #10)
         base_score *= self._SOURCE_BOOST.get(a.source, 1.0)
 
-        # Actionability boost (Task #9)
-        actionability = self._score_actionability(a.text)
+        # Actionability boost (Task #9) — use embedded dims when available
+        adv_q = getattr(a, "advisory_quality", None) or {}
+        if isinstance(adv_q, dict) and adv_q.get("unified_score"):
+            # Use transformer's unified score directly (already blends all 5 dims)
+            actionability = float(adv_q["unified_score"])
+        else:
+            actionability = self._score_actionability(a.text)
         base_score *= (0.5 + actionability)  # 0.5x to 1.5x based on actionability
 
         # Insight-level outcome boost (Task #11)

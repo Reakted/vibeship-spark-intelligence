@@ -33,7 +33,7 @@ Spark compounds useful intelligence over time by enforcing:
 - EIDOS enforcement and durable outcomes
 - Meta-Ralph quality and feedback loop hardening
 - Semantic retrieval with outcome-weighted ranking
-- Chips as modular domain intelligence
+- Chip module retained as premium-enabled architecture surface
 - Project and team memory with measurable behavior change
 
 ## Important Deep Strategy Docs
@@ -41,7 +41,6 @@ Spark compounds useful intelligence over time by enforcing:
 The following remain active and intentionally unarchived:
 - `MoE_Plan.md`
 - `Path to AGI.md`
-- `EVOLUTION_CHIPS_RESEARCH.md`
 
 ## How To Use This Vision
 

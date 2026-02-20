@@ -34,13 +34,6 @@ secrets.json
 telegram_token.txt
 .telegram_token
 
-# Twitter/X API credentials - NEVER commit
-**/x-twitter-mcp/.env
-**/x-twitter-mcp/.env.*
-!**/x-twitter-mcp/.env.example
-twitter_credentials*
-.twitter_keys
-
 # IDE
 .idea/
 .vscode/
@@ -86,10 +79,21 @@ _tmp/
 
 # Run artifacts (keep canonical summaries tracked; stash per-run outputs)
 docs/reports/_runs/
+docs/reports/
 dashboard_out.txt
 dashboard_err.txt
 reports/tune_replay_*.md
 reports/preflight_check_attest.md
+
+# Launch hygiene / local artifacts
+.openclaw_last_health.txt
+openclaw_test.txt
+_tool_test.txt
+zzz_test3.txt
+tmp_openclaw_integration_audit_prompt.txt
+tmp_json_extract_*.py
+C*tmp_ch*.md
+*.sparkmultiplier_grants.jsonl
 
 # Large generated artifacts (keep repo lightweight)
 reports/advisory_auto_score_*.json
@@ -100,6 +104,7 @@ package.json
 package-lock.json
 
 # Benchmark artifacts
+benchmarks/
 benchmarks/out/
 benchmarks/logs/
 
@@ -107,3 +112,10 @@ benchmarks/logs/
 sandbox/spark_sandbox/
 sandbox/spark_sandbox_diff.json
 node_modules/
+
+# OSS launch hygiene (removed from public share)
+trace_hud/
+logs/
+dist/
+build/
+vibeship_spark.egg-info/

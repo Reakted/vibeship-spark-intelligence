@@ -129,11 +129,34 @@ def _read_json(path: Path) -> dict:
 
 
 def _write_json_atomic(path: Path, data: dict):
-    """Write JSON atomically via temp file + replace."""
+    """Write JSON atomically via temp file + replace.
+
+    If this is the tuneables file, validates via schema (clamping out-of-bounds
+    values) and records drift distance after write.
+    """
+    # Validate via schema before writing (soft import)
+    try:
+        from lib.tuneables_schema import validate_tuneables
+        result = validate_tuneables(data)
+        data = result.data  # Use cleaned/clamped version
+    except ImportError:
+        pass
+    except Exception:
+        pass  # Schema error should not block writes
+
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=4), encoding="utf-8")
     tmp.replace(path)
+
+    # Record drift after writing tuneables
+    try:
+        from lib.tuneables_drift import check_drift
+        check_drift()
+    except ImportError:
+        pass
+    except Exception:
+        pass
 
 
 class AutoTuner:

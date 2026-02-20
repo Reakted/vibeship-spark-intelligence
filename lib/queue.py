@@ -97,6 +97,12 @@ def get_queue_config() -> Dict[str, Any]:
 
 _apply_queue_config(_load_queue_config())
 
+try:
+    from lib.tuneables_reload import register_reload as _queue_register
+    _queue_register("queue", apply_queue_config, label="queue.apply_config")
+except ImportError:
+    pass
+
 
 def _load_queue_state() -> Dict[str, Any]:
     if not QUEUE_STATE_FILE.exists():

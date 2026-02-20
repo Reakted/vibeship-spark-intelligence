@@ -38,23 +38,6 @@ learning_sources:
     poll_interval: 2.0
 
   # OPT-IN - Internet learning for higher intelligence
-  x_twitter:
-    enabled: true  # User can set to false
-    description: "Learn from X/Twitter trends about ecosystems, tech, and culture"
-    learns:
-      - Ecosystem developments (AI agents, crypto, tech)
-      - Viral content patterns
-      - Community sentiment
-      - Emerging trends and narratives
-    topics:
-      - vibe_coding
-      - ai_agents
-      - moltbook_openclaw
-      - base_solana_crypto
-      - bittensor_decentralized_ai
-      - tech_trends
-    schedule: "daily"  # daily, hourly, manual
-
   web_research:
     enabled: true  # User can set to false
     description: "Research web for deeper understanding of topics"
