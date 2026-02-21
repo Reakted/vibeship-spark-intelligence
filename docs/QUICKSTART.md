@@ -446,6 +446,47 @@ Spark maps these hook names to runtime event types used by chips:
 
 For predictive advisory to work end-to-end, `PreToolUse` must be enabled.
 
+## Codex Integration (Optional)
+
+Use when you want Codex sessions to receive `SPARK_CONTEXT_FOR_CODEX.md` and
+`SPARK_ADVISORY_PAYLOAD.json`.
+
+```bash
+# Preferred: launch Codex through the wrapper
+scripts/spark-codex.sh
+# Windows
+scripts\\spark-codex.bat
+```
+
+What the wrapper does:
+
+- sets `SPARK_SYNC_TARGETS=codex` if not already set
+- sets `CMD` from `SPARK_CODEX_CMD` or `CODEX_CMD` (fallback to `codex`)
+- runs `python -m spark.cli sync-context` before launching Codex
+
+If you run sync manually:
+
+```bash
+# Either of these enables Codex output during sync
+set SPARK_SYNC_TARGETS=codex
+set SPARK_CODEX_CMD=codex
+# or
+python -m spark.cli sync-context
+```
+
+Verify Codex sync artifacts are present in the current project:
+
+```bash
+test -f SPARK_CONTEXT_FOR_CODEX.md && test -f SPARK_ADVISORY_PAYLOAD.json && echo "ok"
+python -m lib.integration_status
+```
+
+If status still reports missing Codex sync, confirm:
+
+- the command runs in the same shell/environment where `SPARK_CODEX_CMD` or `CODEX_CMD` is set
+- `spark.cli sync-context` is completing successfully
+- `SPARK_SYNC_TARGETS` is not overridden to exclude `codex`
+
 ## Directory Structure
 
 After running, Spark creates:

@@ -100,6 +100,11 @@ def _load_sync_adapter_policy() -> Dict[str, Any]:
 
     if env_targets:
         enabled = set(env_targets)
+    elif os.getenv("SPARK_CODEX_CMD") or os.getenv("CODEX_CMD"):
+        # If a Codex command is configured and no explicit targets were set,
+        # keep Codex in sync automatically (backward-compatible default).
+        enabled.add("codex")
+
     enabled -= env_disabled
 
     return {

@@ -131,6 +131,8 @@ logs/
 dist/
 build/
 vibeship_spark.egg-info/
+vibeship_spark_intelligence.egg-info/
+.pypirc
 site/
 
 # Local test/debug scratch files

@@ -2,7 +2,7 @@
   <img src="logo.png" alt="Spark Intelligence" width="120">
   <h1 align="center">Spark Intelligence</h1>
   <p align="center">
-    <em>self-evolving intelligent companion.</em>
+    <em>local self-evolving AI companion for coding intelligence.</em>
   </p>
   <p align="center">
     <a href="https://github.com/vibeforge1111/vibeship-spark-intelligence/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
@@ -14,18 +14,32 @@
 
 ---
 
-Learns constantly. Resonates and evolves with you.
-Runs 100% on your machine as a local AI companion. Brings a spark to everything.
+Learns constantly. Adapts with your flow.
+Runs 100% on your machine as a local AI companion that turns past work into future-ready behavior.
+It is designed to be beyond a learning loop.
 
-```
-You code → Spark learns → Agent adapts → You code better → Spark learns more
-```
+`You do work` -> `Spark captures memory` -> `Spark distills and transforms it` -> `Spark delivers advisory context` -> `You act with better context` -> `Outcomes re-enter the loop`
 
 ## What is Spark?
 
-Spark Intelligence is a self-evolution layer for AI coding agents. It captures interaction signals, distills them into learnings, and feeds those learnings back into your agent to improve behavior over time.
+Spark Intelligence is a self-evolving AI companion designed to grow smarter through use.
 
-Not a chatbot. Not a wrapper. A learning engine.
+It is:
+- Not a chatbot.
+- Not a fixed rule set.
+- A living intelligence runtime that continuously converts experience into adaptive operational behavior, not just stored memory.
+
+The goal is to keep context, patterns, and practical lessons in a form that your agent can actually use at the right moment.
+
+## Beyond a Learning Loop: Intelligence Operating Flow
+
+- Capture: hooks and events from your agent sessions are converted into structured memories.
+- Distill: noisy data is filtered into reliable, action-oriented insights.
+- Transform: high-value items are shaped for practical reuse (prioritized by reliability, context match, and usefulness).
+- Store: distilled wisdom is persisted and versioned in local memory stores.
+- Act: advisory and context updates are prepared for the right point in workflow.
+- Guard: gating layers check quality, authority, cooldown, and dedupe before any advisory is surfaced.
+- Learn: outcomes and follow-through are fed back to refine future recommendations.
 
 ## Install
 
@@ -64,24 +78,26 @@ Spark works with any coding agent that supports hooks or event capture.
 
 ## What You Get
 
-- **Learning engine** — captures signals, distills insights, promotes high-value learnings to your agent context
-- **Quality gates** — Meta-Ralph scores every insight before it enters the knowledge base
-- **Advisory system** — pre-tool advice ranked by fusion scoring across 7 sources
-- **Episodic intelligence (EIDOS)** — prediction → outcome → evaluation loop
-- **Domain chips** — pluggable YAML modules for domain-specific learning
-- **Dashboards** — Spark Pulse (primary), Meta-Ralph analyzer
-- **CLI** — `spark status`, `spark learnings`, `spark promote`, `spark up/down`, and more
-- **Hot-reloadable config** — tuneables system with schema validation and drift tracking
+- **Self-evolving companion behavior** — adapts from your sessions instead of staying static.
+- **Signal capture** — hooks + event ingestion for tool actions, prompts, and outcomes.
+- **Distillation pipeline** — low-quality/raw observations are filtered out before storage.
+- **Transformation layer** — converts insight candidates into actionable advisory-ready forms.
+- **Advisory delivery** — pre-tool guidance ranked across retrieval sources with cool-down and dedupe.
+- **EIDOS loop** — prediction → outcome → evaluation for continuous quality updates.
+- **Domain chips** — pluggable expertise modules that can specialize behavior.
+- **Dashboards** — Spark Pulse and Meta-Ralph for observability and tuning.
+- **CLI** — `spark status`, `spark learnings`, `spark promote`, `spark up/down`, and more.
+- **Hot-reloadable config** — tuneables with schema checks and live behavior shifts.
 
 ## Architecture
 
 ```
 Your Agent (Claude Code / Cursor / OpenClaw)
-  → hooks capture events
-  → queue → bridge worker → pipeline
-  → quality gate (Meta-Ralph) → cognitive learner
-  → advisory system delivers insights pre-tool
-  → context files updated → agent reads and adapts
+  -> hooks capture events
+  -> queue -> bridge worker -> pipeline
+  -> quality gate (Meta-Ralph) -> cognitive learner
+  -> distillation -> transformation -> advisory packaging
+  -> pre-tool advisory surfaced + context files refreshed
 ```
 
 ## Documentation
