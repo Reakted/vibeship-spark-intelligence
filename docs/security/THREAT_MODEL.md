@@ -1,7 +1,7 @@
 # Spark Intelligence Threat Model (Public Alpha)
 
 Date: 2026-02-15
-Scope: vibeship-spark-intelligence (local-first services + hooks + dashboards)
+Scope: vibeforge1111/vibeship-spark-intelligence (local-first services + hooks + dashboards)
 
 This threat model is intentionally practical. It focuses on likely failures and abuse paths for a public alpha.
 
@@ -104,4 +104,3 @@ Must pass:
 - `tests/test_safety_guardrails.py` and `tests/test_sparkd_hardening.py` pass
 - Default binding is localhost for dashboards and APIs intended to be local-only
 - No secrets committed; `.env` and credential files are ignored
-

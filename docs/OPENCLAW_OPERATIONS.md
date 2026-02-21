@@ -265,7 +265,7 @@ learned_something("what you learned", "context", confidence=0.9)
 
 ## Git Workflow
 
-- Repo: `vibeforge1111/vibeship-spark-intelligence` (PRIVATE)
+- Repo: `vibeforge1111/vibeship-spark-intelligence` (PUBLIC)
 - Push after every logical chunk
 - Today's commits: 14 (Phase 1-2, UTF-8 fixes, live advice, memory leak fix, LLM integration, feedback loop, docs)
 

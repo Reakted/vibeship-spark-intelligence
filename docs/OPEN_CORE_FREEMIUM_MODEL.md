@@ -1,7 +1,7 @@
 # Open Core + Freemium Model (Practical)
 
 Date: 2026-02-15
-Repo: vibeship-spark-intelligence
+Repo: vibeforge1111/vibeship-spark-intelligence
 
 Goal: keep Spark's core open source for growth and auditability, while offering premium modules (chips, benchmark systems like Forge/DEPTH, curated packs) without weakening safety.
 
@@ -50,7 +50,7 @@ See:
 
 ## 5) Recommended Packaging
 
-- This repo: `vibeship-spark` OSS core (MIT).
+- This repo: `vibeship-spark` OSS core (AGPL-3.0; premium modules remain separate).
 - Private packages:
   - `vibeship-spark-chips-premium`
   - `vibeship-spark-forge` (or a hosted Forge API)

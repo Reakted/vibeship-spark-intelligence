@@ -1,7 +1,7 @@
 # AGI Scientist Matrix (Carmack-Style Mapping To Spark)
 
 Date: 2026-02-15
-Repo: vibeship-spark-intelligence
+Repo: vibeforge1111/vibeship-spark-intelligence
 Goal: A "who / what / contribution / how it maps / what to steal" matrix for AGI-adjacent researchers,
 written to be usable for Spark engineering decisions (bounded, measurable, low-complexity).
 
@@ -234,4 +234,3 @@ When reading any AGI research or scientist commentary, translate it into:
 - What is the rollback trigger and the failure classification?
 
 If you cannot answer those four questions, the idea stays research-only.
-

@@ -1,7 +1,7 @@
 # AGI Guardrails Immutability (Practical Research)
 
 Date: 2026-02-15
-Repo: vibeship-spark-intelligence
+Repo: vibeforge1111/vibeship-spark-intelligence
 Audience: system designers/operators building high-autonomy agents
 Goal: Design guardrails that keep an AGI-class system oriented toward humanity's good, while making those guardrails effectively immutable (including "immutable even to the operator").
 

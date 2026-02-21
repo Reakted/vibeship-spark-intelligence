@@ -1,7 +1,7 @@
 # Carmack And AGI Engineering Alignment (Spark Research)
 
 Date: 2026-02-15
-Repo: vibeship-spark-intelligence
+Repo: vibeforge1111/vibeship-spark-intelligence
 Audience: Spark operators/engineers
 Goal: Extract "Carmack-style" (tight, measured, low-complexity) AGI-adjacent principles and map them onto Spark's existing intelligence flow, with concrete optimization and stability recommendations.
 
