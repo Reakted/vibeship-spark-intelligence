@@ -143,6 +143,33 @@ def _validation_quality_weight(
     return max(0.05, min(1.0, float(weight)))
 
 
+def _compute_advisory_readiness(
+    text: str,
+    advisory_quality: Dict[str, Any],
+    confidence: float = 0.5,
+    times_validated: int = 0,
+    times_contradicted: int = 0,
+) -> float:
+    """Score how ready an insight is for advisory reuse.
+
+    This combines advisory quality (primary signal) with reliability and usage history.
+    """
+    quality = 0.0
+    if isinstance(advisory_quality, dict):
+        quality = float(advisory_quality.get("unified_score", 0.0) or 0.0)
+    base = max(0.0, min(1.0, float(confidence)))
+    readiness = max(0.0, 0.10 + 0.45 * quality + 0.20 * base)
+    if times_validated:
+        readiness += min(0.20, 0.05 * min(times_validated, 4))
+    if times_contradicted:
+        readiness -= min(0.20, 0.05 * min(times_contradicted, 4))
+    if isinstance(text, str) and len(text.strip()) > 120:
+        readiness += 0.10
+    if isinstance(text, str) and len(text.strip()) < 40:
+        readiness -= 0.08
+    return max(0.0, min(1.0, readiness))
+
+
 def _coerce_int(value: Any, default: int = 0) -> int:
     try:
         if value is None:
@@ -320,6 +347,7 @@ class CognitiveInsight:
     action_domain: str = ""  # pre-retrieval filter domain: "code", "depth_training", "user_context", "system", "general"
     emotion_state: Dict[str, Any] = field(default_factory=dict)
     advisory_quality: Dict[str, Any] = field(default_factory=dict)  # Embedded quality dimensions from distillation_transformer
+    advisory_readiness: float = 0.0
 
     @property
     def reliability(self) -> float:
@@ -350,6 +378,7 @@ class CognitiveInsight:
             "action_domain": self.action_domain,
             "emotion_state": self.emotion_state or {},
             "advisory_quality": self.advisory_quality or {},
+            "advisory_readiness": round(self.advisory_readiness, 4),
             "reliability": round(self.reliability, 4),
         }
     
@@ -379,6 +408,7 @@ class CognitiveInsight:
             action_domain=data.get("action_domain", ""),
             emotion_state=data.get("emotion_state", {}) if isinstance(data.get("emotion_state"), dict) else {},
             advisory_quality=data.get("advisory_quality", {}) if isinstance(data.get("advisory_quality"), dict) else {},
+            advisory_readiness=float(data.get("advisory_readiness", 0.0) or 0.0),
         )
 
 
@@ -471,6 +501,8 @@ class CognitiveLearner:
                 self.dedupe_struggles()
                 # Backfill action_domain for insights loaded without one
                 self._backfill_action_domains()
+                # Ensure advisory_readiness exists for legacy insights.
+                self._backfill_advisory_readiness()
             except Exception as e:
                 print(f"[SPARK] Error loading insights: {e}")
 
@@ -485,6 +517,22 @@ class CognitiveLearner:
                     source=insight.source,
                 )
                 insight.action_domain = domain
+                changed = True
+        if changed and not getattr(self, "_defer_saves", False):
+            self._save_insights()
+
+    def _backfill_advisory_readiness(self) -> None:
+        """Backfill advisory_readiness for existing insights when missing."""
+        changed = False
+        for key, insight in self.insights.items():
+            if insight.advisory_readiness <= 0.0:
+                insight.advisory_readiness = _compute_advisory_readiness(
+                    insight.insight,
+                    getattr(insight, "advisory_quality", None) or {},
+                    confidence=getattr(insight, "confidence", 0.5) or 0.5,
+                    times_validated=getattr(insight, "times_validated", 0),
+                    times_contradicted=getattr(insight, "times_contradicted", 0),
+                )
                 changed = True
         if changed and not getattr(self, "_defer_saves", False):
             self._save_insights()
@@ -1407,8 +1455,21 @@ class CognitiveLearner:
             # Refresh advisory quality on validation
             if adv_quality_dict:
                 existing.advisory_quality = adv_quality_dict
+            existing.advisory_readiness = _compute_advisory_readiness(
+                insight,
+                existing.advisory_quality,
+                confidence=existing.confidence,
+                times_validated=existing.times_validated,
+                times_contradicted=existing.times_contradicted,
+            )
         else:
             domain = classify_action_domain(insight, category=category.value, source=source)
+            readiness = _compute_advisory_readiness(
+                insight,
+                adv_quality_dict,
+                confidence=confidence,
+                times_validated=1,
+            )
             self.insights[key] = CognitiveInsight(
                 category=category,
                 insight=insight,
@@ -1419,6 +1480,7 @@ class CognitiveLearner:
                 action_domain=domain,
                 emotion_state=emotion_state,
                 advisory_quality=adv_quality_dict,
+                advisory_readiness=readiness,
             )
 
         self._save_insights()

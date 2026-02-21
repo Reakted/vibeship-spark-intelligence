@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
-from .common import write_marked_section
+from .common import write_json, write_marked_section
 
 
 def _load_config() -> Optional[dict]:
@@ -66,11 +66,19 @@ def _resolve_paths() -> List[Path]:
     return [workspace / name for name in _parse_targets()]
 
 
-def write(context: str) -> bool:
+def _payload_path(paths: List[Path]) -> Optional[Path]:
+    if not paths:
+        return None
+    first = paths[0]
+    return Path(first).parent / "SPARK_ADVISORY_PAYLOAD.json"
+
+
+def write(context: str, advisory_payload: Optional[dict] = None) -> bool:
     paths = _resolve_paths()
     if not paths:
         return False
     ok = False
+    payload_path = _payload_path(paths)
     for path in paths:
         header = None
         name = path.name.lower()
@@ -95,4 +103,6 @@ def write(context: str) -> bool:
             marker_start="<!-- SPARK:BEGIN -->",
             marker_end="<!-- SPARK:END -->",
         ) or ok
+    if advisory_payload is not None and payload_path is not None:
+        write_json(payload_path, advisory_payload)
     return ok

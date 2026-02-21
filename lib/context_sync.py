@@ -167,6 +167,81 @@ def _actionability_score(text: str) -> int:
     return score
 
 
+def _build_advisory_payload(
+    *,
+    insights: List[CognitiveInsight],
+    promoted: List[str],
+    chip_highlights: List[Dict[str, Any]],
+    project_profile: Optional[Dict[str, Any]],
+    key_by_id: Dict[int, str],
+    effective_reliability,
+    diagnostics: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "schema_version": "spark_advisory_payload_v1",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "source": "context_sync",
+        "counts": {
+            "insights": len(insights),
+            "promoted": len(promoted),
+            "chip_highlights": len(chip_highlights),
+        },
+        "insights": [],
+        "project": {},
+    }
+    if project_profile:
+        payload["project"] = {
+            "project_key": project_profile.get("project_key"),
+            "phase": project_profile.get("phase"),
+            "done": project_profile.get("done"),
+        }
+
+    for ins in insights:
+        if not ins:
+            continue
+        payload["insights"].append({
+            "insight_key": key_by_id.get(id(ins)),
+            "text": ins.insight,
+            "category": getattr(ins.category, "value", str(ins.category)),
+            "source": getattr(ins, "source", "cognitive"),
+            "reliability": round(effective_reliability(ins), 3),
+            "confidence": round(ins.confidence, 3),
+            "validations": ins.times_validated,
+            "advisory_readiness": round(_advisory_readiness_score(ins), 3),
+            "advisory_quality": getattr(ins, "advisory_quality", {}) or {},
+        })
+
+    if chip_highlights:
+        payload["chip_highlights"] = [
+            {
+                "chip_id": item.get("chip_id"),
+                "observer": item.get("observer"),
+                "score": item.get("score"),
+                "confidence": item.get("confidence"),
+                "text": item.get("content"),
+            }
+            for item in chip_highlights
+        ]
+    if promoted:
+        payload["promoted"] = [{"text": p} for p in promoted[:3]]
+    if diagnostics is not None:
+        payload["diagnostics"] = {k: v for k, v in diagnostics.items()}
+    return payload
+
+
+def _advisory_readiness_score(insight: CognitiveInsight) -> float:
+    """Readiness score for advisory-ready sync ordering."""
+    if insight is None:
+        return 0.0
+    ready = float(getattr(insight, "advisory_readiness", 0.0) or 0.0)
+    if ready:
+        return max(0.0, min(1.0, ready))
+    adv_q = getattr(insight, "advisory_quality", None) or {}
+    if isinstance(adv_q, dict):
+        return max(0.0, min(1.0, float(adv_q.get("unified_score", 0.0) or 0.0)))
+    return 0.0
+
+
 def _category_weight(category) -> int:
     order = {
         "wisdom": 7,
@@ -235,6 +310,7 @@ def _select_insights(
 
     picked.sort(
         key=lambda i: (
+            _advisory_readiness_score(i),
             _actionability_score(i.insight),
             _category_weight(i.category),
             cognitive.effective_reliability(i),
@@ -267,6 +343,7 @@ def _select_insights(
                     "category": i.category.value,
                     "insight": i.insight,
                     "reliability": round(cognitive.effective_reliability(i), 3),
+                    "advisory_readiness": round(_advisory_readiness_score(i), 3),
                     "validations": i.times_validated,
                     "actionability": _actionability_score(i.insight),
                 }
@@ -517,11 +594,17 @@ def sync_context(
         cognitive=cognitive,
         project_context=project_context,
     )
+    key_by_id = {id(v): k for k, v in cognitive.insights.items()}
+    advisory_payload: Optional[Dict[str, Any]] = None
+    project_profile_for_payload: Optional[Dict[str, Any]] = None
+    try:
+        project_profile_for_payload = load_profile(root)
+    except Exception:
+        project_profile_for_payload = None
 
     try:
         session_id = infer_latest_session_id()
         trace_id = infer_latest_trace_id(session_id)
-        key_by_id = {id(v): k for k, v in cognitive.insights.items()}
         exposures = []
         for ins in insights:
             exposures.append({
@@ -548,10 +631,10 @@ def sync_context(
                 "category": "project_milestone",
                 "text": m.get("text"),
             })
-        if p_exposures:
-            session_id = infer_latest_session_id()
-            trace_id = infer_latest_trace_id(session_id)
-            record_exposures("sync_context:project", p_exposures, session_id=session_id, trace_id=trace_id)
+            if p_exposures:
+                session_id = infer_latest_session_id()
+                trace_id = infer_latest_trace_id(session_id)
+                record_exposures("sync_context:project", p_exposures, session_id=session_id, trace_id=trace_id)
     except Exception:
         pass
 
@@ -564,11 +647,17 @@ def sync_context(
     promoted = [p for p in promoted if _normalize_text(p) not in seen]
 
     profile = None
-    try:
-        profile = load_profile(root)
-    except Exception:
-        profile = None
+    profile = project_profile_for_payload
 
+    advisory_payload = _build_advisory_payload(
+        insights=insights,
+        promoted=promoted,
+        chip_highlights=chip_highlights,
+        project_profile=project_profile_for_payload,
+        key_by_id=key_by_id,
+        effective_reliability=cognitive.effective_reliability,
+        diagnostics=diagnostics,
+    )
     context = _format_context(
         insights,
         promoted,
@@ -584,7 +673,7 @@ def sync_context(
 
     if "claude_code" in enabled_adapters:
         try:
-            write_claude_code(context, project_dir=root)
+            write_claude_code(context, project_dir=root, advisory_payload=advisory_payload)
             targets["claude_code"] = "written"
         except Exception:
             targets["claude_code"] = "error"
@@ -593,7 +682,7 @@ def sync_context(
 
     if "cursor" in enabled_adapters:
         try:
-            write_cursor(context, project_dir=root)
+            write_cursor(context, project_dir=root, advisory_payload=advisory_payload)
             targets["cursor"] = "written"
         except Exception:
             targets["cursor"] = "error"
@@ -602,7 +691,7 @@ def sync_context(
 
     if "windsurf" in enabled_adapters:
         try:
-            write_windsurf(context, project_dir=root)
+            write_windsurf(context, project_dir=root, advisory_payload=advisory_payload)
             targets["windsurf"] = "written"
         except Exception:
             targets["windsurf"] = "error"
@@ -611,7 +700,7 @@ def sync_context(
 
     if "clawdbot" in enabled_adapters:
         try:
-            ok = write_clawdbot(context)
+            ok = write_clawdbot(context, advisory_payload=advisory_payload)
             targets["clawdbot"] = "written" if ok else "skipped"
         except Exception:
             targets["clawdbot"] = "error"
@@ -620,7 +709,7 @@ def sync_context(
 
     if "openclaw" in enabled_adapters:
         try:
-            ok = write_openclaw(context)
+            ok = write_openclaw(context, advisory_payload=advisory_payload)
             targets["openclaw"] = "written" if ok else "skipped"
         except Exception:
             targets["openclaw"] = "error"
@@ -629,7 +718,7 @@ def sync_context(
 
     if "exports" in enabled_adapters:
         try:
-            write_exports(context)
+            write_exports(context, advisory_payload=advisory_payload)
             targets["exports"] = "written"
         except Exception:
             targets["exports"] = "error"

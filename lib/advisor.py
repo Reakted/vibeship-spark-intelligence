@@ -35,6 +35,7 @@ from dataclasses import dataclass, field, asdict
 from .cognitive_learner import get_cognitive_learner, CognitiveCategory
 from .mind_bridge import get_mind_bridge, HAS_REQUESTS
 from .memory_banks import retrieve as bank_retrieve, infer_project_key
+from .advisory_quarantine import record_quarantine_item
 
 # EIDOS integration for distillation retrieval
 try:
@@ -905,6 +906,7 @@ class Advice:
     # Embedded advisory quality dimensions from distillation_transformer.
     # When present, used directly by _rank_score() instead of re-computing.
     advisory_quality: Dict[str, Any] = field(default_factory=dict)
+    advisory_readiness: float = 0.0
 
 
 @dataclass
@@ -1772,6 +1774,39 @@ class SparkAdvisor:
         "emergent_other":            {"code", "system", "general"},
     }
 
+    def _insight_readiness_score(self, insight: Any) -> float:
+        """Readiness score for an insight at retrieval time."""
+        ready = float(getattr(insight, "advisory_readiness", 0.0) or 0.0)
+        if ready:
+            return max(0.0, min(1.0, ready))
+        adv_q = getattr(insight, "advisory_quality", None) or {}
+        if isinstance(adv_q, dict):
+            return max(0.0, min(1.0, float(adv_q.get("unified_score", 0.0) or 0.0)))
+        return 0.0
+
+    @staticmethod
+    def _coerce_payload_readiness(payload: Any, fallback: float = 0.0) -> float:
+        """Extract advisory_readiness from mind payloads with graceful fallback."""
+        try:
+            if not isinstance(payload, dict):
+                return max(0.0, min(1.0, float(fallback or 0.0)))
+            direct = payload.get("advisory_readiness")
+            if direct is not None:
+                return max(0.0, min(1.0, float(direct)))
+            adv_q = payload.get("advisory_quality")
+            if isinstance(adv_q, dict):
+                unified = adv_q.get("unified_score")
+                if unified is not None:
+                    return max(0.0, min(1.0, float(unified)))
+                if adv_q.get("domain"):
+                    return 0.55
+        except Exception:
+            pass
+        try:
+            return max(0.0, min(1.0, float(fallback or 0.0)))
+        except Exception:
+            return 0.0
+
     def _prefilter_insights_for_retrieval(
         self,
         insights: Dict[str, Any],
@@ -1799,14 +1834,29 @@ class SparkAdvisor:
         # --- Phase 2: Low-signal drop + keyword scoring (existing logic) ---
         if len(working_set) <= limit:
             if not drop_low_signal:
-                return working_set
+                return {
+                    key: insight
+                    for _, key, insight in sorted(
+                        [(self._insight_readiness_score(insight), key, insight) for key, insight in working_set.items()],
+                        key=lambda row: row[0],
+                        reverse=True,
+                    )
+                }
             filtered: Dict[str, Any] = {}
             for key, insight in working_set.items():
                 _, blob = self._prefilter_cached_blob_tokens(str(key), insight)
                 if self._should_drop_low_signal_candidate(blob):
                     continue
                 filtered[key] = insight
-            return filtered or working_set
+            sorted_filtered = {
+                key: insight
+                for _, key, insight in sorted(
+                    [(self._insight_readiness_score(insight), key, insight) for key, insight in filtered.items()],
+                    key=lambda row: row[0],
+                    reverse=True,
+                )
+            }
+            return sorted_filtered or working_set
 
         query_tokens = self._intent_terms(context)
         if not query_tokens:
@@ -1823,11 +1873,12 @@ class SparkAdvisor:
             intent_coverage = (overlap / max(1, len(query_tokens))) if query_tokens else 0.0
             metadata_boost = 2.0 if tool and tool in blob else 0.0
             reliability = float(getattr(insight, "reliability", 0.5) or 0.5)
-            score = (overlap * 3.5) + (intent_coverage * 2.0) + metadata_boost + reliability
+            readiness = self._insight_readiness_score(insight)
+            score = (overlap * 3.5) + (intent_coverage * 2.0) + metadata_boost + reliability + (readiness * 1.4)
             if overlap > 0 or metadata_boost > 0 or intent_coverage >= 0.2:
                 scored.append((score, key, insight))
             else:
-                fallback.append((reliability, key, insight))
+                fallback.append((reliability + (readiness * 0.6), key, insight))
 
         ranked: List[Tuple[float, str, Any]] = sorted(scored, key=lambda row: row[0], reverse=True)
         if len(ranked) < limit:
@@ -2540,8 +2591,31 @@ class SparkAdvisor:
         return any(marker in lowered for marker in _METADATA_TELEMETRY_HINTS)
 
     def _filter_cross_domain_advice(self, advice_list: List[Advice], context: str) -> List[Advice]:
-        """No dedicated social-domain cross-filter is enabled in OSS launch."""
-        return list(advice_list)
+        """Drop advice that is explicitly marked to another advisory domain."""
+        allowed = self._get_allowed_domains("", context)
+        if not allowed:
+            return list(advice_list)
+        if allowed == {"general"}:
+            return list(advice_list)
+
+        out: List[Advice] = []
+        for advice in advice_list:
+            adv_q = getattr(advice, "advisory_quality", None) or {}
+            if isinstance(adv_q, dict):
+                adv_domain = str(adv_q.get("domain", "general") or "general").lower()
+            else:
+                adv_domain = "general"
+            if adv_domain in ("", "general"):
+                out.append(advice)
+                continue
+            if adv_domain in allowed:
+                out.append(advice)
+                continue
+            text = (advice.text or "").lower()
+            if any(x in text for x in ("troubleshoot", "failure", "regression", "safety", "rollback")):
+                # Cross-cutting reliability and safety advisories are often reusable.
+                out.append(advice)
+        return out
 
     def _lexical_overlap_score(self, query: str, text: str) -> float:
         """Simple lexical overlap score [0..1] for hybrid rerank."""
@@ -2723,6 +2797,21 @@ class SparkAdvisor:
             for mem in memories:
                 content = mem.get("content", "")
                 salience = mem.get("salience", 0.5)
+                mem_meta = mem.get("meta")
+                if not isinstance(mem_meta, dict):
+                    mem_meta = {}
+                advisory_quality = mem.get("advisory_quality")
+                if not isinstance(advisory_quality, dict):
+                    advisory_quality = mem_meta.get("advisory_quality")
+                if not isinstance(advisory_quality, dict):
+                    advisory_quality = {}
+                advisory_readiness = self._coerce_payload_readiness(
+                    {
+                        "advisory_readiness": mem.get("advisory_readiness"),
+                        "advisory_quality": advisory_quality,
+                    },
+                    fallback=salience or 0.0,
+                )
 
                 if salience < MIND_MIN_SALIENCE:
                     continue
@@ -2750,6 +2839,8 @@ class SparkAdvisor:
                     source="mind",
                     context_match=0.7,  # Mind already does semantic matching
                     reason=reason,
+                    advisory_quality=advisory_quality,
+                    advisory_readiness=advisory_readiness,
                 ))
         except Exception:
             pass  # Mind unavailable, gracefully skip
@@ -3871,19 +3962,64 @@ class SparkAdvisor:
     def _should_drop_advice(self, advice: Advice, tool_name: str = "") -> bool:
         text = str(getattr(advice, "text", "") or "").strip()
         if not text:
+            record_quarantine_item(
+                source=str(getattr(advice, "source", "unknown")),
+                stage="advisor_should_drop",
+                reason="empty_text",
+                text=text,
+                advisory_quality=getattr(advice, "advisory_quality", None),
+                advisory_readiness=getattr(advice, "advisory_readiness", None),
+                extras={"tool_name": tool_name},
+            )
             return True
         # Drop advice suppressed by distillation transformer
         adv_q = getattr(advice, "advisory_quality", None) or {}
         if isinstance(adv_q, dict) and adv_q.get("suppressed"):
+            record_quarantine_item(
+                source=str(getattr(advice, "source", "unknown")),
+                stage="advisor_should_drop",
+                reason=f"transformer:{adv_q.get('suppression_reason') or 'suppressed'}",
+                text=text,
+                advisory_quality=adv_q,
+                advisory_readiness=getattr(advice, "advisory_readiness", None),
+                extras={"tool_name": tool_name},
+            )
             return True
         if self._is_low_signal_struggle_text(text):
+            record_quarantine_item(
+                source=str(getattr(advice, "source", "unknown")),
+                stage="advisor_should_drop",
+                reason="low_signal_struggle",
+                text=text,
+                advisory_quality=adv_q if isinstance(adv_q, dict) else None,
+                advisory_readiness=getattr(advice, "advisory_readiness", None),
+                extras={"tool_name": tool_name},
+            )
             return True
         if self._is_transcript_artifact(text):
+            record_quarantine_item(
+                source=str(getattr(advice, "source", "unknown")),
+                stage="advisor_should_drop",
+                reason="transcript_artifact",
+                text=text,
+                advisory_quality=adv_q if isinstance(adv_q, dict) else None,
+                advisory_readiness=getattr(advice, "advisory_readiness", None),
+                extras={"tool_name": tool_name},
+            )
             return True
         if (
             advice.source in {"bank", "mind", "cognitive", "semantic", "semantic-hybrid", "semantic-agentic"}
             and self._is_metadata_pattern(text)
         ):
+            record_quarantine_item(
+                source=str(getattr(advice, "source", "unknown")),
+                stage="advisor_should_drop",
+                reason="metadata_pattern",
+                text=text,
+                advisory_quality=adv_q if isinstance(adv_q, dict) else None,
+                advisory_readiness=getattr(advice, "advisory_readiness", None),
+                extras={"tool_name": tool_name},
+            )
             return True
         text_lower = text.lower()
         if any(
@@ -3896,9 +4032,27 @@ class SparkAdvisor:
             )
         ):
             if str(tool_name or "").strip() not in {"Read", "Edit", "Write"}:
+                record_quarantine_item(
+                    source=str(getattr(advice, "source", "unknown")),
+                    stage="advisor_should_drop",
+                    reason="context_read_before_edit",
+                    text=text,
+                    advisory_quality=adv_q if isinstance(adv_q, dict) else None,
+                    advisory_readiness=getattr(advice, "advisory_readiness", None),
+                    extras={"tool_name": tool_name},
+                )
                 return True
         if text_lower.startswith("constraint:") and "one state" in text_lower:
             if str(tool_name or "").strip() not in {"Task", "EnterPlanMode", "ExitPlanMode"}:
+                record_quarantine_item(
+                    source=str(getattr(advice, "source", "unknown")),
+                    stage="advisor_should_drop",
+                    reason="context_constraint_state",
+                    text=text,
+                    advisory_quality=adv_q if isinstance(adv_q, dict) else None,
+                    advisory_readiness=getattr(advice, "advisory_readiness", None),
+                    extras={"tool_name": tool_name},
+                )
                 return True
         return False
 
@@ -3943,6 +4097,11 @@ class SparkAdvisor:
         else:
             actionability = self._score_actionability(a.text)
         base_score *= (0.5 + actionability)  # 0.5x to 1.5x based on actionability
+
+        readiness = float(getattr(a, "advisory_readiness", 0.0) or 0.0)
+        if not readiness and isinstance(adv_q, dict):
+            readiness = float(adv_q.get("unified_score", 0.0) or 0.0)
+        base_score *= (0.5 + min(0.5, max(0.0, readiness)))
 
         # Insight-level outcome boost (Task #11)
         try:

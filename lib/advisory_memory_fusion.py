@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .outcome_log import read_outcomes
 from .primitive_filter import is_primitive_text
+from .advisory_quarantine import record_quarantine_item
 
 COGNITIVE_FILE = Path.home() / ".spark" / "cognitive_insights.json"
 CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
@@ -238,6 +239,33 @@ def _intent_relevance_score(intent_tokens: set[str], text: str) -> float:
     return 0.0
 
 
+def _coerce_readiness(row: Dict[str, Any], confidence: float = 0.0) -> float:
+    """Compute advisory readiness for a memory row without hard failures."""
+    try:
+        meta = row.get("meta") if isinstance(row, dict) else {}
+        if isinstance(meta, dict):
+            direct = meta.get("advisory_readiness")
+            if direct is not None:
+                return max(0.0, min(1.0, float(direct)))
+
+        adv_q = row.get("advisory_quality") or {}
+        if isinstance(adv_q, dict):
+            unified = adv_q.get("unified_score")
+            if unified is not None:
+                return max(0.0, min(1.0, float(unified)))
+            domain = str(adv_q.get("domain") or "").strip()
+            if domain:
+                return 0.55
+
+        meta_readiness = row.get("advisory_readiness")
+        if meta_readiness is not None:
+            return max(0.0, min(1.0, float(meta_readiness)))
+    except Exception:
+        pass
+
+    return max(0.0, min(1.0, float(confidence or 0.0)))
+
+
 def _collect_cognitive(limit: int = 6) -> List[Dict[str, Any]]:
     if not COGNITIVE_FILE.exists():
         return []
@@ -262,11 +290,25 @@ def _collect_cognitive(limit: int = 6) -> List[Dict[str, Any]]:
         if not text:
             continue
         if _is_noise_evidence(text):
+            record_quarantine_item(
+                source="cognitive",
+                stage="collect_cognitive",
+                reason="noise_evidence",
+                text=text,
+            )
             continue
 
         # Read embedded advisory quality if available
         adv_q = row.get("advisory_quality") or {}
         if isinstance(adv_q, dict) and adv_q.get("suppressed"):
+            record_quarantine_item(
+                source="cognitive",
+                stage="collect_cognitive",
+                reason="transformer_suppressed",
+                text=text,
+                advisory_quality=adv_q,
+                advisory_readiness=row.get("advisory_readiness"),
+            )
             continue  # Skip insights suppressed by distillation transformer
 
         # Use unified_score from transformer when available, fallback to reliability
@@ -275,6 +317,7 @@ def _collect_cognitive(limit: int = 6) -> List[Dict[str, Any]]:
             unified = float(adv_q["unified_score"])
             # Blend: transformer score weighted higher than raw reliability
             confidence = max(confidence, 0.60 * unified + 0.40 * confidence)
+        readiness = _coerce_readiness({"advisory_quality": adv_q}, confidence=confidence)
 
         evidence.append(
             {
@@ -283,7 +326,11 @@ def _collect_cognitive(limit: int = 6) -> List[Dict[str, Any]]:
                 "text": text,
                 "confidence": confidence,
                 "created_at": float(row.get("timestamp") or row.get("created_at") or 0.0),
-                "meta": {"advisory_quality": adv_q} if adv_q else {},
+                "meta": {
+                    "advisory_quality": adv_q,
+                    "advisory_readiness": round(readiness, 4),
+                    "source_mode": "cognitive",
+                },
             }
         )
     return evidence
@@ -306,6 +353,12 @@ def _collect_eidos(intent_text: str, limit: int = 5) -> List[Dict[str, Any]]:
         if not statement:
             continue
         if _is_noise_evidence(statement):
+            record_quarantine_item(
+                source="eidos",
+                stage="collect_eidos",
+                reason="noise_evidence",
+                text=statement,
+            )
             continue
         evidence.append(
             {
@@ -314,6 +367,7 @@ def _collect_eidos(intent_text: str, limit: int = 5) -> List[Dict[str, Any]]:
                 "text": statement,
                 "confidence": float(getattr(item, "confidence", 0.6) or 0.6),
                 "created_at": float(getattr(item, "created_at", 0.0) or 0.0),
+                "meta": {"source_mode": "eidos"},
             }
         )
     return evidence
@@ -358,8 +412,22 @@ def _collect_chips(
                 continue
             chip_id = str(row.get("chip_id") or fp.stem).strip()
             if _is_telemetry_chip_row(chip_id, text):
+                record_quarantine_item(
+                    source="chips",
+                    stage="collect_chips",
+                    reason="telemetry_marker",
+                    text=text,
+                    meta={"chip_id": chip_id, "file": fp.name},
+                )
                 continue
             if _is_noise_evidence(text):
+                record_quarantine_item(
+                    source="chips",
+                    stage="collect_chips",
+                    reason="noise_evidence",
+                    text=text,
+                    meta={"chip_id": chip_id, "file": fp.name},
+                )
                 continue
             relevance = _intent_relevance_score(intent_tokens, text) if intent_tokens else 0.0
             domain_match = _chip_domain_match(chip_id, intent_text, intent_family, tool_name)
@@ -395,6 +463,7 @@ def _collect_chips(
                             "quality_total": quality_total,
                             "intent_relevance": round(float(relevance), 4),
                             "domain_match": round(float(domain_match), 4),
+                            "source_mode": "chip",
                         },
                     },
                 )
@@ -427,6 +496,13 @@ def _collect_outcomes(intent_text: str, limit: int = 6) -> List[Dict[str, Any]]:
         if not text:
             continue
         if _is_noise_evidence(text):
+            record_quarantine_item(
+                source="outcomes",
+                stage="collect_outcomes",
+                reason="noise_evidence",
+                text=text,
+                meta={"outcome_id": row.get("outcome_id"), "polarity": row.get("polarity")},
+            )
             continue
         created_at = float(row.get("created_at") or 0.0)
         if not intent_tokens:
@@ -471,7 +547,11 @@ def _collect_outcomes(intent_text: str, limit: int = 6) -> List[Dict[str, Any]]:
                 "text": text,
                 "confidence": confidence,
                 "created_at": float(row.get("created_at") or 0.0),
-                "meta": {"polarity": polarity, "event_type": row.get("event_type")},
+                "meta": {
+                    "polarity": polarity,
+                    "event_type": row.get("event_type"),
+                    "source_mode": "outcome",
+                },
             }
         )
     return evidence
@@ -488,6 +568,13 @@ def _collect_orchestration(limit: int = 5) -> List[Dict[str, Any]]:
         if not prompt:
             continue
         if _is_noise_evidence(prompt):
+            record_quarantine_item(
+                source="orchestration",
+                stage="collect_orchestration",
+                reason="noise_evidence",
+                text=prompt,
+                meta={"handoff_id": row.get("handoff_id")},
+            )
             continue
         evidence.append(
             {
@@ -496,7 +583,7 @@ def _collect_orchestration(limit: int = 5) -> List[Dict[str, Any]]:
                 "text": prompt,
                 "confidence": 0.55,
                 "created_at": float(row.get("timestamp") or 0.0),
-                "meta": {"to_agent": row.get("to_agent"), "success": row.get("success")},
+                "meta": {"to_agent": row.get("to_agent"), "success": row.get("success"), "source_mode": "orchestration"},
             }
         )
     return evidence
@@ -519,15 +606,45 @@ def _collect_mind(intent_text: str, limit: int = 4) -> List[Dict[str, Any]]:
         text = str(mem.get("content") or mem.get("text") or "").strip()
         if not text:
             continue
+        mem_meta = mem.get("meta")
+        if not isinstance(mem_meta, dict):
+            mem_meta = {}
+        advisory_quality = mem.get("advisory_quality")
+        if not isinstance(advisory_quality, dict):
+            advisory_quality = mem_meta.get("advisory_quality")
+        if not isinstance(advisory_quality, dict):
+            advisory_quality = {}
         if _is_noise_evidence(text):
+            record_quarantine_item(
+                source="mind",
+                stage="collect_mind",
+                reason="noise_evidence",
+                text=text,
+                meta=mem_meta,
+                advisory_quality=advisory_quality,
+                advisory_readiness=mem_meta.get("advisory_readiness"),
+            )
             continue
+        confidence = float(mem.get("salience") or mem.get("score") or mem.get("confidence") or 0.6)
+        readiness = _coerce_readiness(
+            {
+                "advisory_quality": advisory_quality,
+                "advisory_readiness": mem_meta.get("advisory_readiness"),
+            },
+            confidence=confidence,
+        )
+        row_meta = dict(mem_meta)
+        row_meta["advisory_quality"] = advisory_quality
+        row_meta["advisory_readiness"] = round(readiness, 4)
+        row_meta["source_mode"] = row_meta.get("source_mode") or "mind"
         evidence.append(
             {
                 "source": "mind",
                 "id": str(mem.get("memory_id") or mem.get("id") or f"mind:{len(evidence)}"),
                 "text": text,
-                "confidence": float(mem.get("score") or 0.6),
+                "confidence": confidence,
                 "created_at": float(mem.get("created_at") or 0.0),
+                "meta": row_meta,
             }
         )
     return evidence
@@ -614,15 +731,29 @@ def build_memory_bundle(
         meta = row.get("meta") or {}
         adv_q = meta.get("advisory_quality") or {}
         if isinstance(adv_q, dict) and adv_q.get("suppressed"):
+            record_quarantine_item(
+                source=str(row.get("source") or "unknown"),
+                stage="build_memory_bundle",
+                reason="transformer_suppressed",
+                text=text,
+                advisory_quality=adv_q,
+                advisory_readiness=meta.get("advisory_readiness"),
+                meta=dict(meta),
+            )
             continue
         relevance = _intent_relevance_score(intent_tokens, text)
         # Boost relevance with advisory quality structure match
+        readiness = _coerce_readiness(meta, float(row.get("confidence") or 0.0))
         if isinstance(adv_q, dict) and adv_q.get("unified_score"):
             relevance += float(adv_q["unified_score"]) * 0.15
+        relevance += 0.12 * readiness
+        if readiness and not meta.get("advisory_readiness"):
+            meta["advisory_readiness"] = round(readiness, 4)
+        row["meta"] = meta
         scored.append(
             (
                 relevance,
-                float(row.get("confidence") or 0.0),
+                max(0.0, min(1.0, float(row.get("confidence") or 0.0) + 0.1 * readiness)),
                 float(row.get("created_at") or 0.0),
                 row,
             )

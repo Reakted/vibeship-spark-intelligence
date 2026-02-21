@@ -27,6 +27,7 @@ from lib.content_learner import learn_from_edit_event
 from lib.chips import process_chip_events
 from lib.chip_merger import merge_chip_insights
 from lib.context_sync import sync_context
+from lib.advisory_quarantine import record_quarantine_item
 from lib.diagnostics import log_debug
 from lib.opportunity_scanner import scan_runtime_opportunities
 from lib.runtime_hygiene import cleanup_runtime_artifacts
@@ -974,6 +975,12 @@ def _append_eidos_update(update: str) -> None:
     try:
         ok, reason = _is_valid_eidos_distillation(update)
         if not ok:
+            record_quarantine_item(
+                source="eidos",
+                stage="append_eidos_update",
+                reason=f"validator:{reason}",
+                text=update,
+            )
             log_debug("bridge_worker", f"Skipped EIDOS distillation ({reason})", None)
             return
 
@@ -984,10 +991,19 @@ def _append_eidos_update(update: str) -> None:
             adv_q = transform_for_advisory(update, source="eidos")
             adv_quality_dict = adv_q.to_dict()
             if adv_q.suppressed:
+                record_quarantine_item(
+                    source="eidos",
+                    stage="append_eidos_update",
+                    reason=f"transformer_suppressed:{adv_q.suppression_reason}",
+                    text=update,
+                    advisory_quality=adv_quality_dict,
+                    advisory_readiness=adv_quality_dict.get("unified_score"),
+                )
                 log_debug("bridge_worker", f"EIDOS distillation suppressed by transformer ({adv_q.suppression_reason})", None)
                 return
         except Exception:
             pass  # Don't block EIDOS storage if transformer fails
+        advisory_readiness = float((adv_quality_dict or {}).get("unified_score") or 0.0)
 
         eidos_file = Path.home() / ".spark" / "eidos_distillations.jsonl"
         from datetime import datetime
@@ -1009,6 +1025,14 @@ def _append_eidos_update(update: str) -> None:
                     continue
                 kept.append(it)
             if not kept:
+                record_quarantine_item(
+                    source="eidos",
+                    stage="append_eidos_update",
+                    reason="no_keep_actions",
+                    text=update,
+                    advisory_quality=adv_quality_dict,
+                    advisory_readiness=advisory_readiness,
+                )
                 log_debug("bridge_worker", "All EIDOS insights filtered by quality gate", None)
                 return
             summary_parts = []
@@ -1023,12 +1047,14 @@ def _append_eidos_update(update: str) -> None:
                 "insights": kept[:3],
                 "distillation_summary": " | ".join(summary_parts)[:1200],
                 "advisory_quality": adv_quality_dict,
+                "advisory_readiness": round(min(max(advisory_readiness, 0.0), 1.0), 4),
             }
         else:
             entry = {
                 "timestamp": datetime.now().isoformat(),
                 "distillation": update,
                 "advisory_quality": adv_quality_dict,
+                "advisory_readiness": round(min(max(advisory_readiness, 0.0), 1.0), 4),
             }
 
         with open(eidos_file, "a", encoding="utf-8") as f:

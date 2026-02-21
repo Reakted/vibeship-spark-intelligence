@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Optional
@@ -67,5 +68,18 @@ def write_text(path: Path, content: str) -> bool:
             pass
         return False
     _ensure_parent(path)
-    path.write_text(content, encoding="utf-8")
+        path.write_text(content, encoding="utf-8")
+    return True
+
+
+def write_json(path: Path, payload: dict) -> bool:
+    if not isinstance(payload, dict):
+        try:
+            log_exception("output_adapter", f"blocked non-dict advisory payload write to {path}")
+        except Exception:
+            pass
+        return False
+    _ensure_parent(path)
+    text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+    path.write_text(text, encoding="utf-8")
     return True

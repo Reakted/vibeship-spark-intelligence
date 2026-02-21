@@ -67,6 +67,30 @@ class SyncResult:
     queued: bool = False
 
 
+def _coerce_advisory_readiness(
+    *,
+    advisory_quality: Any = None,
+    advisory_readiness: Any = None,
+    fallback: float = 0.0,
+) -> float:
+    """Derive advisory_readiness when stored metadata is partial."""
+    try:
+        if advisory_readiness is not None:
+            return max(0.0, min(1.0, float(advisory_readiness)))
+        if isinstance(advisory_quality, dict):
+            unified_score = advisory_quality.get("unified_score")
+            if unified_score is not None:
+                return max(0.0, min(1.0, float(unified_score)))
+            if advisory_quality.get("domain"):
+                return 0.55
+    except Exception:
+        pass
+    try:
+        return max(0.0, min(1.0, float(fallback or 0.0)))
+    except Exception:
+        return 0.0
+
+
 class MindBridge:
     """
     Bridge between Spark's cognitive learning and Mind's persistent memory.
@@ -192,6 +216,19 @@ class MindBridge:
         content = "\n".join(content_parts)
         if len(content) > MAX_CONTENT_CHARS:
             content = content[:MAX_CONTENT_CHARS]
+        advisory_quality = insight.advisory_quality if isinstance(getattr(insight, "advisory_quality", None), dict) else {}
+        advisory_readiness = _coerce_advisory_readiness(
+            advisory_quality=advisory_quality,
+            advisory_readiness=getattr(insight, "advisory_readiness", 0.0),
+            fallback=insight.reliability,
+        )
+        meta_payload = {
+            "advisory_quality": advisory_quality,
+            "advisory_readiness": round(advisory_readiness, 4),
+            "source_category": insight.category.value,
+            "source": getattr(insight, "source", ""),
+            "evidence_count": len(getattr(insight, "evidence", [])),
+        }
         salience = max(0.5, min(0.95, insight.reliability))
         
         return {
@@ -199,7 +236,10 @@ class MindBridge:
             "content": content,
             "content_type": self._category_to_content_type(insight.category),
             "temporal_level": self._category_to_temporal_level(insight.category),
-            "salience": salience
+            "salience": salience,
+            "meta": meta_payload,
+            "advisory_quality": advisory_quality,
+            "advisory_readiness": round(advisory_readiness, 4),
         }
     
     def _check_mind_health(self, *, force: bool = False, timeout_s: Optional[float] = None) -> bool:
@@ -233,7 +273,9 @@ class MindBridge:
             "insight_hash": self._insight_hash(insight),
             "memory_data": memory_data,
             "category": insight.category.value,
-            "insight_text": insight.insight[:200]
+            "insight_text": insight.insight[:200],
+            "advisory_quality": memory_data.get("advisory_quality") if isinstance(memory_data, dict) else {},
+            "advisory_readiness": memory_data.get("advisory_readiness") if isinstance(memory_data, dict) else None,
         }
         
         with open(OFFLINE_QUEUE_FILE, "a") as f:
@@ -352,7 +394,36 @@ class MindBridge:
             
             if response.status_code == 200:
                 self._record_health_result(True)
-                return response.json().get("memories", [])
+                memories = response.json().get("memories", [])
+                if not isinstance(memories, list):
+                    return []
+                normalized: List[Dict[str, Any]] = []
+                for memory in memories:
+                    if not isinstance(memory, dict):
+                        continue
+                    mem = dict(memory)
+                    salience = float(mem.get("salience", 0.0) or 0.0)
+                    meta = mem.get("meta")
+                    if not isinstance(meta, dict):
+                        meta = {}
+                    advisory_quality = mem.get("advisory_quality")
+                    if not isinstance(advisory_quality, dict):
+                        advisory_quality = meta.get("advisory_quality")
+                    if not isinstance(advisory_quality, dict):
+                        advisory_quality = {}
+                    advisory_readiness = _coerce_advisory_readiness(
+                        advisory_quality=advisory_quality,
+                        advisory_readiness=mem.get("advisory_readiness"),
+                        fallback=salience,
+                    )
+                    meta = dict(meta)
+                    meta["advisory_quality"] = advisory_quality
+                    meta["advisory_readiness"] = round(advisory_readiness, 4)
+                    mem["meta"] = meta
+                    mem["advisory_quality"] = advisory_quality
+                    mem["advisory_readiness"] = round(advisory_readiness, 4)
+                    normalized.append(mem)
+                return normalized[:max(0, int(limit or 0))]
             self._record_health_result(False)
             return []
         except Exception:

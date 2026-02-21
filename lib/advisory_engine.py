@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .diagnostics import log_debug
+from .advisory_quarantine import record_quarantine_item
 from .error_taxonomy import build_error_fields
 
 ENGINE_ENABLED = os.getenv("SPARK_ADVISORY_ENGINE", "1") != "0"
@@ -931,6 +932,55 @@ def _should_use_selective_ai_synth(*, gate_result: Any, remaining_ms: float) -> 
     return _authority_rank(top_authority) >= _authority_rank(min_auth)
 
 
+def _record_advisory_gate_drop(
+    *,
+    stage: str,
+    reason: str,
+    tool_name: str,
+    intent_family: str,
+    task_plane: str,
+    route: str,
+    packet_id: Optional[str],
+    advice_items: Optional[List[Any]] = None,
+    extras: Optional[Dict[str, Any]] = None,
+) -> None:
+    sample = None
+    for item in advice_items or []:
+        txt = str(getattr(item, "text", "") or "").strip()
+        if txt:
+            sample = item
+            break
+    if sample is None and advice_items:
+        sample = advice_items[0]
+
+    sample_quality = getattr(sample, "advisory_quality", None) if sample is not None else None
+    sample_readiness = getattr(sample, "advisory_readiness", None) if sample is not None else None
+    sample_text = str(getattr(sample, "text", "") or "") if sample is not None else ""
+    if not sample_text and extras:
+        sample_text = str(extras.get("text") or "")
+
+    extra_payload: Dict[str, Any] = {
+        "stage": stage,
+        "tool_name": str(tool_name or ""),
+        "intent_family": str(intent_family or ""),
+        "task_plane": str(task_plane or ""),
+        "route": str(route or ""),
+        "packet_id": str(packet_id or ""),
+    }
+    if extras:
+        extra_payload.update({k: v for k, v in extras.items() if v is not None})
+
+    record_quarantine_item(
+        source="advisory_engine",
+        stage=stage,
+        reason=reason,
+        text=sample_text,
+        advisory_quality=sample_quality if isinstance(sample_quality, dict) else None,
+        advisory_readiness=sample_readiness,
+        meta=extra_payload,
+    )
+
+
 def _gate_suppression_metadata(gate_result: Any) -> Dict[str, Any]:
     suppressed = list(getattr(gate_result, "suppressed", []) or [])
     if not suppressed:
@@ -1396,6 +1446,22 @@ def on_pre_tool(
 
             if not fallback_text:
                 suppression_meta = _gate_suppression_metadata(gate_result)
+                _record_advisory_gate_drop(
+                    stage="gate_no_emit",
+                    reason="AE_GATE_SUPPRESSED",
+                    tool_name=tool_name,
+                    intent_family=intent_family,
+                    task_plane=task_plane,
+                    route=route,
+                    packet_id=packet_id,
+                    advice_items=advice_items,
+                    extras={
+                        **suppression_meta,
+                        "fallback_candidate_blocked": bool(
+                            route and route.startswith("packet") and not PACKET_FALLBACK_EMIT_ENABLED
+                        ),
+                    },
+                )
                 save_state(state)
                 _log_engine_event(
                     "no_emit",
@@ -1427,6 +1493,23 @@ def on_pre_tool(
                 fallback_text = _action_first_format(fallback_text)
             fallback_guard = _fallback_guard_allows()
             if not fallback_guard.get("allowed"):
+                _record_advisory_gate_drop(
+                    stage="fallback_rate_limit",
+                    reason="AE_FALLBACK_RATE_LIMIT",
+                    tool_name=tool_name,
+                    intent_family=intent_family,
+                    task_plane=task_plane,
+                    route=route,
+                    packet_id=packet_id,
+                    advice_items=advice_items,
+                    extras={
+                        "route": route,
+                        "fallback_rate_recent": fallback_guard.get("ratio"),
+                        "fallback_rate_limit": fallback_guard.get("limit"),
+                        "fallback_delivered_recent": fallback_guard.get("delivered_recent"),
+                        "fallback_window": fallback_guard.get("window"),
+                    },
+                )
                 save_state(state)
                 _log_engine_event(
                     "no_emit",
@@ -1455,6 +1538,23 @@ def on_pre_tool(
                 return None
             repeat_meta = _duplicate_repeat_state(state, fallback_text)
             if repeat_meta["repeat"]:
+                _record_advisory_gate_drop(
+                    stage="fallback_duplicate",
+                    reason="AE_DUPLICATE_SUPPRESSED",
+                    tool_name=tool_name,
+                    intent_family=intent_family,
+                    task_plane=task_plane,
+                    route=route,
+                    packet_id=packet_id,
+                    advice_items=[None] if not advice_items else advice_items,
+                    extras={
+                        "advisory_fingerprint": repeat_meta["fingerprint"],
+                        "repeat_age_s": repeat_meta["age_s"],
+                        "repeat_cooldown_s": repeat_meta["cooldown_s"],
+                        "actionability_added": bool(action_meta.get("added")),
+                        "actionability_command": action_meta.get("command"),
+                    },
+                )
                 save_state(state)
                 _log_engine_event(
                     "duplicate_suppressed",
@@ -1595,6 +1695,22 @@ def on_pre_tool(
                     kept.append(decision)
 
                 if suppressed:
+                    _record_advisory_gate_drop(
+                        stage="global_dedupe_suppressed",
+                        reason="AE_GLOBAL_DEDUPE_SUPPRESSED",
+                        tool_name=tool_name,
+                        intent_family=intent_family,
+                        task_plane=task_plane,
+                        route=route,
+                        packet_id=packet_id,
+                        advice_items=advice_items,
+                        extras={
+                            "suppressed_count": len(suppressed),
+                            "suppressed": suppressed[:8],
+                            "cooldown_s": round(float(cooldown), 2),
+                            "dedupe_scope": dedupe_scope,
+                        },
+                    )
                     if not kept:
                         save_state(state)
                         _log_engine_event(
@@ -1656,6 +1772,22 @@ def on_pre_tool(
                     cooldown_s=cooldown,
                 )
                 if hit:
+                    _record_advisory_gate_drop(
+                        stage="low_auth_global_suppressed",
+                        reason="AE_LOW_AUTH_GLOBAL_SUPPRESSED",
+                        tool_name=tool_name,
+                        intent_family=intent_family,
+                        task_plane=task_plane,
+                        route=route,
+                        packet_id=packet_id,
+                        advice_items=advice_items,
+                        extras={
+                            "top_advice_id": top_advice_id,
+                            "top_authority": top_authority,
+                            "repeat_age_s": round(float(hit.get("age_s") or 0.0), 2),
+                            "repeat_cooldown_s": round(float(hit.get("cooldown_s") or cooldown), 2),
+                        },
+                    )
                     save_state(state)
                     _log_engine_event(
                         "low_auth_global_suppressed",
@@ -1752,6 +1884,25 @@ def on_pre_tool(
                     record_packet_usage(packet_id, emitted=False, route=f"{route}_repeat_suppressed")
                 except Exception as e:
                     log_debug("advisory_engine", "AE_PKT_USAGE_REPEAT_SUPPRESS_FAILED", e)
+            _record_advisory_gate_drop(
+                stage="duplicate_suppressed",
+                reason="AE_DUPLICATE_SUPPRESSED",
+                tool_name=tool_name,
+                intent_family=intent_family,
+                task_plane=task_plane,
+                route=route,
+                packet_id=packet_id,
+                advice_items=advice_items,
+                extras={
+                    "advisory_fingerprint": repeat_meta["fingerprint"],
+                    "repeat_age_s": repeat_meta["age_s"],
+                    "repeat_cooldown_s": repeat_meta["cooldown_s"],
+                    "actionability_added": bool(action_meta.get("added")),
+                    "actionability_command": action_meta.get("command"),
+                    "top_advice_id": str(getattr(gate_result.emitted[0], "advice_id", "")) if gate_result.emitted else "",
+                    "top_authority": str(getattr(gate_result.emitted[0], "authority", "")) if gate_result.emitted else "",
+                },
+            )
             save_state(state)
             _log_engine_event(
                 "duplicate_suppressed",

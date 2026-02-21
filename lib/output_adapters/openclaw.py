@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..openclaw_paths import discover_openclaw_workspaces
-from .common import write_marked_section
+from .common import write_json, write_marked_section
 
 FALLBACK_ADVISORY_FILE = Path.home() / ".spark" / "llm_advisory.md"
 
@@ -94,7 +94,7 @@ report("decision", intent="use caching", reasoning="reduce latency", confidence=
     return "\n\n".join(sections)
 
 
-def write(context: str, config: Optional[dict] = None) -> bool:
+def write(context: str, config: Optional[dict] = None, advisory_payload: Optional[dict] = None) -> bool:
     """Write Spark context into OpenClaw workspace as SPARK_CONTEXT.md.
 
     Uses marker-bounded sections so the file can coexist with other content.
@@ -129,15 +129,17 @@ def write(context: str, config: Optional[dict] = None) -> bool:
         )
         # Keep advisory visible in profile workspaces even when only the fallback
         # advisory file was updated in this cycle.
-        if FALLBACK_ADVISORY_FILE.exists():
-            advisory_path = workspace / "SPARK_ADVISORY.md"
-            src_mtime = FALLBACK_ADVISORY_FILE.stat().st_mtime
-            dst_mtime = advisory_path.stat().st_mtime if advisory_path.exists() else 0.0
-            if src_mtime > dst_mtime:
-                advisory_path.parent.mkdir(parents=True, exist_ok=True)
-                advisory_path.write_text(
-                    FALLBACK_ADVISORY_FILE.read_text(encoding="utf-8", errors="replace"),
-                    encoding="utf-8",
-                )
+            if FALLBACK_ADVISORY_FILE.exists():
+                advisory_path = workspace / "SPARK_ADVISORY.md"
+                src_mtime = FALLBACK_ADVISORY_FILE.stat().st_mtime
+                dst_mtime = advisory_path.stat().st_mtime if advisory_path.exists() else 0.0
+                if src_mtime > dst_mtime:
+                    advisory_path.parent.mkdir(parents=True, exist_ok=True)
+                    advisory_path.write_text(
+                        FALLBACK_ADVISORY_FILE.read_text(encoding="utf-8", errors="replace"),
+                        encoding="utf-8",
+                    )
+        if advisory_payload is not None:
+            write_json(workspace / "SPARK_ADVISORY_PAYLOAD.json", advisory_payload)
         ok = ok or bool(result)
     return ok

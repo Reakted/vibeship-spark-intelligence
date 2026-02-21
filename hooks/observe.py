@@ -28,8 +28,9 @@ import json
 import time
 import os
 import hashlib
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -70,6 +71,7 @@ ADVICE_FEEDBACK_PROMPT = os.environ.get("SPARK_ADVICE_FEEDBACK_PROMPT", "1") == 
 ADVICE_FEEDBACK_MIN_S = int(os.environ.get("SPARK_ADVICE_FEEDBACK_MIN_S", "600"))
 PRETOOL_BUDGET_MS = float(os.environ.get("SPARK_OBSERVE_PRETOOL_BUDGET_MS", "2500"))
 EIDOS_ENFORCE_BLOCK = os.environ.get("SPARK_EIDOS_ENFORCE_BLOCK", "0") == "1"
+HOOK_PAYLOAD_TEXT_LIMIT = int(os.environ.get("SPARK_HOOK_PAYLOAD_TEXT_LIMIT", "3000"))
 
 # ===== Session Failure Tracking =====
 # Track which tools failed in this session so we can detect recovery patterns.
@@ -275,6 +277,106 @@ def make_prediction(tool_name: str, tool_input: dict) -> dict:
 from lib.cognitive_signals import detect_domain, DOMAIN_TRIGGERS, extract_cognitive_signals  # noqa: F401
 
 
+def _estimate_advisory_readiness(text: str, source: str, tool_name: str = "") -> float:
+    """Estimate how usable a raw event surface is for downstream advisory transformation.
+
+    This is a lightweight signal for intake prioritization and later ranking.
+    """
+    t = (text or "").strip()
+    if not t:
+        return 0.0
+
+    lower = t.lower()
+    readiness = 0.05
+
+    # Intent-rich phrasing is usually distillable.
+    if 40 <= len(t) <= 6000:
+        readiness += 0.30
+    elif len(t) >= 20:
+        readiness += 0.15
+
+    action_verbs = (
+        "use", "avoid", "prefer", "ensure", "check", "verify", "run", "add",
+        "remove", "set", "enable", "disable", "configure", "fix", "update",
+    )
+    if any(v in lower for v in action_verbs):
+        readiness += 0.2
+
+    if re.search(r"\b(if|when|before|after|while|unless)\b", lower):
+        readiness += 0.2
+
+    if any(t in lower for t in ("because", "since", "due to", "so that", "resulted")):
+        readiness += 0.15
+
+    # Tool context helps map the memory; this makes it more likely to be reused.
+    if tool_name:
+        readiness += 0.15
+
+    if source and source not in {"spark", "claude_code", "unknown", ""}:
+        readiness += 0.05
+
+    return max(0.0, min(1.0, round(readiness, 3)))
+
+
+def _build_advisory_payload_hint(text: str, source: str, tool_name: str = "") -> Dict[str, Any]:
+    """Build advisory metadata block attached to each captured event."""
+    if not text:
+        return {}
+
+    hint_domain = "general"
+    try:
+        hint_domain = detect_domain(text) or "general"
+    except Exception:
+        hint_domain = "general"
+    return {
+        "readiness_hint": _estimate_advisory_readiness(text, source=source, tool_name=tool_name),
+        "domain_hint": hint_domain,
+        "content_len": len(text),
+        "signal_domain": source,
+    }
+
+
+def _normalize_hook_payload_text(raw_text: str) -> Dict[str, Any]:
+    """Normalize oversized hook payload text and preserve a stable fingerprint."""
+    text = (raw_text or "").strip()
+    text_len = len(text)
+    if text_len <= HOOK_PAYLOAD_TEXT_LIMIT:
+        return {
+            "text": text,
+            "content_len": text_len,
+            "text_truncated": False,
+            "text_hash": None,
+        }
+    digest = hashlib.sha1(text.encode("utf-8", errors="replace")).hexdigest()
+    return {
+        "text": text[:HOOK_PAYLOAD_TEXT_LIMIT],
+        "content_len": text_len,
+        "text_truncated": True,
+        "text_hash": digest,
+    }
+
+
+def _sanitize_tool_input_for_capture(tool_input: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(tool_input, dict):
+        return None
+
+    sanitized: Dict[str, Any] = {}
+    for key, value in tool_input.items():
+        if isinstance(value, str):
+            txt_meta = _normalize_hook_payload_text(value)
+            if txt_meta["text_truncated"]:
+                sanitized[key] = txt_meta["text"]
+                sanitized[f"{key}_truncated"] = True
+                sanitized[f"{key}_len"] = txt_meta["content_len"]
+                sanitized[f"{key}_hash"] = txt_meta["text_hash"]
+                continue
+            sanitized[key] = value
+            continue
+        sanitized[key] = value
+
+    return sanitized
+
+
 def _make_trace_id(*parts: str) -> str:
     raw = "|".join(str(p or "") for p in parts).encode("utf-8")
     return hashlib.sha1(raw).hexdigest()[:16]
@@ -294,6 +396,24 @@ def _resolve_post_trace_id(session_id: str, tool_name: str, trace_id: Optional[s
         return resolved or trace_id
     except Exception:
         return trace_id
+
+
+def _normalize_source(raw_source: Any) -> str:
+    """Normalize source metadata for reliable downstream schema grouping."""
+    source = str(raw_source or "").strip().lower()
+    if not source:
+        return "claude_code"
+    if source in {"unknown", "n/a", "none"}:
+        return "claude_code"
+    source = re.sub(r"[^a-z0-9._-]+", "-", source)
+    source = source.strip("-._")
+    if not source:
+        return "claude_code"
+    if source in {"spark", "spark-hook", "spark-hook-json"}:
+        return "spark"
+    if source in {"claudecode", "claude-code"}:
+        return "claude_code"
+    return source[:80]
 
 
 # ===== Event Type Mapping =====
@@ -430,6 +550,7 @@ def main():
         sys.exit(0)
     
     session_id = input_data.get("session_id", "unknown")
+    source_hint = _normalize_source(input_data.get("source") or input_data.get("app"))
     hook_event = input_data.get("hook_event_name", "unknown")
     tool_name = input_data.get("tool_name")
     tool_input = input_data.get("tool_input", {})
@@ -720,10 +841,26 @@ def main():
             txt = txt.get("text") or ""
         txt = str(txt).strip()
         if txt:
+            txt_meta = _normalize_hook_payload_text(txt)
             trace_id = _make_trace_id(session_id, "user_prompt", txt, time.time())
-            data["payload"] = {"role": "user", "text": txt}
-            data["source"] = "claude_code"
+            data["payload"] = {
+                "role": "user",
+                "text": txt_meta["text"],
+                "text_len": txt_meta["content_len"],
+            }
+            if txt_meta["text_truncated"]:
+                data["payload"]["text_hash"] = txt_meta["text_hash"]
+                data["payload"]["text_truncated"] = True
+            data["source"] = source_hint or "claude_code"
             data["kind"] = "message"
+            data["advisory"] = _build_advisory_payload_hint(
+                txt_meta["text"],
+                source=data.get("source") or "claude_code",
+            )
+            data["advisory"]["content_len"] = txt_meta["content_len"]
+            if txt_meta["text_truncated"]:
+                data["advisory"]["content_hash"] = txt_meta["text_hash"]
+                data["advisory"]["truncated"] = True
 
             # Advisory Engine: capture user intent for contextual retrieval
             try:
@@ -749,13 +886,38 @@ def main():
         data["trace_id"] = trace_id
 
     # Ensure source attribution on ALL events (not just UserPromptSubmit)
+    tool_input_payload = _sanitize_tool_input_for_capture(tool_input)
+
     if "source" not in data:
-        data["source"] = "claude_code"
+        data["source"] = source_hint
+
+    if "advisory" not in data and tool_name:
+        tool_payload = None
+        if isinstance(tool_input_payload, dict):
+            for key in ("command", "path", "file_path", "pattern", "query", "text", "content"):
+                value = tool_input.get(key) if isinstance(tool_input, dict) else None
+                if isinstance(value, str) and value.strip():
+                    tool_payload = value.strip()
+                    break
+        if tool_payload:
+            tool_payload_meta = _normalize_hook_payload_text(tool_payload)
+            data["advisory"] = _build_advisory_payload_hint(
+                tool_payload,
+                source=data.get("source") or "claude_code",
+                tool_name=tool_name,
+            )
+            data["advisory"]["content_len"] = tool_payload_meta["content_len"]
+            if tool_payload_meta["text_truncated"]:
+                data["advisory"]["content_hash"] = tool_payload_meta["text_hash"]
+                data["advisory"]["truncated"] = True
 
     kwargs = {}
     if tool_name:
         kwargs["tool_name"] = tool_name
-        kwargs["tool_input"] = tool_input
+        if tool_input_payload is not None:
+            kwargs["tool_input"] = tool_input_payload
+        else:
+            kwargs["tool_input"] = tool_input
     if trace_id:
         kwargs["trace_id"] = trace_id
     
