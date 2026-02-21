@@ -1169,6 +1169,65 @@ def lookup_exact(
     return packet
 
 
+def resolve_advisory_packet_for_context(
+    *,
+    project_key: str,
+    session_context_key: str,
+    tool_name: str = "",
+    intent_family: str = "",
+    task_plane: str = "",
+    context_text: str = "",
+    now_ts: Optional[float] = None,
+    do_alias_relaxed_to_exact: bool = True,
+) -> Tuple[Optional[Dict[str, Any]], str]:
+    """
+    Resolve an advisory packet with exact-first fallback semantics.
+
+    Returns:
+        (packet, route): packet may be None; route is one of
+        "packet_exact", "packet_relaxed", or "packet_miss".
+    """
+    packet = lookup_exact(
+        project_key=project_key,
+        session_context_key=session_context_key,
+        tool_name=tool_name,
+        intent_family=intent_family,
+        now_ts=now_ts,
+    )
+    if packet:
+        return packet, "packet_exact"
+
+    packet = lookup_relaxed(
+        project_key=project_key,
+        tool_name=tool_name,
+        intent_family=intent_family,
+        task_plane=task_plane,
+        now_ts=now_ts,
+        context_text=context_text,
+    )
+    if not packet:
+        return None, "packet_miss"
+
+    if do_alias_relaxed_to_exact:
+        try:
+            if (
+                str(packet.get("project_key") or "").strip() == str(project_key or "").strip()
+                and str(packet.get("tool_name") or "").strip() == str(tool_name or "").strip()
+                and str(packet.get("intent_family") or "").strip() == str(intent_family or "").strip()
+            ):
+                alias_exact_key(
+                    project_key=project_key,
+                    session_context_key=session_context_key,
+                    tool_name=tool_name,
+                    intent_family=intent_family,
+                    packet_id=str(packet.get("packet_id") or ""),
+                )
+        except Exception:
+            pass
+
+    return packet, "packet_relaxed"
+
+
 def lookup_relaxed(
     *,
     project_key: str,

@@ -77,7 +77,7 @@ SESSION_KEY_INCLUDE_RECENT_TOOLS = (
 
 DELIVERY_STALE_SECONDS = float(os.getenv("SPARK_ADVISORY_STALE_S", "900"))
 ADVISORY_TEXT_REPEAT_COOLDOWN_S = float(
-    os.getenv("SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S", "1800")
+    os.getenv("SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S", "600")
 )
 
 # Cross-session spam guard: suppress repeated low-authority emissions (WHISPER/NOTE)
@@ -93,11 +93,11 @@ try:
     LOW_AUTH_GLOBAL_COOLDOWN_S = float(
         os.getenv(
             "SPARK_ADVISORY_LOW_AUTH_GLOBAL_COOLDOWN_S",
-            os.getenv("SPARK_ADVISORY_WHISPER_GLOBAL_COOLDOWN_S", "3600"),
+            os.getenv("SPARK_ADVISORY_WHISPER_GLOBAL_COOLDOWN_S", "600"),
         )
     )
 except Exception:
-    LOW_AUTH_GLOBAL_COOLDOWN_S = 3600.0
+    LOW_AUTH_GLOBAL_COOLDOWN_S = 600.0
 LOW_AUTH_DEDUPE_LOG = Path.home() / ".spark" / "advisory_low_auth_dedupe.jsonl"
 LOW_AUTH_DEDUPE_LOG_MAX = 2000
 
@@ -607,6 +607,8 @@ def _packet_to_advice(packet: Dict[str, Any]) -> List[Any]:
         "convo",
         "eidos",
         "engagement",
+        "replay",
+        "opportunity",
     }
     for row in advice_rows[:8]:
         if not isinstance(row, dict):
@@ -618,6 +620,19 @@ def _packet_to_advice(packet: Dict[str, Any]) -> List[Any]:
         canonical_source = source.strip().lower()
         if canonical_source.startswith("semantic") or canonical_source == "trigger":
             canonical_source = "cognitive"
+
+        quality_raw = row.get("advisory_quality")
+        if not isinstance(quality_raw, dict):
+            quality_raw = {}
+        readiness_raw = row.get("advisory_readiness")
+        try:
+            readiness_value = float(readiness_raw)
+        except Exception:
+            readiness_value = 0.0
+
+        category_raw = row.get("category") or quality_raw.get("domain") or row.get("domain")
+        category = str(category_raw or canonical_source or "general")
+        category = category.replace(":", "_").strip().lower()[:64]
 
         insight_key_raw = row.get("insight_key")
         insight_key = str(insight_key_raw or "").strip()
@@ -636,6 +651,9 @@ def _packet_to_advice(packet: Dict[str, Any]) -> List[Any]:
                 source=source,
                 context_match=float(row.get("context_match") or 0.8),
                 reason=str(row.get("reason") or ""),
+                category=category,
+                advisory_quality=quality_raw,
+                advisory_readiness=readiness_value,
             )
         )
     if out:
@@ -1271,8 +1289,7 @@ def on_pre_tool(
         )
         from .advisory_packet_store import (
             build_packet,
-            lookup_exact,
-            lookup_relaxed,
+            resolve_advisory_packet_for_context,
             record_packet_usage,
             save_packet,
         )
@@ -1304,43 +1321,16 @@ def on_pre_tool(
         task_plane = state.task_plane or "build_delivery"
 
         t_lookup = time.time() * 1000.0
-        packet = lookup_exact(
+        packet, packet_route = resolve_advisory_packet_for_context(
             project_key=project_key,
             session_context_key=session_context_key,
             tool_name=tool_name,
             intent_family=intent_family,
+            task_plane=task_plane,
+            context_text=str(getattr(state, "user_intent", "") or ""),
         )
-        if packet:
-            route = "packet_exact"
-        else:
-            packet = lookup_relaxed(
-                project_key=project_key,
-                tool_name=tool_name,
-                intent_family=intent_family,
-                task_plane=task_plane,
-            )
-            if packet:
-                route = "packet_relaxed"
-                # Self-evolution speed: if relaxed lookup found a packet that already matches this
-                # tool+intent, alias it into the exact index for this session_context_key so future
-                # lookups are O(1).
-                try:
-                    if (
-                        str(packet.get("project_key") or "") == project_key
-                        and str(packet.get("tool_name") or "") == tool_name
-                        and str(packet.get("intent_family") or "") == intent_family
-                    ):
-                        from .advisory_packet_store import alias_exact_key
-
-                        alias_exact_key(
-                            project_key=project_key,
-                            session_context_key=session_context_key,
-                            tool_name=tool_name,
-                            intent_family=intent_family,
-                            packet_id=str(packet.get("packet_id") or ""),
-                        )
-                except Exception:
-                    pass
+        if packet_route in {"packet_exact", "packet_relaxed"}:
+            route = packet_route
 
         _mark("packet_lookup", t_lookup)
 
@@ -1635,11 +1625,13 @@ def on_pre_tool(
             emitted_advice.append(item)
         emitted_advice_source_counts = _advice_source_counts(emitted_advice)
 
-        # Cross-session dedupe for any emitted advice_id. This reduces repeated spam
-        # when session_id churns defeats per-session cooldowns. (Bench sessions bypass.)
+        # Cross-session dedupe: single text_sig mechanism.
+        # Previously 3 overlapping layers (by advice_id, by text_sig, by low-auth ID).
+        # Consolidated to text_sig only — catches exact repeats AND rephrasings.
         try:
             if (
                 GLOBAL_DEDUPE_ENABLED
+                and GLOBAL_DEDUPE_TEXT_ENABLED
                 and gate_result.emitted
                 and not str(session_id or "").startswith("advisory-bench-")
             ):
@@ -1652,46 +1644,28 @@ def on_pre_tool(
                     aid = str(getattr(decision, "advice_id", "") or "").strip()
                     if not aid:
                         continue
-                    hit = _global_recently_emitted(
-                        tool_name=tool_name,
-                        advice_id=aid,
-                        now_ts=now_ts,
-                        cooldown_s=cooldown,
-                        scope_key=dedupe_scope,
-                    )
-                    if hit:
-                        suppressed.append(
-                            {
-                                "advice_id": aid,
-                                "reason": "advice_id",
-                                "repeat_age_s": round(float(hit.get("age_s") or 0.0), 2),
-                                "repeat_cooldown_s": round(float(hit.get("cooldown_s") or cooldown), 2),
-                            }
+                    try:
+                        item = advice_by_id.get(aid)
+                        sig = _text_fingerprint(str(getattr(item, "text", "") or "")) if item else ""
+                    except Exception:
+                        sig = ""
+                    if sig:
+                        hit_sig = _global_recently_emitted_text_sig(
+                            text_sig=sig,
+                            now_ts=now_ts,
+                            cooldown_s=cooldown,
+                            scope_key=dedupe_scope,
                         )
-                        continue
-                    if GLOBAL_DEDUPE_TEXT_ENABLED:
-                        try:
-                            item = advice_by_id.get(aid)
-                            sig = _text_fingerprint(str(getattr(item, "text", "") or "")) if item else ""
-                        except Exception:
-                            sig = ""
-                        if sig:
-                            hit_sig = _global_recently_emitted_text_sig(
-                                text_sig=sig,
-                                now_ts=now_ts,
-                                cooldown_s=cooldown,
-                                scope_key=dedupe_scope,
+                        if hit_sig:
+                            suppressed.append(
+                                {
+                                    "advice_id": aid,
+                                    "reason": "text_sig",
+                                    "repeat_age_s": round(float(hit_sig.get("age_s") or 0.0), 2),
+                                    "repeat_cooldown_s": round(float(hit_sig.get("cooldown_s") or cooldown), 2),
+                                }
                             )
-                            if hit_sig:
-                                suppressed.append(
-                                    {
-                                        "advice_id": aid,
-                                        "reason": "text_sig",
-                                        "repeat_age_s": round(float(hit_sig.get("age_s") or 0.0), 2),
-                                        "repeat_cooldown_s": round(float(hit_sig.get("cooldown_s") or cooldown), 2),
-                                    }
-                                )
-                                continue
+                            continue
                     kept.append(decision)
 
                 if suppressed:
@@ -1747,72 +1721,6 @@ def on_pre_tool(
                         item._authority = decision.authority
                         emitted_advice.append(item)
                     emitted_advice_source_counts = _advice_source_counts(emitted_advice)
-        except Exception:
-            pass
-
-        # Cross-session low-authority spam guard: if session_id churns, "already shown this session"
-        # doesn't help. Suppress repeated WHISPER/NOTE emissions globally (bench sessions bypass).
-        try:
-            top_decision = gate_result.emitted[0] if gate_result.emitted else None
-            top_authority = str(getattr(top_decision, "authority", "") or "")
-            top_advice_id = str(getattr(top_decision, "advice_id", "") or "")
-            if (
-                LOW_AUTH_GLOBAL_DEDUPE_ENABLED
-                and top_authority in {"whisper", "note"}
-                and top_advice_id
-                and not str(session_id or "").startswith("advisory-bench-")
-            ):
-                now_ts = time.time()
-                cooldown = float(LOW_AUTH_GLOBAL_COOLDOWN_S)
-                hit = _low_auth_recently_emitted(
-                    tool_name=tool_name,
-                    advice_id=top_advice_id,
-                    authority=top_authority,
-                    now_ts=now_ts,
-                    cooldown_s=cooldown,
-                )
-                if hit:
-                    _record_advisory_gate_drop(
-                        stage="low_auth_global_suppressed",
-                        reason="AE_LOW_AUTH_GLOBAL_SUPPRESSED",
-                        tool_name=tool_name,
-                        intent_family=intent_family,
-                        task_plane=task_plane,
-                        route=route,
-                        packet_id=packet_id,
-                        advice_items=advice_items,
-                        extras={
-                            "top_advice_id": top_advice_id,
-                            "top_authority": top_authority,
-                            "repeat_age_s": round(float(hit.get("age_s") or 0.0), 2),
-                            "repeat_cooldown_s": round(float(hit.get("cooldown_s") or cooldown), 2),
-                        },
-                    )
-                    save_state(state)
-                    _log_engine_event(
-                        "low_auth_global_suppressed",
-                        tool_name,
-                        len(advice_items),
-                        0,
-                        start_ms,
-                        extra={
-                            **_diag(route),
-                            "route": route,
-                            "intent_family": intent_family,
-                            "task_plane": task_plane,
-                            "packet_id": packet_id,
-                            "stage_ms": stage_ms,
-                            "delivery_mode": "none",
-                            "advice_source_counts": advice_source_counts,
-                            "error_kind": "policy",
-                            "error_code": "AE_LOW_AUTH_GLOBAL_SUPPRESSED",
-                            "advice_id": top_advice_id,
-                            "authority": top_authority,
-                            "repeat_age_s": round(float(hit.get("age_s") or 0.0), 2),
-                            "repeat_cooldown_s": round(float(hit.get("cooldown_s") or cooldown), 2),
-                        },
-                    )
-                    return None
         except Exception:
             pass
 
@@ -1983,6 +1891,12 @@ def on_pre_tool(
                     trace_id=resolved_trace_id,
                     route=route,
                     delivered=True,
+                    categories=[getattr(adv, "category", None) for adv in list(emitted_advice or [])[:4]],
+                    advisory_readiness=[getattr(adv, "advisory_readiness", 0.0) for adv in list(emitted_advice or [])[:4]],
+                    advisory_quality=[
+                        q if isinstance(q, dict) else {}
+                        for q in [getattr(adv, "advisory_quality", None) for adv in list(emitted_advice or [])[:4]]
+                    ],
                 )
             except Exception:
                 pass
@@ -2425,7 +2339,7 @@ def _record_implicit_feedback(
         if not recent or not recent.get("advice_ids"):
             return
 
-        shown_ids = set(state.shown_advice_ids or [])
+        shown_ids = set(state.shown_advice_ids.keys()) if isinstance(state.shown_advice_ids, dict) else set(state.shown_advice_ids or [])
         matching_ids = [aid for aid in recent.get("advice_ids", []) if aid in shown_ids]
         if not matching_ids:
             return
