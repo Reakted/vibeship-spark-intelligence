@@ -90,6 +90,12 @@ dashboard_err.txt
 reports/tune_replay_*.md
 reports/preflight_check_attest.md
 
+# Internal research notes (not for public repo)
+docs/MINIMAX_KIMI_APPLICATION_IDEAS.md
+docs/MINIMAX_KIMI_48_PROJECTS.md
+docs/CARMACK_WEEK_OF_PAPERS.md
+docs/SPARK_CARMACK_OPTIMIZATION_IMPLEMENTATION.md
+
 # Launch hygiene / local artifacts
 .openclaw_last_health.txt
 openclaw_test.txt
