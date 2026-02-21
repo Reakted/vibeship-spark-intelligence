@@ -320,8 +320,48 @@ DEFAULT_HIGH_RISK_HINTS = (
     "session",
     "memory retrieval",
 )
-X_SOCIAL_MARKERS: Tuple[str, ...] = ()
+X_SOCIAL_MARKERS: Tuple[str, ...] = (
+    "tweet",
+    "retweet",
+    "reply",
+    "replies",
+    "thread",
+    "threaded",
+    "hashtag",
+    "x_post",
+    "x post",
+    "xpost",
+    "x-post",
+    "x.com",
+    "twitter",
+    "social network",
+    "social networks",
+    "social feed",
+    "social media",
+    "engagement",
+    "follower",
+    "followers",
+    "timeline",
+)
 RETRIEVAL_DOMAIN_MARKERS: Dict[str, Tuple[str, ...]] = {
+    "x_social": (
+        "tweet",
+        "x_post",
+        "x post",
+        "xpost",
+        "x-post",
+        "retweet",
+        "reply",
+        "replies",
+        "hashtag",
+        "social",
+        "engagement",
+        "follower",
+        "followers",
+        "tweeting",
+        "social media",
+        "thread",
+    ),
     "memory": (
         "memory",
         "retrieval",
@@ -422,6 +462,9 @@ RETRIEVAL_DOMAIN_MARKERS: Dict[str, Tuple[str, ...]] = {
     ),
 }
 RETRIEVAL_TOOL_DOMAIN_HINTS: Dict[str, str] = {
+    "x_post": "x_social",
+    "tweet": "x_social",
+    "reply": "x_social",
     "edit": "coding",
     "bash": "coding",
     "read": "coding",
@@ -548,6 +591,9 @@ def _norm_retrieval_domain(value: Any) -> str:
     aliases = {
         "ui": "ui_design",
         "ux": "ui_design",
+        "social": "x_social",
+        "xsocial": "x_social",
+        "x_social": "x_social",
     }
     return aliases.get(text, text)
 
@@ -2964,6 +3010,7 @@ class SparkAdvisor:
         filtered_low_match = 0
         filtered_domain_mismatch = 0
         for r in ranked_rows[:semantic_limit]:
+            is_social_query = self._is_x_social_query(context)
             if hasattr(self.cognitive, "is_noise_insight") and self.cognitive.is_noise_insight(r.insight_text):
                 continue
             insight_key = str(getattr(r, "insight_key", "") or "")
@@ -2975,7 +3022,7 @@ class SparkAdvisor:
             if support_count > 1:
                 confidence = min(0.98, confidence + min(0.12, 0.04 * float(support_count - 1)))
             source = "trigger" if str(getattr(r, "source_type", "") or "") == "trigger" else semantic_source
-            if self._is_x_social_insight(str(getattr(r, "insight_text", "") or "")):
+            if (not is_social_query) and self._is_x_social_insight(str(getattr(r, "insight_text", "") or "")):
                 filtered_domain_mismatch += 1
                 continue
             semantic_sim = float(getattr(r, "semantic_sim", 0.0) or 0.0)
@@ -3104,10 +3151,24 @@ class SparkAdvisor:
         return [f"{t} failure pattern and fix" for t in facets]
 
     def _is_x_social_query(self, text: str) -> bool:
-        return False
+        body = str(text or "").strip().lower()
+        if not body:
+            return False
+        normalized = re.sub(r"[\\s_]+", " ", body)
+        return any(marker in normalized for marker in X_SOCIAL_MARKERS)
 
     def _is_x_social_insight(self, text: str) -> bool:
-        return False
+        body = str(text or "").strip().lower()
+        if not body:
+            return False
+        normalized = re.sub(r"[\\s_]+", " ", body)
+        return any(marker in normalized for marker in X_SOCIAL_MARKERS) or any(
+            token in body
+            for token in (
+                "multiplier granted",
+                "tweet reply",
+            )
+        )
 
     def _intent_terms(self, text: str) -> set:
         tokens = {t for t in re.findall(r"[a-z0-9_]+", str(text or "").lower()) if len(t) >= 3}
@@ -3142,6 +3203,7 @@ class SparkAdvisor:
             return list(advice_list)
         if allowed == {"general"}:
             return list(advice_list)
+        is_social_context = self._is_x_social_query(context)
 
         out: List[Advice] = []
         for advice in advice_list:
@@ -3155,6 +3217,8 @@ class SparkAdvisor:
                 continue
             if adv_domain in allowed:
                 out.append(advice)
+                continue
+            if (not is_social_context) and self._is_x_social_insight(advice.text or ""):
                 continue
             text = (advice.text or "").lower()
             if any(x in text for x in ("troubleshoot", "failure", "regression", "safety", "rollback")):
