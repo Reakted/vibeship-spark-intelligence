@@ -35,9 +35,54 @@ body {
   -webkit-font-smoothing: antialiased;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 a { color: var(--green); text-decoration: none; }
+
+/* ---- SPARK BACKGROUND ---- */
+
+#spark-bg {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+#spark-img {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 30%;
+  opacity: 0;
+  filter: saturate(0.65) brightness(0.45);
+  transition: opacity 1.5s ease, filter 2s ease;
+}
+
+#spark-canvas {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* mouse glow */
+#reveal-glow {
+  position: fixed;
+  width: 500px;
+  height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,196,154,0.04) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 1;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
 
 /* ---- NAV ---- */
 
@@ -47,6 +92,8 @@ nav {
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
+  position: relative;
+  z-index: 10;
 }
 
 .nav-brand {
@@ -56,10 +103,7 @@ nav {
   text-decoration: none;
 }
 
-.nav-logo-img {
-  height: 24px;
-  width: auto;
-}
+.nav-logo-img { height: 24px; width: auto; }
 
 .nav-logo-text {
   font-family: 'Instrument Serif', serif;
@@ -96,6 +140,8 @@ main {
   text-align: center;
   padding: 0 24px;
   gap: 0;
+  position: relative;
+  z-index: 10;
 }
 
 .label {
@@ -123,7 +169,7 @@ h1 span { color: var(--green); }
   font-family: 'Inter', sans-serif;
   font-size: clamp(16px, 2vw, 20px);
   font-weight: 400;
-  color: var(--text-secondary);
+  color: #c8ccd6;
   margin-bottom: 12px;
 }
 
@@ -148,6 +194,8 @@ h1 span { color: var(--green); }
   cursor: pointer;
   transition: border-color 150ms, box-shadow 150ms;
   user-select: all;
+  position: relative;
+  z-index: 10;
 }
 
 .clone-box:hover {
@@ -160,24 +208,20 @@ h1 span { color: var(--green); }
   font-size: 11px;
   border-left: 1px solid var(--border);
   padding-left: 12px;
+  transition: color 200ms;
 }
+
+.clone-box.copied .clone-hint { color: var(--green); }
 
 /* ---- FOOTER ---- */
 
 footer {
   padding: 20px 40px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   flex-shrink: 0;
-  color: var(--text-muted);
-  font-size: 12px;
+  position: relative;
+  z-index: 10;
+  height: 52px;
 }
-
-footer a { color: var(--text-muted); transition: color 150ms; }
-footer a:hover { color: var(--text-secondary); }
-
-.footer-links { display: flex; gap: 20px; list-style: none; }
 
 /* ---- ANIMATION ---- */
 
@@ -201,11 +245,16 @@ h1 { animation-delay: 0.08s; }
   nav, footer { padding: 16px 20px; }
   .clone-box { font-size: 11px; padding: 12px 16px; }
   .clone-hint { display: none; }
-  .footer-links { gap: 14px; }
 }
 </style>
 </head>
 <body>
+
+<div id="spark-bg">
+  <img id="spark-img" src="spark.png" alt="">
+</div>
+<canvas id="spark-canvas"></canvas>
+<div id="reveal-glow"></div>
 
 <nav>
   <a href="/" class="nav-brand">
@@ -214,30 +263,147 @@ h1 { animation-delay: 0.08s; }
   </a>
   <ul class="nav-links">
     <li><a href="https://github.com/vibeship/spark-intelligence" target="_blank">GitHub</a></li>
-    <li><a href="https://github.com/vibeship/spark-intelligence/blob/main/docs/QUICKSTART.md" target="_blank">Docs</a></li>
+    <li><a href="docs.html">Docs</a></li>
+    <li><a href="https://x.com/Spark_coded" target="_blank">@Spark_coded</a></li>
   </ul>
 </nav>
 
 <main>
   <div class="label">open source</div>
   <h1><span>Spark</span></h1>
-  <div class="sub">Local self-evolving intelligence</div>
+  <div class="sub">a local self-evolving intelligence.</div>
   <p class="desc">
-    Learns from every coding session. Filters noise ruthlessly.
-    Tunes itself. Runs 100% on your machine. No cloud. No API keys.
+    Learns from every session. Resonates and evolves with you.
+    Runs 100% on your machine as a local companion.
+    Brings a spark to everything that you do.
   </p>
-  <div class="clone-box" onclick="navigator.clipboard.writeText('git clone https://github.com/vibeship/spark-intelligence')">
+  <div class="clone-box" id="clone-box">
     git clone https://github.com/vibeship/spark-intelligence
     <span class="clone-hint">click to copy</span>
   </div>
 </main>
 
-<footer>
-  <span>vibeship</span>
-  <ul class="footer-links">
-    <li><a href="https://x.com/Spark_coded" target="_blank">@Spark_coded</a></li>
-  </ul>
-</footer>
+<footer></footer>
+
+<script>
+const sparkImg = document.getElementById('spark-img');
+const revealGlow = document.getElementById('reveal-glow');
+const cloneBox = document.getElementById('clone-box');
+const hint = cloneBox.querySelector('.clone-hint');
+const canvas = document.getElementById('spark-canvas');
+const ctx = canvas.getContext('2d');
+
+let opacity = 0;
+let targetOpacity = 0;
+let moveCount = 0;
+let copied = false;
+let sparks = [];
+
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// --- Spark particle ---
+class Spark {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1 + Math.random() * 3;
+    this.vx = Math.cos(angle) * speed;
+    this.vy = Math.sin(angle) * speed - 1;
+    this.life = 0;
+    this.maxLife = 30 + Math.random() * 40;
+    this.size = 1 + Math.random() * 2;
+    this.green = Math.random() > 0.3;
+  }
+
+  update() {
+    this.life++;
+    this.x += this.vx;
+    this.y += this.vy;
+    this.vx *= 0.97;
+    this.vy *= 0.97;
+    this.vy += 0.02;
+    const a = 1 - this.life / this.maxLife;
+    if (a <= 0) return false;
+    const r = this.size * a;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
+    if (this.green) {
+      ctx.fillStyle = `rgba(0, 196, 154, ${a * 0.8})`;
+    } else {
+      ctx.fillStyle = `rgba(217, 119, 87, ${a * 0.7})`;
+    }
+    ctx.fill();
+    return true;
+  }
+}
+
+function emitSparks(count) {
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  for (let i = 0; i < count; i++) {
+    const x = cx + (Math.random() - 0.5) * canvas.width * 0.6;
+    const y = cy + (Math.random() - 0.5) * canvas.height * 0.5;
+    sparks.push(new Spark(x, y));
+  }
+}
+
+// Mouse move — Spark fades in
+document.addEventListener('mousemove', (e) => {
+  revealGlow.style.left = e.clientX + 'px';
+  revealGlow.style.top = e.clientY + 'px';
+  revealGlow.style.opacity = '1';
+
+  moveCount++;
+  if (!copied) {
+    targetOpacity = Math.min(0.35, moveCount * 0.0023);
+  }
+});
+
+document.addEventListener('mouseleave', () => {
+  revealGlow.style.opacity = '0';
+  if (!copied) {
+    targetOpacity = Math.max(0.08, targetOpacity - 0.03);
+  }
+});
+
+// Click to copy — full reveal + sparks
+cloneBox.addEventListener('click', () => {
+  navigator.clipboard.writeText('git clone https://github.com/vibeship/spark-intelligence');
+  hint.textContent = 'copied!';
+  cloneBox.classList.add('copied');
+  setTimeout(() => {
+    hint.textContent = 'click to copy';
+    cloneBox.classList.remove('copied');
+  }, 2000);
+
+  copied = true;
+  targetOpacity = 0.45;
+  sparkImg.style.filter = 'saturate(0.75) brightness(0.5)';
+
+  // burst of sparks
+  emitSparks(60);
+  setTimeout(() => emitSparks(40), 200);
+  setTimeout(() => emitSparks(25), 450);
+});
+
+// Animation loop
+function animate() {
+  opacity += (targetOpacity - opacity) * 0.03;
+  sparkImg.style.opacity = opacity;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  sparks = sparks.filter(s => s.update());
+
+  requestAnimationFrame(animate);
+}
+animate();
+</script>
 
 </body>
 </html>

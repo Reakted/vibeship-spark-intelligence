@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs - Spark Intelligence</title>
+<meta name="description" content="Spark documentation. Get started in 5 minutes with Claude Code, Cursor, OpenClaw, or any coding agent.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0e1016;
+  --bg-card: #1a1e28;
+  --bg-sidebar: #13161e;
+  --border: #2a3042;
+  --green: #00C49A;
+  --green-dim: rgba(0, 196, 154, 0.15);
+  --orange: #D97757;
+  --text: #e2e4e9;
+  --text-secondary: #9aa3b5;
+  --text-muted: #6b7489;
+  --sidebar-w: 240px;
+}
+
+html { height: 100%; }
+
+body {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--green); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---- NAV ---- */
+
+nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: 16px 40px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+}
+
+.nav-logo-img { height: 24px; width: auto; }
+
+.nav-logo-text {
+  font-family: 'Instrument Serif', serif;
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: var(--text);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.nav-links {
+  display: flex;
+  gap: 28px;
+  list-style: none;
+}
+
+.nav-links a {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 150ms;
+  text-decoration: none;
+}
+
+.nav-links a:hover { color: var(--text); text-decoration: none; }
+
+/* ---- LAYOUT ---- */
+
+.layout {
+  display: flex;
+  margin-top: 57px;
+  min-height: calc(100vh - 57px);
+}
+
+/* ---- SIDEBAR ---- */
+
+.sidebar {
+  position: fixed;
+  top: 57px;
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-w);
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  padding: 24px 0;
+  overflow-y: auto;
+}
+
+.sidebar-section {
+  padding: 0 20px;
+  margin-bottom: 24px;
+}
+
+.sidebar-section-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.sidebar-link {
+  display: block;
+  padding: 6px 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 400;
+  transition: color 150ms;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.sidebar-link:hover { color: var(--text); text-decoration: none; }
+.sidebar-link.active { color: var(--green); }
+
+/* ---- CONTENT ---- */
+
+.content {
+  margin-left: var(--sidebar-w);
+  flex: 1;
+  padding: 48px 60px 80px;
+  max-width: 820px;
+}
+
+.content section {
+  margin-bottom: 64px;
+}
+
+h2 {
+  font-family: 'Instrument Serif', serif;
+  font-weight: 400;
+  font-size: 32px;
+  color: var(--text);
+  margin-bottom: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+h3 {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text);
+  margin: 28px 0 10px;
+}
+
+h4 {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin: 20px 0 8px;
+}
+
+p, li {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text-secondary);
+}
+
+p { margin-bottom: 14px; }
+
+ul, ol {
+  padding-left: 20px;
+  margin-bottom: 14px;
+}
+
+li { margin-bottom: 4px; }
+
+code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  background: var(--bg-card);
+  padding: 2px 6px;
+  color: var(--green);
+}
+
+pre {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 16px 20px;
+  margin-bottom: 18px;
+  overflow-x: auto;
+  line-height: 1.6;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.badge {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  margin-right: 6px;
+  margin-bottom: 6px;
+}
+
+.badge-green { border-color: var(--green); color: var(--green); }
+.badge-orange { border-color: var(--orange); color: var(--orange); }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 18px;
+  font-size: 13px;
+}
+
+th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+td {
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+td code { font-size: 11.5px; }
+
+.callout {
+  border-left: 3px solid var(--green);
+  padding: 12px 16px;
+  margin-bottom: 18px;
+  background: var(--green-dim);
+}
+
+.callout p { margin-bottom: 0; color: var(--text-secondary); }
+
+/* ---- MOBILE ---- */
+
+.menu-toggle {
+  display: none;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  nav { padding: 14px 20px; }
+  .menu-toggle { display: block; }
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 200ms;
+    z-index: 99;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .content { margin-left: 0; padding: 32px 20px 60px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="index.html" class="nav-brand">
+    <img src="logo.png" alt="vibeship" class="nav-logo-img">
+    <span class="nav-logo-text">vibeship</span>
+  </a>
+  <div style="display:flex;align-items:center;gap:20px;">
+    <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">Menu</button>
+    <ul class="nav-links">
+      <li><a href="https://github.com/vibeship/spark-intelligence" target="_blank">GitHub</a></li>
+      <li><a href="index.html">Home</a></li>
+    </ul>
+  </div>
+</nav>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Getting Started</div>
+      <a class="sidebar-link active" href="#quick-start">Quick Start</a>
+      <a class="sidebar-link" href="#installation">Installation</a>
+      <a class="sidebar-link" href="#verify">Verify Health</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Integrations</div>
+      <a class="sidebar-link" href="#claude-code">Claude Code</a>
+      <a class="sidebar-link" href="#cursor">Cursor / VS Code</a>
+      <a class="sidebar-link" href="#openclaw">OpenClaw</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Usage</div>
+      <a class="sidebar-link" href="#cli">CLI Commands</a>
+      <a class="sidebar-link" href="#dashboards">Dashboards</a>
+      <a class="sidebar-link" href="#learnings">Learnings</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Configuration</div>
+      <a class="sidebar-link" href="#tuneables">Tuneables</a>
+      <a class="sidebar-link" href="#hooks">Hooks</a>
+      <a class="sidebar-link" href="#autostart">Always-On</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">Reference</div>
+      <a class="sidebar-link" href="#directory">Directory Structure</a>
+      <a class="sidebar-link" href="#troubleshooting">Troubleshooting</a>
+    </div>
+  </aside>
+
+  <div class="content">
+
+    <!-- QUICK START -->
+    <section id="quick-start">
+      <h2>Quick Start</h2>
+      <p>Get Spark running in 5 minutes. Python 3.10+ and pip required.</p>
+
+      <div class="callout">
+        <p>Spark runs 100% on your machine. No cloud services, no API keys, no accounts needed.</p>
+      </div>
+
+      <h3>1. Clone and install</h3>
+<pre><code>git clone https://github.com/vibeship/spark-intelligence
+cd spark-intelligence
+pip install -e .[services]</code></pre>
+
+      <h3>2. Start services</h3>
+      <h4>Windows</h4>
+<pre><code>start_spark.bat</code></pre>
+
+      <h4>Mac / Linux</h4>
+<pre><code>python3 -m spark.cli up</code></pre>
+
+      <p>Use <code>--lite</code> for core-only mode (no dashboards):</p>
+<pre><code>python3 -m spark.cli up --lite</code></pre>
+
+      <h3>3. Verify</h3>
+<pre><code>python3 -m spark.cli health</code></pre>
+
+      <h3>4. Connect your agent</h3>
+      <p>Spark works with any coding agent. See the integration guides below for <a href="#claude-code">Claude Code</a>, <a href="#cursor">Cursor</a>, and <a href="#openclaw">OpenClaw</a>.</p>
+    </section>
+
+    <!-- INSTALLATION -->
+    <section id="installation">
+      <h2>Installation</h2>
+
+      <h3>Option A: Installer (recommended)</h3>
+      <p>Clone the <code>spark-openclaw-installer</code> repo and run the platform script:</p>
+      <ul>
+        <li>Windows: <code>install.ps1</code></li>
+        <li>Mac/Linux: <code>install.sh</code></li>
+      </ul>
+
+      <h3>Option B: Manual</h3>
+<pre><code># Core
+pip install -e .
+
+# With background services
+pip install -e .[services]
+
+# Optional: local embeddings
+pip install -e .[embeddings]</code></pre>
+
+      <h3>Optional: Mind integration</h3>
+      <p>For persistent semantic memory across projects:</p>
+<pre><code>pip install vibeship-mind
+python3 -m mind.lite_tier</code></pre>
+    </section>
+
+    <!-- VERIFY -->
+    <section id="verify">
+      <h2>Verify Health</h2>
+<pre><code>python3 -m spark.cli health
+python3 -m spark.cli status
+python3 -m spark.cli services</code></pre>
+
+      <p>HTTP endpoints:</p>
+      <table>
+        <tr><th>Service</th><th>URL</th></tr>
+        <tr><td>sparkd health</td><td><code>http://127.0.0.1:8787/health</code></td></tr>
+        <tr><td>sparkd status</td><td><code>http://127.0.0.1:8787/status</code></td></tr>
+        <tr><td>Spark Pulse</td><td><code>http://localhost:8765</code></td></tr>
+        <tr><td>Mind (optional)</td><td><code>http://127.0.0.1:8080/health</code></td></tr>
+      </table>
+    </section>
+
+    <!-- CLAUDE CODE -->
+    <section id="claude-code">
+      <h2>Claude Code</h2>
+      <span class="badge badge-green">hooks</span>
+      <span class="badge">PreToolUse</span>
+      <span class="badge">PostToolUse</span>
+      <span class="badge">UserPromptSubmit</span>
+
+      <h3>1. Start Spark</h3>
+<pre><code>spark up</code></pre>
+
+      <h3>2. Install hooks</h3>
+      <h4>Mac / Linux</h4>
+<pre><code>./scripts/install_claude_hooks.sh</code></pre>
+
+      <h4>Windows</h4>
+<pre><code>powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install_claude_hooks.ps1</code></pre>
+
+      <p>This writes <code>~/.claude/spark-hooks.json</code>.</p>
+
+      <h3>3. Merge into settings</h3>
+      <p>Copy the <code>hooks</code> object from <code>spark-hooks.json</code> into your <code>~/.claude/settings.json</code>. Spark does not auto-merge to avoid overwriting your custom hooks.</p>
+
+      <p>Alternatively, add hooks manually to <code>settings.json</code>:</p>
+<pre><code>{
+  "hooks": {
+    "PreToolUse": [{ "matcher": "", "hooks": [{
+      "type": "command",
+      "command": "python3 /path/to/spark/hooks/observe.py"
+    }]}],
+    "PostToolUse": [{ "matcher": "", "hooks": [{
+      "type": "command",
+      "command": "python3 /path/to/spark/hooks/observe.py"
+    }]}],
+    "UserPromptSubmit": [{ "matcher": "", "hooks": [{
+      "type": "command",
+      "command": "python3 /path/to/spark/hooks/observe.py"
+    }]}]
+  }
+}</code></pre>
+
+      <h3>4. Smoke test</h3>
+<pre><code>powershell -NoProfile -ExecutionPolicy Bypass -File scripts\claude_hook_smoke_test.ps1</code></pre>
+
+      <p>Spark maps hook names to event types: <code>PostToolUse</code> &rarr; <code>post_tool</code>, <code>UserPromptSubmit</code> &rarr; <code>user_prompt</code>.</p>
+    </section>
+
+    <!-- CURSOR -->
+    <section id="cursor">
+      <h2>Cursor / VS Code</h2>
+      <span class="badge badge-green">tasks.json</span>
+      <span class="badge">emit_event</span>
+
+      <p>Feed Spark events without coupling to any IDE.</p>
+
+      <h3>1. Start Spark</h3>
+<pre><code>spark up</code></pre>
+
+      <h3>2. Add a VS Code task</h3>
+      <p>Create <code>.vscode/tasks.json</code>:</p>
+<pre><code>{
+  "version": "2.0.0",
+  "inputs": [{
+    "id": "rememberText",
+    "type": "promptString",
+    "description": "What should Spark remember?"
+  }],
+  "tasks": [{
+    "label": "Spark: Remember",
+    "type": "shell",
+    "command": "python3 scripts/emit_event.py --source cursor --kind command --session ${workspaceFolderBasename} --intent remember --text \"${input:rememberText}\" | python3 adapters/stdin_ingest.py",
+    "problemMatcher": []
+  }]
+}</code></pre>
+
+      <h3>Optional: chat text capture</h3>
+<pre><code>python3 scripts/emit_event.py \
+  --source cursor --kind message \
+  --session "${workspaceFolderBasename}" \
+  --role user --text "..." \
+| python3 adapters/stdin_ingest.py</code></pre>
+    </section>
+
+    <!-- OPENCLAW -->
+    <section id="openclaw">
+      <h2>OpenClaw</h2>
+      <span class="badge badge-orange">tailer</span>
+      <span class="badge">session JSONL</span>
+
+      <h3>Data flow</h3>
+<pre><code>You type a message
+    &darr;
+OpenClaw processes it (tools, responses)
+    &darr;
+Session JSONL written to ~/.openclaw/agents/main/sessions/
+    &darr;
+openclaw_tailer reads events, sends to sparkd (:8787)
+    &darr;
+bridge_worker processes queue every ~30s
+    &darr;
+Outputs: SPARK_CONTEXT.md, SPARK_ADVISORY.md</code></pre>
+
+      <h3>Start services</h3>
+<pre><code># Core
+python sparkd.py
+python bridge_worker.py
+python adapters/openclaw_tailer.py --include-subagents
+
+# Dashboard
+python -m uvicorn app:app --host 127.0.0.1 --port 8765</code></pre>
+
+      <h3>Services reference</h3>
+      <table>
+        <tr><th>Service</th><th>Port</th><th>Notes</th></tr>
+        <tr><td>sparkd</td><td>8787</td><td>HTTP event ingestion</td></tr>
+        <tr><td>bridge_worker</td><td>&mdash;</td><td>Set <code>SPARK_EMBEDDINGS=0</code></td></tr>
+        <tr><td>openclaw_tailer</td><td>&mdash;</td><td>Tails session JSONL files</td></tr>
+        <tr><td>Spark Pulse</td><td>8765</td><td>Use <code>-m uvicorn</code></td></tr>
+      </table>
+    </section>
+
+    <!-- CLI -->
+    <section id="cli">
+      <h2>CLI Commands</h2>
+      <table>
+        <tr><th>Command</th><th>Description</th></tr>
+        <tr><td><code>status</code></td><td>Full system status</td></tr>
+        <tr><td><code>services</code></td><td>Daemon/service status</td></tr>
+        <tr><td><code>up</code></td><td>Start background services</td></tr>
+        <tr><td><code>up --lite</code></td><td>Core-only (no dashboards)</td></tr>
+        <tr><td><code>down</code></td><td>Stop background services</td></tr>
+        <tr><td><code>ensure</code></td><td>Start missing services</td></tr>
+        <tr><td><code>health</code></td><td>Quick health check</td></tr>
+        <tr><td><code>learnings</code></td><td>List cognitive insights</td></tr>
+        <tr><td><code>write</code></td><td>Write insights to markdown</td></tr>
+        <tr><td><code>promote</code></td><td>Auto-promote high-value insights</td></tr>
+        <tr><td><code>sync-context</code></td><td>Sync to platform files</td></tr>
+        <tr><td><code>process</code></td><td>Run bridge cycle</td></tr>
+        <tr><td><code>validate</code></td><td>Validation scan</td></tr>
+        <tr><td><code>events</code></td><td>Show recent events</td></tr>
+        <tr><td><code>decay</code></td><td>Preview/apply pruning</td></tr>
+        <tr><td><code>sync</code></td><td>Sync to Mind</td></tr>
+      </table>
+    </section>
+
+    <!-- DASHBOARDS -->
+    <section id="dashboards">
+      <h2>Dashboards</h2>
+      <table>
+        <tr><th>Dashboard</th><th>Default Port</th><th>Env Override</th></tr>
+        <tr><td>Spark Pulse (primary)</td><td>8765</td><td><code>SPARK_PULSE_PORT</code></td></tr>
+        <tr><td>Spark Lab (legacy)</td><td>8585</td><td><code>SPARK_DASHBOARD_PORT</code></td></tr>
+        <tr><td>Meta-Ralph Analyzer</td><td>8586</td><td><code>SPARK_META_RALPH_PORT</code></td></tr>
+        <tr><td>Mind</td><td>8080</td><td><code>SPARK_MIND_PORT</code></td></tr>
+      </table>
+      <p><code>spark up</code> starts Pulse + Spark Lab + Meta-Ralph by default. Use <code>--lite</code> to skip all dashboards.</p>
+    </section>
+
+    <!-- LEARNINGS -->
+    <section id="learnings">
+      <h2>Learnings</h2>
+      <p>Spark automatically captures insights from your coding sessions and stores them in <code>~/.spark/cognitive_insights.json</code>.</p>
+
+      <h3>View learnings</h3>
+<pre><code>python3 -m spark.cli learnings</code></pre>
+
+      <h3>Write to markdown</h3>
+<pre><code>python3 -m spark.cli write
+# Creates .learnings/LEARNINGS.md</code></pre>
+
+      <h3>Promote to context files</h3>
+<pre><code># Preview
+python3 -m spark.cli promote --dry-run
+
+# Apply
+python3 -m spark.cli promote
+# Updates AGENTS.md, CLAUDE.md, etc.</code></pre>
+
+      <h3>Programmatic usage</h3>
+<pre><code>from lib.cognitive_learner import get_cognitive_learner
+
+cognitive = get_cognitive_learner()
+
+cognitive.learn_struggle_area(
+    task_type="regex_patterns",
+    failure_reason="Edge cases in complex patterns"
+)
+
+cognitive.learn_principle(
+    principle="Always test edge cases",
+    examples=["Empty input", "Null values", "Unicode"]
+)</code></pre>
+    </section>
+
+    <!-- TUNEABLES -->
+    <section id="tuneables">
+      <h2>Tuneables</h2>
+      <p>All runtime knobs live in <code>~/.spark/tuneables.json</code>. Schema-validated, hot-reloaded each bridge cycle, drift-tracked against baseline.</p>
+
+      <h3>Key sections</h3>
+      <table>
+        <tr><th>Section</th><th>Controls</th></tr>
+        <tr><td><code>values</code></td><td>Batch size, queue limits, cooldowns</td></tr>
+        <tr><td><code>meta_ralph</code></td><td>Quality gate threshold, noise patterns</td></tr>
+        <tr><td><code>advisor</code></td><td>Ranking weights, fusion scores, delivery</td></tr>
+        <tr><td><code>eidos</code></td><td>Episode budgets, distillation settings</td></tr>
+        <tr><td><code>semantic</code></td><td>Embedding model, similarity thresholds</td></tr>
+        <tr><td><code>promotion</code></td><td>Target files, confidence thresholds</td></tr>
+      </table>
+
+      <h3>Hot-reload</h3>
+      <p>Changes to <code>tuneables.json</code> are picked up automatically every bridge cycle. No restart needed for: meta_ralph, advisor, eidos, queue, pipeline, advisory_gate.</p>
+
+      <h3>Drift tracking</h3>
+<pre><code>python3 -c "from lib.tuneables_drift import check_drift; r=check_drift(); print(f'drift={r.drift_score:.4f}')"</code></pre>
+      <p>Alerts when runtime config drifts &gt;0.3 from the version-controlled baseline in <code>config/tuneables.json</code>.</p>
+    </section>
+
+    <!-- HOOKS -->
+    <section id="hooks">
+      <h2>Hooks</h2>
+      <p>Spark captures events via hooks registered in your coding agent's config.</p>
+
+      <table>
+        <tr><th>Hook</th><th>Event Type</th><th>Purpose</th></tr>
+        <tr><td><code>PreToolUse</code></td><td><code>pre_tool</code></td><td>Advisory before tool runs</td></tr>
+        <tr><td><code>PostToolUse</code></td><td><code>post_tool</code></td><td>Learn from tool outcomes</td></tr>
+        <tr><td><code>PostToolUseFailure</code></td><td><code>post_tool_failure</code></td><td>Capture failure patterns</td></tr>
+        <tr><td><code>UserPromptSubmit</code></td><td><code>user_prompt</code></td><td>Capture user context</td></tr>
+      </table>
+
+      <p>For predictive advisory to work end-to-end, <code>PreToolUse</code> must be enabled.</p>
+    </section>
+
+    <!-- AUTOSTART -->
+    <section id="autostart">
+      <h2>Always-On Setup</h2>
+      <p>Keep Spark running at login so hooks never miss events.</p>
+
+      <h3>Windows (Task Scheduler)</h3>
+<pre><code># Automated setup
+powershell ./scripts/install_autostart_windows.ps1
+
+# Remove
+powershell ./scripts/remove_autostart_windows.ps1</code></pre>
+
+      <h3>macOS (launchd)</h3>
+<pre><code>launchctl load -w ~/Library/LaunchAgents/co.vibeship.spark.plist</code></pre>
+
+      <h3>Linux (systemd)</h3>
+<pre><code>systemctl --user enable --now spark-up.service</code></pre>
+
+      <h3>Per-project ensure</h3>
+<pre><code>spark ensure --sync-context --project .</code></pre>
+    </section>
+
+    <!-- DIRECTORY -->
+    <section id="directory">
+      <h2>Directory Structure</h2>
+<pre><code>~/.spark/                        # Config and data
+  cognitive_insights.json         # Validated knowledge base
+  tuneables.json                  # Runtime configuration
+  queue/events.jsonl              # Event queue
+  eidos.db                        # Episodic intelligence
+  bridge_worker_heartbeat.json    # Bridge cycle status
+  chip_insights/*.jsonl           # Per-domain observations
+
+config/tuneables.json             # Baseline (version-controlled)
+
+.learnings/
+  LEARNINGS.md                    # Human-readable insights
+  ERRORS.md                       # Error patterns
+
+AGENTS.md                         # Promoted workflow patterns
+CLAUDE.md                         # Promoted conventions</code></pre>
+    </section>
+
+    <!-- TROUBLESHOOTING -->
+    <section id="troubleshooting">
+      <h2>Troubleshooting</h2>
+
+      <h3>Port already in use</h3>
+      <p>Override via environment variables: <code>SPARKD_PORT</code>, <code>SPARK_PULSE_PORT</code>, <code>SPARK_DASHBOARD_PORT</code>, <code>SPARK_META_RALPH_PORT</code>.</p>
+
+      <h3>Mind not available</h3>
+      <p>Mind is optional. Spark works offline and queues events for later sync.</p>
+
+      <h3>No events in queue</h3>
+      <p>Verify the hook is configured with an absolute path. Run a tool interaction in your agent to generate events.</p>
+
+      <h3>Queue stalled</h3>
+<pre><code>python3 -m spark.cli process --drain</code></pre>
+
+      <h3>Missing dependencies</h3>
+<pre><code>pip install requests</code></pre>
+
+      <h3>Debug mode</h3>
+<pre><code>set SPARK_DEBUG=1   # Windows
+export SPARK_DEBUG=1 # Mac/Linux</code></pre>
+
+      <h3>Test gates</h3>
+<pre><code>python -m ruff check . --select E9,F63,F7,F82
+python -m pytest -q</code></pre>
+    </section>
+
+  </div>
+</div>
+
+<script>
+// Active sidebar link tracking
+const links = document.querySelectorAll('.sidebar-link');
+const sections = document.querySelectorAll('.content section');
+
+function updateActive() {
+  let current = '';
+  sections.forEach(s => {
+    if (s.getBoundingClientRect().top <= 120) current = s.id;
+  });
+  links.forEach(l => {
+    l.classList.toggle('active', l.getAttribute('href') === '#' + current);
+  });
+}
+
+document.querySelector('.content').parentElement.addEventListener('scroll', updateActive);
+window.addEventListener('scroll', updateActive);
+
+// Smooth scroll
+links.forEach(l => {
+  l.addEventListener('click', e => {
+    e.preventDefault();
+    const target = document.querySelector(l.getAttribute('href'));
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.querySelector('.sidebar').classList.remove('open');
+  });
+});
+</script>
+
+</body>
+</html>
