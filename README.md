@@ -89,7 +89,7 @@ Your Agent (Claude Code / Cursor / OpenClaw)
 - **5-minute start**: `docs/GETTING_STARTED_5_MIN.md`
 - **Full setup**: `docs/QUICKSTART.md`
 - **Docs index**: `docs/DOCS_INDEX.md`
-- **Website**: [spark.vibeship.com](https://spark.vibeship.com)
+- **Website**: [spark.vibeship.co](https://spark.vibeship.co)
 - **Contributing**: `CONTRIBUTING.md` (local setup, PR flow, and safety expectations)
 
 ## Responsible Use
