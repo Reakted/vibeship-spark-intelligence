@@ -1,3 +1,6 @@
+# Chips (runtime-generated domain intelligence)
+chips/
+
 # Python
 __pycache__/
 *.py[cod]
