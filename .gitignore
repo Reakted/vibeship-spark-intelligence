@@ -126,7 +126,6 @@ node_modules/
 _pw_smoke.js
 
 # OSS launch hygiene (removed from public share)
-trace_hud/
 logs/
 dist/
 build/

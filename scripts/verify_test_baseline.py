@@ -15,8 +15,6 @@ BROAD_BASELINE_ARGS = [
     "-q",
     "-m",
     "not integration",
-    "--ignore=tests/test_compact_chip_insights.py",
-    "--ignore=tests/test_trace_hud.py",
 ]
 
 
