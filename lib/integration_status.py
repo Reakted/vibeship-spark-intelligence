@@ -141,6 +141,43 @@ def check_effectiveness() -> Tuple[bool, str]:
         return False, f"Error reading effectiveness: {e}"
 
 
+def check_advisory_packet_store() -> Tuple[bool, str]:
+    try:
+        from .advisory_packet_store import get_store_status
+
+        status = get_store_status()
+    except Exception as e:
+        return False, f"Advisory packet store unavailable: {e}"
+
+    total = int(status.get("total_packets", 0) or 0)
+    if total <= 0:
+        return False, "No advisory packets stored yet"
+
+    readiness = float(status.get("readiness_ratio", 0.0) or 0.0)
+    if readiness <= 0.0:
+        return False, "No fresh packets available"
+
+    queue_depth = int(status.get("queue_depth", 0) or 0)
+    if queue_depth > 4000:
+        return False, f"Prefetch queue backlog too high: {queue_depth}"
+
+    config = status.get("config", {}) if isinstance(status.get("config", {}), dict) else {}
+    obsidian_enabled = (
+        bool(status.get("obsidian_enabled", False))
+        or bool(config.get("obsidian_enabled", False))
+        or bool(config.get("obsidian_auto_export", False))
+    )
+    if obsidian_enabled and not bool(status.get("obsidian_export_dir_exists", False)):
+        return False, f"Obsidian export enabled but directory missing: {status.get('obsidian_export_dir')}"
+
+    return True, (
+        f"{total} packets, readiness={readiness:.1%}, "
+        f"freshness={float(status.get('freshness_ratio', 0.0) or 0.0):.1%}, "
+        f"avg_effectiveness={float(status.get('avg_effectiveness_score', 0.0) or 0.0):.1%}, "
+        f"queue_depth={queue_depth}"
+    )
+
+
 def check_pre_tool_events(minutes: int = 60) -> Tuple[bool, str]:
     """Check specifically for pre_tool events."""
     if not EVENTS_FILE.exists():
@@ -182,6 +219,7 @@ def get_full_status() -> Dict:
         ("Recent Events", check_recent_events(60)),
         ("Pre/Post Tool Events", check_pre_tool_events(60)),
         ("Advice Log", check_advice_log_growing()),
+        ("Advisory Packet Store", check_advisory_packet_store()),
         ("Effectiveness Tracking", check_effectiveness()),
     ]
 
@@ -258,6 +296,14 @@ def print_status():
     a) PostToolUse hook is configured
     b) report_outcome() is being called
     c) Check lib/bridge_cycle.py integration
+""")
+                elif "Advisory Packet Store" in check["check"]:
+                    print("""
+  - Advisory packet store is not healthy. Recommended checks:
+    a) Confirm advisory packets are being saved (`build_packet`/`save_packet` flow runs)
+    b) Verify packet TTL is not too short for your workflow
+    c) Trim invalidation rules if too many packets become invalidated
+    d) Inspect ~/.spark/advice_packets/index.json for unexpected corruption
 """)
 
     print("=" * 60 + "\n")

@@ -10,15 +10,25 @@ Phase 1 scope:
 
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
+import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    import httpx as _HTTPX
+except Exception:
+    _HTTPX = None
+
 PACKET_DIR = Path.home() / ".spark" / "advice_packets"
 INDEX_FILE = PACKET_DIR / "index.json"
 PREFETCH_QUEUE_FILE = PACKET_DIR / "prefetch_queue.jsonl"
+OBSIDIAN_EXPORT_DIR = PACKET_DIR / "obsidian"
+OBSIDIAN_PACKETS_DIR = OBSIDIAN_EXPORT_DIR / "packets"
 
 DEFAULT_PACKET_TTL_S = 900.0
 MAX_INDEX_PACKETS = 2000
@@ -31,6 +41,21 @@ RELAXED_LOW_EFFECTIVENESS_THRESHOLD = 0.3
 RELAXED_LOW_EFFECTIVENESS_PENALTY = 0.5
 RELAXED_MIN_MATCH_DIMENSIONS = 1
 RELAXED_MIN_MATCH_SCORE = 3.0
+DEFAULT_PACKET_RELAXED_MAX_CANDIDATES = 6
+DEFAULT_PACKET_RELAXED_PREVIEW_CHARS = 360
+DEFAULT_PACKET_LOOKUP_CANDIDATES = 6
+DEFAULT_PACKET_LOOKUP_LLM_ENABLED = False
+DEFAULT_PACKET_LOOKUP_LLM_PROVIDER = "minimax"
+DEFAULT_PACKET_LOOKUP_LLM_TIMEOUT_S = 1.2
+DEFAULT_PACKET_LOOKUP_LLM_TOP_K = 3
+DEFAULT_PACKET_LOOKUP_LLM_MIN_CANDIDATES = 2
+DEFAULT_PACKET_LOOKUP_LLM_CONTEXT_CHARS = 220
+DEFAULT_PACKET_LOOKUP_LLM_PROVIDER_URL = "https://api.minimax.io/v1"
+DEFAULT_PACKET_LOOKUP_LLM_MODEL = "MiniMax-M2.5"
+DEFAULT_OBSIDIAN_EXPORT_MAX_PACKETS = 300
+DEFAULT_OBSIDIAN_EXPORT_ENABLED = False
+DEFAULT_OBSIDIAN_AUTO_EXPORT = False
+DEFAULT_OBSIDIAN_EXPORT_DIR = str(OBSIDIAN_EXPORT_DIR)
 
 REQUIRED_PACKET_FIELDS = {
     "packet_id",
@@ -63,6 +88,53 @@ _INDEX_CACHE: Optional[Dict[str, Any]] = None
 _INDEX_CACHE_MTIME_NS: Optional[int] = None
 _ALIASED_EXACT_KEYS: set[str] = set()
 
+_OBSIDIAN_CONFIG_DIR_OVERRIDE: Optional[str] = None
+PACKET_RELAXED_MAX_CANDIDATES = int(DEFAULT_PACKET_RELAXED_MAX_CANDIDATES)
+PACKET_LOOKUP_CANDIDATES = int(DEFAULT_PACKET_LOOKUP_CANDIDATES)
+PACKET_LOOKUP_LLM_ENABLED = bool(DEFAULT_PACKET_LOOKUP_LLM_ENABLED)
+PACKET_LOOKUP_LLM_PROVIDER = str(DEFAULT_PACKET_LOOKUP_LLM_PROVIDER).strip().lower() or "minimax"
+PACKET_LOOKUP_LLM_TIMEOUT_S = float(DEFAULT_PACKET_LOOKUP_LLM_TIMEOUT_S)
+PACKET_LOOKUP_LLM_TOP_K = int(DEFAULT_PACKET_LOOKUP_LLM_TOP_K)
+PACKET_LOOKUP_LLM_MIN_CANDIDATES = int(DEFAULT_PACKET_LOOKUP_LLM_MIN_CANDIDATES)
+PACKET_LOOKUP_LLM_CONTEXT_CHARS = int(DEFAULT_PACKET_LOOKUP_LLM_CONTEXT_CHARS)
+PACKET_LOOKUP_LLM_URL = str(DEFAULT_PACKET_LOOKUP_LLM_PROVIDER_URL).strip() or "https://api.minimax.io/v1"
+PACKET_LOOKUP_LLM_MODEL = str(DEFAULT_PACKET_LOOKUP_LLM_MODEL).strip() or "MiniMax-M2.5"
+PACKET_LOOKUP_LLM_FALLBACK_TO_SCORING = True
+OBSIDIAN_EXPORT_ENABLED = bool(DEFAULT_OBSIDIAN_EXPORT_ENABLED)
+OBSIDIAN_AUTO_EXPORT = bool(DEFAULT_OBSIDIAN_AUTO_EXPORT)
+OBSIDIAN_EXPORT_MAX_PACKETS = int(DEFAULT_OBSIDIAN_EXPORT_MAX_PACKETS)
+
+
+def _obsidian_export_dir() -> Path:
+    base = str(_OBSIDIAN_CONFIG_DIR_OVERRIDE or DEFAULT_OBSIDIAN_EXPORT_DIR).strip()
+    if base:
+        return Path(base).expanduser()
+    return OBSIDIAN_EXPORT_DIR
+
+
+def _obsidian_packets_dir() -> Path:
+    return _obsidian_export_dir() / "packets"
+
+
+def _obsidian_enabled() -> bool:
+    return bool(OBSIDIAN_EXPORT_ENABLED)
+
+
+def _load_packet_store_config(path: Optional[Path] = None) -> Dict[str, Any]:
+    """Load advisory packet store tuneables."""
+    tuneables = path or (Path.home() / ".spark" / "tuneables.json")
+    if not tuneables.exists():
+        return {}
+    try:
+        data = json.loads(tuneables.read_text(encoding="utf-8-sig"))
+    except Exception:
+        try:
+            data = json.loads(tuneables.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    section = data.get("advisory_packet_store") if isinstance(data, dict) else {}
+    return section if isinstance(section, dict) else {}
+
 
 def _to_int(value: Any, default: int = 0) -> int:
     try:
@@ -76,6 +148,254 @@ def _to_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return float(default)
+
+
+def _safe_list(value: Any, *, max_items: int = 20) -> List[str]:
+    out: List[str] = []
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            out.append(text)
+            if len(out) >= max_items:
+                break
+    elif isinstance(value, str):
+        text = value.strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _sanitize_lookup_provider(raw: Any) -> str:
+    provider = str(raw or "").strip().lower()
+    if not provider:
+        return PACKET_LOOKUP_LLM_PROVIDER
+    if provider in {"minimax", "openai", "ollama", "anthropic", "gemini"}:
+        return provider
+    return PACKET_LOOKUP_LLM_PROVIDER
+
+
+def _build_lookup_payload(
+    packet_candidates: List[Dict[str, Any]],
+    context_text: str,
+    top_k: int,
+) -> str:
+    prompt_lines = [
+        "You are a strict ranker for advisory packet retrieval.",
+        "Return exactly one JSON array of packet_id strings in descending relevance order.",
+        "Only include packet_ids from the provided candidate list.",
+        f"Select at most {top_k} packet_ids.",
+        "Prefer packets with higher expected usefulness for the immediate user intent.",
+    ]
+    context = str(context_text or "").strip().replace("\n", " ")
+    if context:
+        prompt_lines.append(f'Context: "{context}"')
+    prompt_lines.append("Candidates (packet_id, score, tool_name, intent_family, task_plane, advisory_preview):")
+    for row in packet_candidates[:top_k]:
+        prompt_lines.append(json.dumps({
+            "packet_id": str(row.get("packet_id") or ""),
+            "score": float(row.get("score", 0.0) or 0.0),
+            "tool_name": str(row.get("tool_name") or ""),
+            "intent_family": str(row.get("intent_family") or ""),
+            "task_plane": str(row.get("task_plane") or ""),
+            "effectiveness_score": float(row.get("effectiveness_score", 0.0) or 0.0),
+            "advisory_text_preview": str(row.get("advisory_text_preview") or ""),
+        }, ensure_ascii=False, separators=(",", ":"))
+    prompt_lines.append("Return only JSON. No markdown. Example: [\"pkt_abc\", \"pkt_def\"]")
+    return "\n".join(prompt_lines)
+
+
+def _extract_json_like_array(raw: str) -> List[str]:
+    if not raw:
+        return []
+    text = str(raw).strip()
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        # Try extracting first JSON-like list from markdown-wrapped output.
+        match = re.search(r"\[[^\r\n]*\]", text, re.DOTALL)
+        if not match:
+            return []
+        try:
+            parsed = json.loads(match.group(0))
+        except Exception:
+            return []
+    if isinstance(parsed, dict):
+        parsed_list: Optional[List[Any]] = None
+        for k in ("packet_ids", "reranked_ids", "result", "ids"):
+            candidate = parsed.get(k)
+            if isinstance(candidate, list):
+                parsed_list = candidate
+                break
+        parsed = parsed_list if parsed_list is not None else []
+    if not isinstance(parsed, list):
+        return []
+    out: List[str] = []
+    for value in parsed:
+        packet_id = str(value or "").strip()
+        if packet_id:
+            out.append(packet_id)
+    return out
+
+
+def _lookup_llm_api_key(provider: str) -> Optional[str]:
+    p = str(provider or "").strip().lower()
+    if p == "minimax":
+        return (
+            os.getenv("SPARK_MINIMAX_API_KEY")
+            or os.getenv("MINIMAX_API_KEY")
+            or os.getenv("SPARK_MINIMAX_TOKEN")
+        )
+    if p == "openai":
+        return os.getenv("OPENAI_API_KEY") or os.getenv("SPARK_OPENAI_API_KEY")
+    if p == "anthropic":
+        return (
+            os.getenv("ANTHROPIC_API_KEY")
+            or os.getenv("SPARK_ANTHROPIC_API_KEY")
+            or os.getenv("CLAUDE_API_KEY")
+        )
+    if p == "gemini":
+        return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    return None
+
+
+def _lookup_llm_url(provider: str) -> str:
+    p = str(provider or "").strip().lower()
+    if p == "ollama":
+        return str(os.getenv("SPARK_OLLAMA_API", "http://localhost:11434")).rstrip("/")
+    if p == "minimax":
+        return str(os.getenv("SPARK_MINIMAX_BASE_URL", PACKET_LOOKUP_LLM_URL)).rstrip("/")
+    if p == "openai":
+        return str(os.getenv("SPARK_OPENAI_BASE_URL", "https://api.openai.com")).rstrip("/")
+    if p == "anthropic":
+        return str(os.getenv("SPARK_ANTHROPIC_BASE_URL", "https://api.anthropic.com")).rstrip("/")
+    if p == "gemini":
+        return str(os.getenv("SPARK_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")).rstrip("/")
+    return str(PACKET_LOOKUP_LLM_URL).rstrip("/")
+
+
+def _call_lookup_llm(
+    prompt: str,
+    *,
+    provider: str,
+    timeout_s: float,
+) -> Optional[str]:
+    if _HTTPX is None:
+        return None
+    provider = str(provider or "").strip().lower()
+    base_url = _lookup_llm_url(provider)
+    if provider == "ollama":
+        request_url = f"{base_url}/api/chat"
+        payload = {
+            "model": PACKET_LOOKUP_LLM_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "options": {"temperature": 0.0},
+        }
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+    else:
+        if provider == "minimax":
+            request_url = f"{base_url}/chat/completions"
+        else:
+            request_url = f"{base_url}/v1/chat/completions"
+        api_key = _lookup_llm_api_key(provider)
+        if not api_key:
+            return None
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": PACKET_LOOKUP_LLM_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 220,
+            "temperature": 0.0,
+            "response_format": {"type": "json_object"},
+        }
+    try:
+        with _HTTPX.Client(timeout=timeout_s) as client:
+            resp = client.post(request_url, headers=headers, json=payload)
+        if not (200 <= int(resp.status_code) < 300):
+            return None
+        data = resp.json()
+        if isinstance(data, dict):
+            choices = data.get("choices") or []
+            if choices:
+                msg = choices[0].get("message") if isinstance(choices[0], dict) else {}
+                content = msg.get("content", "") if isinstance(msg, dict) else ""
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+            raw = data.get("response")
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+    except Exception:
+        return None
+    return None
+
+
+def _rerank_candidates_with_lookup_llm(
+    candidates: List[Dict[str, Any]],
+    *,
+    context_text: str,
+) -> List[Dict[str, Any]]:
+    if not PACKET_LOOKUP_LLM_ENABLED or not candidates:
+        return candidates
+    provider = _sanitize_lookup_provider(PACKET_LOOKUP_LLM_PROVIDER)
+    if provider not in {"minimax", "openai", "ollama", "anthropic", "gemini"}:
+        return candidates
+    min_candidates = max(1, int(PACKET_LOOKUP_LLM_MIN_CANDIDATES))
+    if len(candidates) < min_candidates:
+        return candidates
+
+    top_k = max(1, min(len(candidates), int(PACKET_LOOKUP_LLM_TOP_K)))
+    context = str(context_text or "").strip().replace("\n", " ")
+    if context:
+        context = context[: max(1, int(PACKET_LOOKUP_LLM_CONTEXT_CHARS))]
+    prompt = _build_lookup_payload(candidates, context, top_k)
+    response = _call_lookup_llm(prompt, provider=provider, timeout_s=PACKET_LOOKUP_LLM_TIMEOUT_S)
+    if not response:
+        return candidates
+    ranked_ids = _extract_json_like_array(response)
+    if not ranked_ids:
+        return candidates
+
+    ranked = list(ranked_ids)
+    lookup = {str(row.get("packet_id") or ""): row for row in candidates}
+    reranked: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for packet_id in ranked:
+        packet_id = str(packet_id or "").strip()
+        if not packet_id or packet_id in seen:
+            continue
+        row = lookup.get(packet_id)
+        if row is not None:
+            row = dict(row)
+            row["llm_rank"] = len(reranked)
+            row["llm_reranked"] = True
+            reranked.append(row)
+            seen.add(packet_id)
+
+    for row in candidates:
+        packet_id = str(row.get("packet_id") or "")
+        if packet_id in seen:
+            continue
+        row = dict(row)
+        row["llm_rank"] = len(reranked)
+        row["llm_reranked"] = False
+        reranked.append(row)
+    return reranked
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
 
 
 def _compute_effectiveness_score(
@@ -111,6 +431,8 @@ def _normalize_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
         unhelpful_count=out["unhelpful_count"],
         noisy_count=out["noisy_count"],
     )
+    out["category_summary"] = _safe_list(out.get("category_summary"), max_items=20)
+    out["source_summary"] = _safe_list(out.get("source_summary"), max_items=40)
     return out
 
 
@@ -141,8 +463,157 @@ def _read_json(path: Path, default: Dict[str, Any]) -> Dict[str, Any]:
     return dict(default)
 
 
+def _packet_lookup_context(row: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(row, dict):
+        return {}
+    return {
+        "packet_id": str(row.get("packet_id") or ""),
+        "tool_name": str(row.get("tool_name") or ""),
+        "intent_family": str(row.get("intent_family") or ""),
+        "task_plane": str(row.get("task_plane") or ""),
+        "project_key": str(row.get("project_key") or ""),
+        "updated_ts": float(row.get("updated_ts") or 0.0),
+        "fresh_until_ts": float(row.get("fresh_until_ts") or 0.0),
+    }
+
+
+def _obsidian_payload(packet: Dict[str, Any]) -> str:
+    packet_id = str(packet.get("packet_id") or "")
+    if not packet_id:
+        return ""
+    project = str(packet.get("project_key") or "unknown_project")
+    session_ctx = str(packet.get("session_context_key") or "")
+    tool = str(packet.get("tool_name") or "*")
+    intent = str(packet.get("intent_family") or "emergent_other")
+    plane = str(packet.get("task_plane") or "build_delivery")
+    source_mode = str(packet.get("source_mode") or "")
+    advisory_text = str(packet.get("advisory_text") or "").strip()
+    created_ts = float(packet.get("created_ts") or 0.0)
+    updated_ts = float(packet.get("updated_ts") or 0.0)
+    fresh_until_ts = float(packet.get("fresh_until_ts") or 0.0)
+    sources = _safe_list(packet.get("source_summary"), max_items=30)
+    categories = _safe_list(packet.get("category_summary"), max_items=20)
+    source_line = ", ".join(sources) if sources else "unset"
+    category_line = ", ".join(categories) if categories else "unset"
+
+    lines = [
+        f"# Packet {packet_id}",
+        "",
+        "## Packet Metadata",
+        f"- Project: `{project}`",
+        f"- Session key: `{session_ctx}`",
+        f"- Tool context: `{tool}`",
+        f"- Intent family: `{intent}`",
+        f"- Task plane: `{plane}`",
+        f"- Source mode: `{source_mode}`",
+        f"- Created: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(created_ts)) if created_ts else 'unknown'}",
+        f"- Updated: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(updated_ts)) if updated_ts else 'unknown'}",
+        f"- Fresh until: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(fresh_until_ts)) if fresh_until_ts else 'unknown'}",
+        f"- Sources: {source_line}",
+        f"- Categories: {category_line}",
+        f"- Effectiveness: {float(packet.get('effectiveness_score', 0.5) or 0.5):.3f}",
+        f"- Usage: {int(packet.get('usage_count', 0) or 0)}",
+        f"- Emitted: {int(packet.get('emit_count', 0) or 0)}",
+        f"- Feedback: {int(packet.get('feedback_count', 0) or 0)}",
+        f"- Helpful: {int(packet.get('helpful_count', 0) or 0)}",
+        f"- Unhelpful: {int(packet.get('unhelpful_count', 0) or 0)}",
+        f"- Noisy: {int(packet.get('noisy_count', 0) or 0)}",
+        "",
+        "## Advisory Text",
+    ]
+
+    if advisory_text:
+        lines.append(advisory_text)
+
+    lines.extend(["", "## Advice Items", ""])
+    for idx, row in enumerate(packet.get("advice_items") or [], start=1):
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        src = str(row.get("source") or "unknown")
+        conf = row.get("confidence")
+        aid = str(row.get("advice_id") or f"item_{idx}")
+        cat = str(row.get("category") or row.get("source") or "general")
+        try:
+            conf_display = f"{float(conf):.2f}"
+        except Exception:
+            conf_display = "n/a"
+        lines.append(f"### {idx}. {aid}")
+        lines.append(f"- source: {src}")
+        lines.append(f"- category: {cat}")
+        lines.append(f"- confidence: {conf_display}")
+        lines.append(text)
+        lines.append("")
+
+    return "\n".join(lines).strip() + "\n"
+
+
+def _export_packet_to_obsidian(packet: Dict[str, Any]) -> Optional[str]:
+    if not _obsidian_enabled() or not isinstance(packet, dict):
+        return None
+    packet_id = str(packet.get("packet_id") or "").strip()
+    if not packet_id:
+        return None
+    if not OBSIDIAN_AUTO_EXPORT:
+        return None
+
+    packets_dir = _obsidian_packets_dir()
+    packets_dir.mkdir(parents=True, exist_ok=True)
+    payload = _obsidian_payload(packet)
+    if not payload:
+        return None
+
+    target = packets_dir / f"{packet_id}.md"
+    target.write_text(payload, encoding="utf-8")
+
+    try:
+        all_exports = list(packets_dir.glob("*.md"))
+        all_exports.sort(key=lambda p: p.stat().st_mtime)
+        keep = max(1, OBSIDIAN_EXPORT_MAX_PACKETS)
+        if len(all_exports) > keep:
+            for stale in all_exports[: len(all_exports) - keep]:
+                try:
+                    stale.unlink()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return str(target)
+
+
+def export_packet_packet(packet_id: str) -> Optional[str]:
+    """Export an advisory packet into Obsidian manually (outside auto flow)."""
+    packet = get_packet(packet_id)
+    if not packet:
+        return None
+    original_auto = OBSIDIAN_AUTO_EXPORT
+    try:
+        return _export_packet_to_obsidian(packet)
+    except Exception:
+        return None
+    finally:
+        # restore original auto export preference if any caller mutates at runtime
+        if original_auto != OBSIDIAN_AUTO_EXPORT:
+            pass
+
+
 def _packet_path(packet_id: str) -> Path:
     return PACKET_DIR / f"{packet_id}.json"
+
+
+def _obsidian_dir_override(raw: Any) -> None:
+    global _OBSIDIAN_CONFIG_DIR_OVERRIDE
+    if raw is None:
+        _OBSIDIAN_CONFIG_DIR_OVERRIDE = None
+        return
+    value = str(raw).strip()
+    if value:
+        _OBSIDIAN_CONFIG_DIR_OVERRIDE = value
+    else:
+        _OBSIDIAN_CONFIG_DIR_OVERRIDE = None
 
 
 def _make_exact_key(
@@ -172,6 +643,37 @@ def _make_packet_id(
     raw = _make_exact_key(project_key, session_context_key, tool_name, intent_family)
     digest = hashlib.sha1(f"{raw}|{created_ts:.6f}".encode("utf-8", errors="replace")).hexdigest()[:12]
     return f"pkt_{digest}"
+
+
+def _derive_packet_metadata(
+    advice_items: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[List[str], List[str]]:
+    """Derive compact source and category summaries from packet advice rows."""
+    sources: List[str] = []
+    categories: List[str] = []
+    for row in (advice_items or []):
+        if not isinstance(row, dict):
+            continue
+        source = str(row.get("source") or "").strip()
+        category = str(row.get("category") or "").strip()
+        if source:
+            sources.append(source)
+        if category:
+            categories.append(category)
+
+    # Deduplicate preserving order.
+    def _uniq(values: List[str]) -> List[str]:
+        seen = set()
+        out: List[str] = []
+        for value in values:
+            normalized = value.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            out.append(normalized)
+        return out
+
+    return _uniq(sources), _uniq(categories)
 
 
 def _load_index() -> Dict[str, Any]:
@@ -258,6 +760,7 @@ def build_packet(
     ttl_s: Optional[float] = None,
 ) -> Dict[str, Any]:
     created = _now()
+    rows = list(advice_items or [])
     project = _sanitize_token(project_key, "unknown_project")
     session_ctx = _sanitize_token(session_context_key, "default")
     tool = _sanitize_token(tool_name, "*")
@@ -272,6 +775,7 @@ def build_packet(
         safe_lineage.setdefault("trace_id", trace_id)
 
     ttl_value = DEFAULT_PACKET_TTL_S if ttl_s is None else float(ttl_s or DEFAULT_PACKET_TTL_S)
+    source_summary, category_summary = _derive_packet_metadata(rows)
     return {
         "packet_id": packet_id,
         "project_key": project,
@@ -281,7 +785,9 @@ def build_packet(
         "task_plane": plane,
         "advisory_text": (advisory_text or "").strip(),
         "source_mode": mode,
-        "advice_items": list(advice_items or []),
+        "advice_items": rows,
+        "source_summary": source_summary,
+        "category_summary": category_summary,
         "lineage": safe_lineage,
         "created_ts": created,
         "updated_ts": created,
@@ -350,19 +856,27 @@ def save_packet(packet: Dict[str, Any]) -> str:
         "tool_name": packet.get("tool_name"),
         "intent_family": packet.get("intent_family"),
         "task_plane": packet.get("task_plane"),
+        "source_summary": _safe_list(packet.get("source_summary"), max_items=40),
+        "category_summary": _safe_list(packet.get("category_summary"), max_items=20),
         "updated_ts": packet.get("updated_ts"),
         "fresh_until_ts": packet.get("fresh_until_ts"),
         "invalidated": bool(packet.get("invalidated", False)),
         "usage_count": int(packet.get("usage_count", 0) or 0),
         "emit_count": int(packet.get("emit_count", 0) or 0),
+        "feedback_count": int(packet.get("feedback_count", 0) or 0),
         "helpful_count": int(packet.get("helpful_count", 0) or 0),
         "unhelpful_count": int(packet.get("unhelpful_count", 0) or 0),
         "noisy_count": int(packet.get("noisy_count", 0) or 0),
-        "feedback_count": int(packet.get("feedback_count", 0) or 0),
         "effectiveness_score": float(packet.get("effectiveness_score", 0.5) or 0.5),
+        "source_mode": str(packet.get("source_mode") or ""),
+        "age_s": max(0.0, _now() - float(packet.get("updated_ts", 0.0) or 0.0)),
     }
     _prune_index(index)
     _save_index(index)
+    try:
+        _export_packet_to_obsidian(packet)
+    except Exception:
+        pass
     return packet_id
 
 
@@ -406,6 +920,59 @@ def _is_fresh(packet: Dict[str, Any], now_ts: Optional[float] = None) -> bool:
     return float(packet.get("fresh_until_ts", 0.0)) >= now_value
 
 
+def _candidate_match_score(
+    row: Dict[str, Any],
+    *,
+    project: str,
+    tool_name: str,
+    intent_family: str,
+    task_plane: str,
+    now_value: float,
+) -> Optional[Tuple[float, float]]:
+    if row.get("project_key") != project:
+        return None
+    if bool(row.get("invalidated")):
+        return None
+    if float(row.get("fresh_until_ts", 0.0)) < now_value:
+        return None
+
+    score = 0.0
+    match_score = 0.0
+    match_dimensions = 0
+    row_tool = str(row.get("tool_name") or "")
+    row_intent = str(row.get("intent_family") or "")
+    row_plane = str(row.get("task_plane") or "")
+
+    if tool_name and row_tool == tool_name:
+        score += RELAXED_MATCH_WEIGHT_TOOL
+        match_score += RELAXED_MATCH_WEIGHT_TOOL
+        match_dimensions += 1
+    elif row_tool == "*":
+        score += RELAXED_WILDCARD_TOOL_BONUS
+        match_score += RELAXED_WILDCARD_TOOL_BONUS
+        match_dimensions += 1
+    if intent_family and row_intent == intent_family:
+        score += RELAXED_MATCH_WEIGHT_INTENT
+        match_score += RELAXED_MATCH_WEIGHT_INTENT
+        match_dimensions += 1
+    if task_plane and row_plane == task_plane:
+        score += RELAXED_MATCH_WEIGHT_PLANE
+        match_score += RELAXED_MATCH_WEIGHT_PLANE
+        match_dimensions += 1
+
+    if match_dimensions < RELAXED_MIN_MATCH_DIMENSIONS:
+        return None
+    if match_score < RELAXED_MIN_MATCH_SCORE:
+        return None
+
+    effectiveness = max(0.0, min(1.0, float(row.get("effectiveness_score", 0.5) or 0.5))
+    score += effectiveness * RELAXED_EFFECTIVENESS_WEIGHT
+    if effectiveness < RELAXED_LOW_EFFECTIVENESS_THRESHOLD:
+        score -= RELAXED_LOW_EFFECTIVENESS_PENALTY
+    score += min(1.0, max(0.0, (float(row.get("updated_ts", 0.0)) / 1e10)))
+    return score, float(row.get("updated_ts", 0.0))
+
+
 def lookup_exact(
     *,
     project_key: str,
@@ -437,11 +1004,40 @@ def lookup_relaxed(
     intent_family: str = "",
     task_plane: str = "",
     now_ts: Optional[float] = None,
+    context_text: str = "",
 ) -> Optional[Dict[str, Any]]:
+    candidates = lookup_relaxed_candidates(
+        project_key=project_key,
+        tool_name=tool_name,
+        intent_family=intent_family,
+        task_plane=task_plane,
+        now_ts=now_ts,
+        max_candidates=PACKET_LOOKUP_CANDIDATES,
+        context_text=context_text,
+    )
+    if not candidates:
+        return None
+    packet_id = str(candidates[0].get("packet_id") or "")
+    if not packet_id:
+        return None
+    return get_packet(packet_id)
+
+
+def lookup_relaxed_candidates(
+    *,
+    project_key: str,
+    tool_name: str = "",
+    intent_family: str = "",
+    task_plane: str = "",
+    now_ts: Optional[float] = None,
+    max_candidates: int = 10,
+    context_text: str = "",
+) -> List[Dict[str, Any]]:
     index = _load_index()
     meta = index.get("packet_meta") or {}
     now_value = float(now_ts if now_ts is not None else _now())
-    candidates: List[Tuple[float, float, str]] = []
+    limit = max(1, min(30, int(max_candidates or PACKET_RELAXED_MAX_CANDIDATES or 1)))
+    candidates: List[Tuple[float, float, str, Dict[str, Any]]] = []
     project = _sanitize_token(project_key, "unknown_project")
     tool_name = _sanitize_token(tool_name, "") if tool_name else ""
     intent_family = _sanitize_token(intent_family, "") if intent_family else ""
@@ -449,51 +1045,54 @@ def lookup_relaxed(
 
     for packet_id, item in meta.items():
         row = item or {}
-        if row.get("project_key") != project:
+        scored = _candidate_match_score(
+            row,
+            project=project,
+            tool_name=tool_name,
+            intent_family=intent_family,
+            task_plane=task_plane,
+            now_value=now_value,
+        )
+        if not scored:
             continue
-        if bool(row.get("invalidated")):
-            continue
-        if float(row.get("fresh_until_ts", 0.0)) < now_value:
-            continue
-        score = 0.0
-        match_score = 0.0
-        match_dimensions = 0
-        if tool_name and row.get("tool_name") == tool_name:
-            score += RELAXED_MATCH_WEIGHT_TOOL
-            match_score += RELAXED_MATCH_WEIGHT_TOOL
-            match_dimensions += 1
-        if intent_family and row.get("intent_family") == intent_family:
-            score += RELAXED_MATCH_WEIGHT_INTENT
-            match_score += RELAXED_MATCH_WEIGHT_INTENT
-            match_dimensions += 1
-        if task_plane and row.get("task_plane") == task_plane:
-            score += RELAXED_MATCH_WEIGHT_PLANE
-            match_score += RELAXED_MATCH_WEIGHT_PLANE
-            match_dimensions += 1
-        if not tool_name and row.get("tool_name") == "*":
-            score += RELAXED_WILDCARD_TOOL_BONUS
-            match_score += RELAXED_WILDCARD_TOOL_BONUS
-            match_dimensions += 1
-        if match_dimensions < RELAXED_MIN_MATCH_DIMENSIONS:
-            continue
-        if match_score < RELAXED_MIN_MATCH_SCORE:
-            continue
-        effectiveness = max(0.0, min(1.0, float(row.get("effectiveness_score", 0.5) or 0.5)))
-        score += effectiveness * RELAXED_EFFECTIVENESS_WEIGHT
-        if effectiveness < RELAXED_LOW_EFFECTIVENESS_THRESHOLD:
-            score -= RELAXED_LOW_EFFECTIVENESS_PENALTY
-        score += min(1.0, max(0.0, (float(row.get("updated_ts", 0.0)) / 1e10)))
-        candidates.append((score, float(row.get("updated_ts", 0.0)), packet_id))
+        score, updated_ts = scored
+        candidates.append((score, updated_ts, str(packet_id or ""), row))
 
     if not candidates:
         return None
-
     candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    for _, __, packet_id in candidates:
-        packet = get_packet(packet_id)
-        if packet and _is_fresh(packet, now_ts=now_value):
-            return packet
-    return None
+    out: List[Dict[str, Any]] = []
+    for score, updated_ts, packet_id, row in candidates[:limit]:
+        preview = ""
+        try:
+            packet = get_packet(packet_id)
+            if packet:
+                text = str(packet.get("advisory_text") or "")
+                preview = text[:DEFAULT_PACKET_RELAXED_PREVIEW_CHARS].replace("\n", " ").strip()
+        except Exception:
+            preview = ""
+
+        item = {
+            "packet_id": str(packet_id),
+            "score": float(score),
+            "updated_ts": float(updated_ts),
+            "tool_name": str(row.get("tool_name") or ""),
+            "intent_family": str(row.get("intent_family") or ""),
+            "task_plane": str(row.get("task_plane") or ""),
+            "source_summary": _safe_list(row.get("source_summary"), max_items=20),
+            "category_summary": _safe_list(row.get("category_summary"), max_items=20),
+            "effectiveness_score": float(row.get("effectiveness_score", 0.5) or 0.5),
+            "usage_count": int(row.get("usage_count", 0) or 0),
+            "emit_count": int(row.get("emit_count", 0) or 0),
+            "fresh_until_ts": float(row.get("fresh_until_ts", 0.0) or 0.0),
+            "advisory_text_preview": preview,
+            "invalidated": bool(row.get("invalidated", False)),
+        }
+        out.append(item)
+
+    if context_text and len(out) > 1:
+        out = _rerank_candidates_with_lookup_llm(out, context_text=context_text)
+    return out
 
 
 def invalidate_packet(packet_id: str, reason: str = "manual") -> bool:
@@ -808,6 +1407,20 @@ def apply_packet_store_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     global RELAXED_LOW_EFFECTIVENESS_PENALTY
     global RELAXED_MIN_MATCH_DIMENSIONS
     global RELAXED_MIN_MATCH_SCORE
+    global PACKET_RELAXED_MAX_CANDIDATES
+    global PACKET_LOOKUP_CANDIDATES
+    global PACKET_LOOKUP_LLM_ENABLED
+    global PACKET_LOOKUP_LLM_PROVIDER
+    global PACKET_LOOKUP_LLM_TIMEOUT_S
+    global PACKET_LOOKUP_LLM_TOP_K
+    global PACKET_LOOKUP_LLM_MIN_CANDIDATES
+    global PACKET_LOOKUP_LLM_CONTEXT_CHARS
+    global PACKET_LOOKUP_LLM_URL
+    global PACKET_LOOKUP_LLM_MODEL
+    global OBSIDIAN_EXPORT_ENABLED
+    global OBSIDIAN_AUTO_EXPORT
+    global OBSIDIAN_EXPORT_MAX_PACKETS
+    global DEFAULT_OBSIDIAN_EXPORT_DIR
 
     applied: List[str] = []
     warnings: List[str] = []
@@ -878,6 +1491,111 @@ def apply_packet_store_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
         except Exception:
             warnings.append("invalid_relaxed_min_match_score")
 
+    if "relaxed_max_candidates" in cfg:
+        try:
+            PACKET_RELAXED_MAX_CANDIDATES = max(
+                1,
+                min(30, int(cfg.get("relaxed_max_candidates") or 1)),
+            )
+            applied.append("relaxed_max_candidates")
+        except Exception:
+            warnings.append("invalid_relaxed_max_candidates")
+
+    if "packet_lookup_candidates" in cfg:
+        try:
+            PACKET_LOOKUP_CANDIDATES = max(
+                1,
+                min(30, int(cfg.get("packet_lookup_candidates") or 1)),
+            )
+            applied.append("packet_lookup_candidates")
+        except Exception:
+            warnings.append("invalid_packet_lookup_candidates")
+
+    if "packet_lookup_llm_enabled" in cfg:
+        PACKET_LOOKUP_LLM_ENABLED = _coerce_bool(
+            cfg.get("packet_lookup_llm_enabled"),
+            PACKET_LOOKUP_LLM_ENABLED,
+        )
+        applied.append("packet_lookup_llm_enabled")
+
+    if "packet_lookup_llm_provider" in cfg:
+        PACKET_LOOKUP_LLM_PROVIDER = _sanitize_lookup_provider(cfg.get("packet_lookup_llm_provider"))
+        applied.append("packet_lookup_llm_provider")
+
+    if "packet_lookup_llm_timeout_s" in cfg:
+        try:
+            PACKET_LOOKUP_LLM_TIMEOUT_S = max(0.2, float(cfg.get("packet_lookup_llm_timeout_s")))
+            applied.append("packet_lookup_llm_timeout_s")
+        except Exception:
+            warnings.append("invalid_packet_lookup_llm_timeout_s")
+
+    if "packet_lookup_llm_top_k" in cfg:
+        try:
+            PACKET_LOOKUP_LLM_TOP_K = max(1, min(20, int(cfg.get("packet_lookup_llm_top_k") or 1)))
+            applied.append("packet_lookup_llm_top_k")
+        except Exception:
+            warnings.append("invalid_packet_lookup_llm_top_k")
+
+    if "packet_lookup_llm_min_candidates" in cfg:
+        try:
+            PACKET_LOOKUP_LLM_MIN_CANDIDATES = max(
+                1, min(20, int(cfg.get("packet_lookup_llm_min_candidates") or 1))
+            )
+            applied.append("packet_lookup_llm_min_candidates")
+        except Exception:
+            warnings.append("invalid_packet_lookup_llm_min_candidates")
+
+    if "packet_lookup_llm_context_chars" in cfg:
+        try:
+            PACKET_LOOKUP_LLM_CONTEXT_CHARS = max(
+                40, min(5000, int(cfg.get("packet_lookup_llm_context_chars") or 40))
+            )
+            applied.append("packet_lookup_llm_context_chars")
+        except Exception:
+            warnings.append("invalid_packet_lookup_llm_context_chars")
+
+    if "packet_lookup_llm_provider_url" in cfg:
+        url = str(cfg.get("packet_lookup_llm_provider_url") or PACKET_LOOKUP_LLM_URL).strip()
+        if url:
+            PACKET_LOOKUP_LLM_URL = url.rstrip("/")
+            applied.append("packet_lookup_llm_provider_url")
+
+    if "packet_lookup_llm_model" in cfg:
+        model = str(cfg.get("packet_lookup_llm_model") or PACKET_LOOKUP_LLM_MODEL).strip()
+        if model:
+            PACKET_LOOKUP_LLM_MODEL = model
+            applied.append("packet_lookup_llm_model")
+
+    if "obsidian_enabled" in cfg:
+        OBSIDIAN_EXPORT_ENABLED = _coerce_bool(
+            cfg.get("obsidian_enabled"),
+            OBSIDIAN_EXPORT_ENABLED,
+        )
+        applied.append("obsidian_enabled")
+
+    if "obsidian_auto_export" in cfg:
+        OBSIDIAN_AUTO_EXPORT = _coerce_bool(
+            cfg.get("obsidian_auto_export"),
+            OBSIDIAN_AUTO_EXPORT,
+        )
+        applied.append("obsidian_auto_export")
+
+    if "obsidian_export_max_packets" in cfg:
+        try:
+            OBSIDIAN_EXPORT_MAX_PACKETS = max(1, min(5000, int(cfg.get("obsidian_export_max_packets") or 1)))
+            applied.append("obsidian_export_max_packets")
+        except Exception:
+            warnings.append("invalid_obsidian_export_max_packets")
+
+    if "obsidian_export_dir" in cfg:
+        try:
+            raw_dir = str(cfg.get("obsidian_export_dir") or DEFAULT_OBSIDIAN_EXPORT_DIR).strip()
+            if raw_dir:
+                _obsidian_dir_override(raw_dir)
+            applied.append("obsidian_export_dir")
+        except Exception:
+            warnings.append("invalid_obsidian_export_dir")
+
     return {"applied": applied, "warnings": warnings}
 
 
@@ -890,6 +1608,20 @@ def get_packet_store_config() -> Dict[str, Any]:
         "relaxed_low_effectiveness_penalty": float(RELAXED_LOW_EFFECTIVENESS_PENALTY),
         "relaxed_min_match_dimensions": int(RELAXED_MIN_MATCH_DIMENSIONS),
         "relaxed_min_match_score": float(RELAXED_MIN_MATCH_SCORE),
+        "relaxed_max_candidates": int(PACKET_RELAXED_MAX_CANDIDATES),
+        "packet_lookup_candidates": int(PACKET_LOOKUP_CANDIDATES),
+        "packet_lookup_llm_enabled": bool(PACKET_LOOKUP_LLM_ENABLED),
+        "packet_lookup_llm_provider": str(PACKET_LOOKUP_LLM_PROVIDER),
+        "packet_lookup_llm_timeout_s": float(PACKET_LOOKUP_LLM_TIMEOUT_S),
+        "packet_lookup_llm_top_k": int(PACKET_LOOKUP_LLM_TOP_K),
+        "packet_lookup_llm_min_candidates": int(PACKET_LOOKUP_LLM_MIN_CANDIDATES),
+        "packet_lookup_llm_context_chars": int(PACKET_LOOKUP_LLM_CONTEXT_CHARS),
+        "packet_lookup_llm_provider_url": str(PACKET_LOOKUP_LLM_URL),
+        "packet_lookup_llm_model": str(PACKET_LOOKUP_LLM_MODEL),
+        "obsidian_enabled": bool(OBSIDIAN_EXPORT_ENABLED),
+        "obsidian_auto_export": bool(OBSIDIAN_AUTO_EXPORT),
+        "obsidian_export_max_packets": int(OBSIDIAN_EXPORT_MAX_PACKETS),
+        "obsidian_export_dir": str(_obsidian_export_dir()),
     }
 
 
@@ -899,6 +1631,8 @@ def get_store_status() -> Dict[str, Any]:
     total = len(meta)
     active = sum(1 for row in meta.values() if not bool((row or {}).get("invalidated")))
     now_value = _now()
+    source_counter: Counter[str] = Counter()
+    category_counter: Counter[str] = Counter()
     fresh = sum(
         1
         for row in meta.values()
@@ -914,22 +1648,104 @@ def get_store_status() -> Dict[str, Any]:
     usage_total = sum(int((row or {}).get("usage_count", 0) or 0) for row in meta.values())
     emit_total = sum(int((row or {}).get("emit_count", 0) or 0) for row in meta.values())
     feedback_total = sum(int((row or {}).get("feedback_count", 0) or 0) for row in meta.values())
+    noisy_total = sum(int((row or {}).get("noisy_count", 0) or 0) for row in meta.values())
     avg_effectiveness = 0.0
+    freshness_age_sum = 0.0
+    freshness_age_count = 0
+    age_sum = 0.0
+    age_count = 0
+    stale = 0
+    inactive = total - active
     if meta:
         avg_effectiveness = sum(
             float((row or {}).get("effectiveness_score", 0.5) or 0.5)
             for row in meta.values()
         ) / max(1, len(meta))
+        for row in meta.values():
+            if bool((row or {}).get("invalidated")):
+                continue
+            for source in _safe_list(row.get("source_summary"), max_items=1):
+                source_counter[source] += 1
+            for category in _safe_list(row.get("category_summary"), max_items=1):
+                category_counter[category] += 1
+        for row in meta.values():
+            if bool((row or {}).get("invalidated")):
+                continue
+            updated_ts = float((row or {}).get("updated_ts", 0.0) or 0.0)
+            age_sum += max(0.0, now_value - updated_ts)
+            age_count += 1
+            freshness_age = float((row or {}).get("fresh_until_ts", 0.0) or 0.0) - now_value
+            if freshness_age > 0.0:
+                freshness_age_sum += freshness_age
+                freshness_age_count += 1
+    stale = sum(
+        1
+        for row in meta.values()
+        if not bool((row or {}).get("invalidated"))
+        and float((row or {}).get("fresh_until_ts", 0.0)) < now_value
+    )
+    active_rows = max(1, int(active))
+    top_sources = [
+        {"name": str(name), "count": int(count)}
+        for name, count in source_counter.most_common(5)
+    ]
+    top_categories = [
+        {"name": str(name), "count": int(count)}
+        for name, count in category_counter.most_common(5)
+    ]
+    top_concentration = 0.0
+    if top_categories:
+        top_concentration = top_categories[0]["count"] / float(max(active_rows, 1))
     return {
         "total_packets": total,
         "active_packets": active,
         "fresh_packets": fresh,
+        "stale_packets": stale,
+        "inactive_packets": inactive,
+        "freshness_ratio": round(float(fresh) / max(total, 1), 3),
+        "stale_ratio": round(float(stale) / max(total, 1), 3),
+        "inactive_ratio": round(float(inactive) / max(total, 1), 3),
+        "readiness_ratio": round(float(fresh) / max(active_rows, 1), 3),
+        "top_sources": top_sources,
+        "top_categories": top_categories,
+        "top_category_concentration": round(float(top_concentration), 3),
+        "lookup_candidate_budget": int(PACKET_LOOKUP_CANDIDATES),
+        "packet_age_avg_s": round(float(age_sum / max(age_count, 1)), 2),
+        "packet_freshness_age_avg_s": round(
+            float(freshness_age_sum / max(freshness_age_count, 1)),
+            2,
+        ),
         "queue_depth": queue_depth,
         "usage_total": usage_total,
         "emit_total": emit_total,
         "feedback_total": feedback_total,
+        "noisy_total": noisy_total,
         "hit_rate": (emit_total / max(usage_total, 1)) if usage_total > 0 else None,
         "avg_effectiveness_score": round(float(avg_effectiveness), 3),
+        "lookup_rerank_enabled": bool(PACKET_LOOKUP_LLM_ENABLED),
         "config": get_packet_store_config(),
+        "lookup_rerank_provider": str(PACKET_LOOKUP_LLM_PROVIDER),
+        "obsidian_enabled": bool(OBSIDIAN_EXPORT_ENABLED),
+        "obsidian_auto_export": bool(OBSIDIAN_AUTO_EXPORT),
+        "obsidian_export_dir": str(_obsidian_export_dir()),
+        "obsidian_export_dir_exists": bool(_obsidian_export_dir().exists()),
         "index_file": str(INDEX_FILE),
     }
+
+
+try:
+    _BOOT_PACKET_CFG = _load_packet_store_config()
+    if _BOOT_PACKET_CFG:
+        apply_packet_store_config(_BOOT_PACKET_CFG)
+    try:
+        from .tuneables_reload import register_reload as _register_packet_store_reload
+
+        _register_packet_store_reload(
+            "advisory_packet_store",
+            apply_packet_store_config,
+            label="advisory_packet_store.apply_config",
+        )
+    except Exception:
+        pass
+except Exception:
+    pass
