@@ -713,6 +713,13 @@ def run_bridge_cycle(
     if SPARK_OPENCLAW_NOTIFY:
         _maybe_notify_openclaw(stats)
 
+    # --- Observatory sync (non-critical, best-effort) ---
+    try:
+        from lib.observatory import maybe_sync_observatory
+        maybe_sync_observatory(stats)
+    except Exception:
+        pass
+
     return stats
 
 

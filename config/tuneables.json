@@ -443,6 +443,14 @@
     "enabled": true,
     "auto_save_threshold": 0.65
   },
+  "observatory": {
+    "enabled": true,
+    "auto_sync": true,
+    "sync_cooldown_s": 120,
+    "vault_dir": "C:\\Users\\USER\\Documents\\Obsidian Vault\\Spark-Intelligence-Observatory",
+    "generate_canvas": true,
+    "max_recent_items": 20
+  },
   "production_gates": {
     "enforce_meta_ralph_quality_band": true,
     "min_quality_samples": 50,

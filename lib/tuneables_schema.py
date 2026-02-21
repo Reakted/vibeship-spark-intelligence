@@ -327,6 +327,16 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "enabled": TuneableSpec("bool", True, None, None, "Enable memory capture"),
     },
 
+    # ---- observatory: Obsidian pipeline visualization ----
+    "observatory": {
+        "enabled": TuneableSpec("bool", True, None, None, "Enable observatory generation"),
+        "auto_sync": TuneableSpec("bool", True, None, None, "Auto-sync on bridge cycle"),
+        "sync_cooldown_s": TuneableSpec("int", 120, 10, 3600, "Min seconds between auto-syncs"),
+        "vault_dir": TuneableSpec("str", "", None, None, "Obsidian vault directory path"),
+        "generate_canvas": TuneableSpec("bool", True, None, None, "Generate .canvas spatial view"),
+        "max_recent_items": TuneableSpec("int", 20, 5, 100, "Max recent items per stage page"),
+    },
+
     # ---- production_gates: quality enforcement ----
     "production_gates": {
         "enforce_meta_ralph_quality_band": TuneableSpec("bool", True, None, None, "Enforce quality band check"),

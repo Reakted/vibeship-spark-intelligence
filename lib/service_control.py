@@ -300,11 +300,14 @@ def _scheduler_heartbeat_age() -> Optional[float]:
         return None
 
 
-def _load_repo_env(path: Path = REPO_ENV_FILE) -> dict[str, str]:
+def _load_repo_env(path: Path | None = None) -> dict[str, str]:
     """Load simple KEY=VALUE pairs from repo .env file.
 
     This avoids requiring python-dotenv for daemon startup paths.
     """
+    if path is None:
+        path = REPO_ENV_FILE
+
     if not path.exists():
         return {}
     out: dict[str, str] = {}

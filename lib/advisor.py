@@ -2495,12 +2495,7 @@ class SparkAdvisor:
 
         # 2. Query cognitive insights (semantic + keyword fallback)
         advice_list.extend(
-            self._get_cognitive_advice(
-                tool_name,
-                context,
-                semantic_context=semantic_context,
-                trace_id=trace_id,
-            )
+            self._get_cognitive_advice(tool_name, context, semantic_context, trace_id)
         )
 
         # 2.5. Query chip insights (domain-specific intelligence).
