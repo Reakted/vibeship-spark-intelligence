@@ -1135,18 +1135,20 @@ def generate_html() -> str:
             if (!phases || phases.length === 0) {
                 return '<div class="empty-state"><p>No data</p></div>';
             }
+
+            const phaseCounts = phases.map((phase) => Math.max(0, Math.trunc(toSafeNumber(phase.count, 0))));
+            const maxCount = phaseCounts.reduce((m, n) => Math.max(m, n), 0);
             
-            const maxCount = Math.max(...phases.map(p => p.count));
-            
-            return phases.map(phase => {
-                const pct = maxCount > 0 ? (phase.count / maxCount * 100) : 0;
+            return phases.map((phase, idx) => {
+                const count = phaseCounts[idx];
+                const pct = maxCount > 0 ? (count / maxCount * 100) : 0;
                 return `
                     <div class="phase-bar">
                         <div class="phase-label">${escapeHtml(phase.phase || '')}</div>
                         <div class="phase-track">
                             <div class="phase-fill" style="width: ${pct}%"></div>
                         </div>
-                        <div class="phase-count">${Number(phase.count || 0)}</div>
+                        <div class="phase-count">${count}</div>
                     </div>
                 `;
             }).join('');
