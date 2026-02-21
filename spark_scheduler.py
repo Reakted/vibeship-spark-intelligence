@@ -123,7 +123,7 @@ DEFAULT_CONFIG = {
     "engagement_snapshot_interval": 1800,
     "daily_research_interval": 86400,
     "niche_scan_interval": 21600,
-    "advisory_review_interval": 86400,
+    "advisory_review_interval": 43200,
     "mention_poll_enabled": True,
     "engagement_snapshot_enabled": True,
     "daily_research_enabled": True,
@@ -437,7 +437,9 @@ def _read_heartbeat_ts(path: Path) -> Optional[float]:
 def scheduler_heartbeat_age_s() -> Optional[float]:
     """Return heartbeat age in seconds, or None if missing."""
     now = time.time()
-    candidates = [_read_heartbeat_ts(HEARTBEAT_FILE), _read_heartbeat_ts(LEGACY_HEARTBEAT_FILE)]
+    candidates = [_read_heartbeat_ts(HEARTBEAT_FILE)]
+    if HEARTBEAT_FILE == SCHEDULER_DIR / "heartbeat.json":
+        candidates.append(_read_heartbeat_ts(LEGACY_HEARTBEAT_FILE))
     latest = max((ts for ts in candidates if ts), default=None)
     if latest is None:
         return None
