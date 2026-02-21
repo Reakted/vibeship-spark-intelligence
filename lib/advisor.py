@@ -3154,14 +3154,14 @@ class SparkAdvisor:
         body = str(text or "").strip().lower()
         if not body:
             return False
-        normalized = re.sub(r"[\\s_]+", " ", body)
+        normalized = re.sub(r"[\s_]+", " ", body)
         return any(marker in normalized for marker in X_SOCIAL_MARKERS)
 
     def _is_x_social_insight(self, text: str) -> bool:
         body = str(text or "").strip().lower()
         if not body:
             return False
-        normalized = re.sub(r"[\\s_]+", " ", body)
+        normalized = re.sub(r"[\s_]+", " ", body)
         return any(marker in normalized for marker in X_SOCIAL_MARKERS) or any(
             token in body
             for token in (
@@ -3212,13 +3212,15 @@ class SparkAdvisor:
                 adv_domain = str(adv_q.get("domain", "general") or "general").lower()
             else:
                 adv_domain = "general"
+
+            if (not is_social_context) and self._is_x_social_insight(advice.text or ""):
+                continue
+
             if adv_domain in ("", "general"):
                 out.append(advice)
                 continue
             if adv_domain in allowed:
                 out.append(advice)
-                continue
-            if (not is_social_context) and self._is_x_social_insight(advice.text or ""):
                 continue
             text = (advice.text or "").lower()
             if any(x in text for x in ("troubleshoot", "failure", "regression", "safety", "rollback")):
@@ -3367,6 +3369,10 @@ class SparkAdvisor:
                 continue
             # Filter metadata patterns like "X: Y = Z" (Task #16)
             if self._is_metadata_pattern(text):
+                continue
+            if text.startswith("You are Spark Intelligence, observing a live coding session"):
+                # Local memory banks sometimes cache bootstrap prompts (policy/system text).
+                # These are not operator learnings and should not surface as advice.
                 continue
             context_match = self._calculate_context_match(text, context)
 
@@ -4580,6 +4586,7 @@ class SparkAdvisor:
 
     def _should_drop_advice(self, advice: Advice, tool_name: str = "") -> bool:
         text = str(getattr(advice, "text", "") or "").strip()
+        adv_q = getattr(advice, "advisory_quality", None) or {}
         if not text:
             record_quarantine_item(
                 source=str(getattr(advice, "source", "unknown")),
@@ -4591,8 +4598,18 @@ class SparkAdvisor:
                 extras={"tool_name": tool_name},
             )
             return True
+        if self._is_inventory_style_text(text):
+            record_quarantine_item(
+                source=str(getattr(advice, "source", "unknown")),
+                stage="advisor_should_drop",
+                reason="inventory_style",
+                text=text,
+                advisory_quality=adv_q if isinstance(adv_q, dict) else None,
+                advisory_readiness=getattr(advice, "advisory_readiness", None),
+                extras={"tool_name": tool_name},
+            )
+            return True
         # Drop advice suppressed by distillation transformer
-        adv_q = getattr(advice, "advisory_quality", None) or {}
         if isinstance(adv_q, dict) and adv_q.get("suppressed"):
             record_quarantine_item(
                 source=str(getattr(advice, "source", "unknown")),
@@ -4669,11 +4686,33 @@ class SparkAdvisor:
                     reason="context_constraint_state",
                     text=text,
                     advisory_quality=adv_q if isinstance(adv_q, dict) else None,
-                    advisory_readiness=getattr(advice, "advisory_readiness", None),
-                    extras={"tool_name": tool_name},
-                )
-                return True
+                advisory_readiness=getattr(advice, "advisory_readiness", None),
+                extras={"tool_name": tool_name},
+            )
+            return True
         return False
+
+    def _is_inventory_style_text(self, text: str) -> bool:
+        normalized = str(text or "").strip().lower()
+        if not normalized:
+            return False
+        return any(
+            marker in normalized
+            for marker in (
+                "learned insights (from past sessions):",
+                "you are spark intelligence, observing a live coding session",
+                "system inventory (what actually exists",
+                "system inventory (what actually exists — do not reference anything outside this list)",
+                "\n- services:",
+                "cycle summary:",
+                "service inventory",
+                "services:",
+                "<task-notification",
+                "<task-id>",
+                "<status>",
+                "<summary>",
+            )
+        )
 
     # Source quality tiers — normalized 0-1 for additive scoring
     _SOURCE_QUALITY = {
