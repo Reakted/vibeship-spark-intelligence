@@ -225,6 +225,7 @@ Acts as the single source of truth for delivery-ready advisory content.
 - invalidation state and reason
 - usage and freshness remaining indicators
 - forced sync on invalidation updates when export is enabled
+- Obsidian watchtower index also includes decision-ledger tails so suppression and emission behavior is visible at a glance.
 
 ### 8. Engine Orchestrator (`lib/advisory_engine.py`)
 

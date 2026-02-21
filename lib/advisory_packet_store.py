@@ -30,6 +30,7 @@ PREFETCH_QUEUE_FILE = PACKET_DIR / "prefetch_queue.jsonl"
 OBSIDIAN_EXPORT_DIR = PACKET_DIR / "obsidian"
 OBSIDIAN_PACKETS_DIR = OBSIDIAN_EXPORT_DIR / "packets"
 OBSIDIAN_INDEX_FILE = OBSIDIAN_PACKETS_DIR / "index.md"
+ADVISORY_DECISION_LEDGER_FILE = Path.home() / ".spark" / "advisory_decision_ledger.jsonl"
 
 DEFAULT_PACKET_TTL_S = 900.0
 MAX_INDEX_PACKETS = 2000
@@ -123,6 +124,69 @@ def _obsidian_packets_dir() -> Path:
 
 def _obsidian_enabled() -> bool:
     return bool(OBSIDIAN_EXPORT_ENABLED)
+
+
+def _decision_ledger_enabled() -> bool:
+    return os.getenv("SPARK_ADVISORY_DECISION_LEDGER", "1") != "0"
+
+
+def _read_advisory_decision_ledger(limit: int = 120) -> List[Dict[str, Any]]:
+    if not ADVISORY_DECISION_LEDGER_FILE.exists():
+        return []
+    try:
+        limit_count = int(limit)
+    except Exception:
+        limit_count = 120
+    if limit_count < 0:
+        limit_count = 0
+
+    try:
+        raw = ADVISORY_DECISION_LEDGER_FILE.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return []
+    if not raw:
+        return []
+
+    if limit_count > 0:
+        raw = raw[-limit_count:]
+
+    out: List[Dict[str, Any]] = []
+    for line in raw:
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(row, dict):
+            out.append(row)
+    return out
+
+
+def _decision_ledger_meta() -> Dict[str, Any]:
+    meta: Dict[str, Any] = {
+        "path": str(ADVISORY_DECISION_LEDGER_FILE),
+        "enabled": bool(_decision_ledger_enabled()),
+        "exists": False,
+    }
+    if not ADVISORY_DECISION_LEDGER_FILE.exists():
+        return meta
+    try:
+        raw = ADVISORY_DECISION_LEDGER_FILE.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return meta
+
+    total = len([ln for ln in raw if ln.strip()])
+    recent = _read_advisory_decision_ledger(limit=20)
+    emitted_recent = sum(1 for row in recent if str(row.get("outcome", "")).strip().lower() == "emitted")
+    meta.update(
+        {
+            "exists": True,
+            "entry_count": int(total),
+            "recent_count": int(len(recent)),
+            "recent_emitted_count": int(emitted_recent),
+            "recent_emission_rate": round(emitted_recent / max(len(recent), 1), 3) if recent else 0.0,
+        }
+    )
+    return meta
 
 
 def _load_packet_store_config(path: Optional[Path] = None) -> Dict[str, Any]:
@@ -710,6 +774,17 @@ def _render_obsidian_index(lines: List[str], catalog: List[Dict[str, Any]]) -> N
         for source in _safe_list(row.get("source_summary"), max_items=20):
             if source:
                 source_counter[str(source)] += 1
+
+    watchtower = _read_advisory_decision_ledger(limit=max(0, int(OBSIDIAN_EXPORT_MAX_PACKETS // 3)))
+    watchtower_reasons: Counter[str] = Counter()
+    watchtower_stage: Counter[str] = Counter()
+    for row in watchtower:
+        stage = str(row.get("stage", "") or "unspecified").strip() or "unspecified"
+        watchtower_stage[stage] += 1
+        for reason in _safe_list([str(r.get("reason") or "") for r in row.get("suppressed_reasons", [])], max_items=6):
+            if reason:
+                watchtower_reasons[str(reason)] += 1
+
     ready = [r for r in catalog if bool(r.get("ready_for_use"))]
     invalid = [r for r in catalog if bool(r.get("invalidated"))]
     stale = [r for r in catalog if not bool(r.get("is_fresh")) and not bool(r.get("invalidated"))]
@@ -717,16 +792,54 @@ def _render_obsidian_index(lines: List[str], catalog: List[Dict[str, Any]]) -> N
     lines.append("# SPARK Advisory Packet Catalog")
     lines.append("")
     lines.append(f"- entries: {len(catalog)}")
+    lines.append(f"- decision ledger entries: {len(watchtower)}")
+    lines.append(f"- decision ledger enabled: {bool(_decision_ledger_enabled())}")
+    lines.append(f"- ledger path: `{ADVISORY_DECISION_LEDGER_FILE}`")
     lines.append(f"- ready: {len(ready)}")
     lines.append(f"- stale: {len(stale)}")
     if invalid:
         lines.append(f"- invalidated: {len(invalid)}")
     lines.append(f"- updated: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(_now()))}")
+    if watchtower_stage:
+        stage_text = ", ".join(f"{k}({v})" for k, v in watchtower_stage.most_common(8))
+        lines.append(f"- watchtower stages: {stage_text}")
+    if watchtower_reasons:
+        lines.append(
+            "- watchtower top suppressions: "
+            + ", ".join(f"{k}({v})" for k, v in watchtower_reasons.most_common(8))
+        )
     if source_counter:
         lines.append("- top sources: " + ", ".join(f"{k}({v})" for k, v in source_counter.most_common(8)))
     if category_counter:
         lines.append("- top categories: " + ", ".join(f"{k}({v})" for k, v in category_counter.most_common(8)))
     lines.append("")
+
+    lines.append("## Advisory Watchtower")
+    if not watchtower:
+        lines.append("- no ledger entries yet")
+        lines.append("")
+    else:
+        for idx, row in enumerate(watchtower[-80:], start=1):
+            ts = float(row.get("ts", 0.0) or 0.0)
+            ts_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts)) if ts else "unknown"
+            tool = str(row.get("tool", "") or "*")
+            route = str(row.get("route", "") or "*")
+            stage = str(row.get("stage", "") or "unknown")
+            outcome = str(row.get("outcome", "") or stage)
+            selected = int(row.get("selected_count", 0) or 0)
+            suppressed = int(row.get("suppressed_count", 0) or 0)
+            lines.append(
+                f"{idx}. {ts_text} | tool={tool} | route={route} | outcome={outcome} | selected={selected} suppressed={suppressed}"
+            )
+            if suppressed > 0:
+                top = _safe_list([str(reason.get("reason") or "") for reason in row.get("suppressed_reasons", [])], max_items=2)
+                if top:
+                    lines.append(f"   - suppressions: {', '.join(top)}")
+            preview = str(row.get("route_hint", "") or row.get("suppressed_reasons", "") or "")
+            if preview:
+                lines.append(f"   - hint: {preview if isinstance(preview, str) else str(preview)}")
+        lines.append("")
+
     if invalid:
         lines.append("## Invalid Packets")
         for idx, row in enumerate(invalid[:80], start=1):
@@ -793,7 +906,7 @@ def _sync_obsidian_catalog() -> Optional[str]:
         include_invalid=True,
         limit=max(1, OBSIDIAN_EXPORT_MAX_PACKETS),
     )
-    if not catalog:
+    if not catalog and not ADVISORY_DECISION_LEDGER_FILE.exists():
         return None
 
     lines: List[str] = []
@@ -2272,6 +2385,7 @@ def get_store_status() -> Dict[str, Any]:
         "obsidian_export_dir": str(_obsidian_export_dir()),
         "obsidian_export_dir_exists": bool(_obsidian_export_dir().exists()),
         "obsidian_index_file": str(OBSIDIAN_INDEX_FILE),
+        "decision_ledger": _decision_ledger_meta(),
         "index_file": str(INDEX_FILE),
     }
 

@@ -19,6 +19,13 @@ from .error_taxonomy import build_error_fields
 ENGINE_ENABLED = os.getenv("SPARK_ADVISORY_ENGINE", "1") != "0"
 ENGINE_LOG = Path.home() / ".spark" / "advisory_engine.jsonl"
 ENGINE_LOG_MAX = 500
+ADVISORY_DECISION_LEDGER_FILE = Path.home() / ".spark" / "advisory_decision_ledger.jsonl"
+ADVISORY_DECISION_LEDGER_ENABLED = os.getenv("SPARK_ADVISORY_DECISION_LEDGER", "1") != "0"
+try:
+    ADVISORY_DECISION_LEDGER_MAX = max(
+        120, min(8000, int(os.getenv("SPARK_ADVISORY_DECISION_LEDGER_MAX_LINES", "1500")))
+except Exception:
+    ADVISORY_DECISION_LEDGER_MAX = 1500
 MAX_ENGINE_MS = float(os.getenv("SPARK_ADVISORY_MAX_MS", "4000"))
 INCLUDE_MIND_IN_MEMORY = os.getenv("SPARK_ADVISORY_INCLUDE_MIND", "0") == "1"
 ENABLE_PREFETCH_QUEUE = os.getenv("SPARK_ADVISORY_PREFETCH_QUEUE", "1") != "0"
@@ -515,6 +522,30 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
             applied.append("advisory_text_repeat_cooldown_s")
         except Exception:
             warnings.append("invalid_advisory_text_repeat_cooldown_s")
+    if "decision_ledger_enabled" in cfg:
+        raw = cfg.get("decision_ledger_enabled")
+        if isinstance(raw, bool):
+            ADVISORY_DECISION_LEDGER_ENABLED = raw
+            applied.append("decision_ledger_enabled")
+        elif isinstance(raw, str):
+            raw_lower = raw.strip().lower()
+            if raw_lower in {"1", "true", "yes", "on"}:
+                ADVISORY_DECISION_LEDGER_ENABLED = True
+                applied.append("decision_ledger_enabled")
+            elif raw_lower in {"0", "false", "no", "off"}:
+                ADVISORY_DECISION_LEDGER_ENABLED = False
+                applied.append("decision_ledger_enabled")
+            else:
+                warnings.append("invalid_decision_ledger_enabled")
+    if "decision_ledger_max_lines" in cfg:
+        try:
+            ADVISORY_DECISION_LEDGER_MAX = max(
+                120,
+                min(8000, int(cfg.get("decision_ledger_max_lines") or 120)),
+            )
+            applied.append("decision_ledger_max_lines")
+        except Exception:
+            warnings.append("invalid_decision_ledger_max_lines")
 
     return {"applied": applied, "warnings": warnings}
 
@@ -539,6 +570,8 @@ def get_engine_config() -> Dict[str, Any]:
         "session_key_include_recent_tools": bool(SESSION_KEY_INCLUDE_RECENT_TOOLS),
         "delivery_stale_s": float(DELIVERY_STALE_SECONDS),
         "advisory_text_repeat_cooldown_s": float(ADVISORY_TEXT_REPEAT_COOLDOWN_S),
+        "decision_ledger_enabled": bool(ADVISORY_DECISION_LEDGER_ENABLED),
+        "decision_ledger_max_lines": int(ADVISORY_DECISION_LEDGER_MAX),
     }
 
 
@@ -999,6 +1032,96 @@ def _record_advisory_gate_drop(
     )
 
 
+def _snapshot_gate_decisions(gate_result: Any) -> List[Dict[str, Any]]:
+    decisions = list(getattr(gate_result, "decisions", []) or [])
+    out: List[Dict[str, Any]] = []
+    for decision in decisions:
+        try:
+            out.append({
+                "advice_id": str(getattr(decision, "advice_id", "") or ""),
+                "authority": str(getattr(decision, "authority", "") or ""),
+                "emit": bool(getattr(decision, "emit", False)),
+                "score": float(getattr(decision, "adjusted_score", 0.0) or 0.0),
+                "reason": str(getattr(decision, "reason", "") or ""),
+                "original_score": float(getattr(decision, "original_score", 0.0) or 0.0),
+            })
+        except Exception:
+            continue
+    return out
+
+
+def _record_advisory_decision_ledger(
+    *,
+    stage: str,
+    outcome: str,
+    tool_name: str,
+    intent_family: str,
+    task_plane: str,
+    route: str,
+    packet_id: Optional[str],
+    advice_items: Optional[List[Any]],
+    gate_result: Optional[Any],
+    session_id: str,
+    trace_id: Optional[str] = None,
+    extras: Optional[Dict[str, Any]] = None,
+    suppressed_reasons: Optional[Dict[str, int]] = None,
+) -> None:
+    if not ADVISORY_DECISION_LEDGER_ENABLED:
+        return
+
+    snapshot = _snapshot_gate_decisions(gate_result)
+    suppressed = []
+    emitted = []
+    for row in snapshot:
+        if row.get("emit"):
+            emitted.append(row)
+        else:
+            suppressed.append(row)
+
+    suppressed_summary: List[Dict[str, Any]] = []
+    reason_counts = dict(suppressed_reasons or {})
+    if not reason_counts and suppressed:
+        for row in suppressed:
+            reason = str(row.get("reason", "") or "unspecified").strip()
+            reason_counts[reason] = int(reason_counts.get(reason, 0) + 1)
+    for reason, count in sorted(reason_counts.items(), key=lambda kv: kv[1], reverse=True):
+        suppressed_summary.append({"reason": str(reason), "count": int(count)})
+    selected_ids = [str(row.get("advice_id", "") or "").strip() for row in emitted]
+    suppressed_ids = [str(row.get("advice_id", "") or "").strip() for row in suppressed]
+    route_clean = str(route or "").strip()
+
+    entry: Dict[str, Any] = {
+        "ts": time.time(),
+        "stage": str(stage or "").strip(),
+        "outcome": str(outcome or "").strip(),
+        "session_id": str(session_id or ""),
+        "trace_id": str(trace_id or ""),
+        "tool": str(tool_name or ""),
+        "intent_family": str(intent_family or ""),
+        "task_plane": str(task_plane or ""),
+        "route": route_clean,
+        "packet_id": str(packet_id or ""),
+        "route_hint": str(route_clean or ""),
+        "selected_count": int(len(selected_ids)),
+        "suppressed_count": int(len(suppressed_ids)),
+        "selected_ids": selected_ids[:12],
+        "suppressed_ids": suppressed_ids[:12],
+        "suppressed_reasons": suppressed_summary[:12],
+        "decision_count": len(snapshot),
+    }
+    if extras:
+        entry.update({k: v for k, v in extras.items() if v is not None})
+
+    if isinstance(advice_items, list):
+        entry["retrieved_count"] = len(advice_items)
+        entry["source_counts"] = _advice_source_counts(advice_items)
+    _append_jsonl_capped(
+        ADVISORY_DECISION_LEDGER_FILE,
+        entry,
+        max_lines=ADVISORY_DECISION_LEDGER_MAX,
+    )
+
+
 def _gate_suppression_metadata(gate_result: Any) -> Dict[str, Any]:
     suppressed = list(getattr(gate_result, "suppressed", []) or [])
     if not suppressed:
@@ -1164,6 +1287,42 @@ def _derive_delivery_badge(
         "event": event,
         "delivery_mode": mode,
     }
+
+
+def _decision_ledger_status() -> Dict[str, Any]:
+    status: Dict[str, Any] = {
+        "enabled": bool(ADVISORY_DECISION_LEDGER_ENABLED),
+        "path": str(ADVISORY_DECISION_LEDGER_FILE),
+        "exists": bool(ADVISORY_DECISION_LEDGER_FILE.exists()),
+        "total_entries": 0,
+        "recent_count": 0,
+        "recent_emitted_count": 0,
+        "recent_emission_rate": 0.0,
+    }
+
+    if not status["exists"]:
+        return status
+
+    try:
+        lines = ADVISORY_DECISION_LEDGER_FILE.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return status
+
+    parsed: List[Dict[str, Any]] = []
+    status["total_entries"] = int(len(lines))
+    for line in lines[-120:]:
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(row, dict):
+            parsed.append(row)
+
+    status["recent_count"] = int(len(parsed))
+    status["recent_emitted_count"] = int(sum(1 for row in parsed if str(row.get("outcome", "")).strip().lower() == "emitted"))
+    if status["recent_count"]:
+        status["recent_emission_rate"] = round(status["recent_emitted_count"] / max(status["recent_count"], 1), 3)
+    return status
 
 
 def _fallback_guard_allows() -> Dict[str, Any]:
@@ -1392,6 +1551,25 @@ def on_pre_tool(
 
         if not advice_items:
             save_state(state)
+            _record_advisory_decision_ledger(
+                stage="no_advice",
+                outcome="none",
+                tool_name=tool_name,
+                intent_family=intent_family,
+                task_plane=task_plane,
+                route=route,
+                packet_id=packet_id,
+                advice_items=advice_items,
+                gate_result=None,
+                session_id=session_id,
+                trace_id=resolved_trace_id,
+                extras={
+                    "event": "no_advice",
+                    "error_kind": "no_hit",
+                    "error_code": "AE_NO_ADVICE",
+                    "stage": "no_advice",
+                },
+            )
             _log_engine_event(
                 "no_advice",
                 tool_name,
@@ -1405,9 +1583,9 @@ def on_pre_tool(
                     "task_plane": task_plane,
                     "stage_ms": stage_ms,
                     "delivery_mode": "none",
-                    "advice_source_counts": advice_source_counts,
-                    "error_kind": "no_hit",
-                    "error_code": "AE_NO_ADVICE",
+                "advice_source_counts": advice_source_counts,
+                "error_kind": "no_hit",
+                "error_code": "AE_NO_ADVICE",
                 },
             )
             return None
@@ -1450,6 +1628,24 @@ def on_pre_tool(
                         "fallback_candidate_blocked": bool(
                             route and route.startswith("packet") and not PACKET_FALLBACK_EMIT_ENABLED
                         ),
+                    },
+                )
+                _record_advisory_decision_ledger(
+                    stage="gate_no_emit",
+                    outcome="blocked",
+                    tool_name=tool_name,
+                    intent_family=intent_family,
+                    task_plane=task_plane,
+                    route=route,
+                    packet_id=packet_id,
+                    advice_items=advice_items,
+                    gate_result=gate_result,
+                    session_id=session_id,
+                    trace_id=resolved_trace_id,
+                    extras={
+                        "error_kind": "policy",
+                        "error_code": "AE_GATE_SUPPRESSED",
+                        "suppressed_reasons": suppression_meta.get("suppressed_reasons", []),
                     },
                 )
                 save_state(state)
@@ -1500,6 +1696,25 @@ def on_pre_tool(
                         "fallback_window": fallback_guard.get("window"),
                     },
                 )
+                _record_advisory_decision_ledger(
+                    stage="fallback_rate_limit",
+                    outcome="blocked",
+                    tool_name=tool_name,
+                    intent_family=intent_family,
+                    task_plane=task_plane,
+                    route=route,
+                    packet_id=packet_id,
+                    advice_items=advice_items,
+                    gate_result=gate_result,
+                    session_id=session_id,
+                    trace_id=resolved_trace_id,
+                    extras={
+                        "error_kind": "policy",
+                        "error_code": "AE_FALLBACK_RATE_LIMIT",
+                        "fallback_rate_recent": fallback_guard.get("ratio"),
+                        "fallback_rate_limit": fallback_guard.get("limit"),
+                    },
+                )
                 save_state(state)
                 _log_engine_event(
                     "no_emit",
@@ -1538,6 +1753,28 @@ def on_pre_tool(
                     packet_id=packet_id,
                     advice_items=[None] if not advice_items else advice_items,
                     extras={
+                        "advisory_fingerprint": repeat_meta["fingerprint"],
+                        "repeat_age_s": repeat_meta["age_s"],
+                        "repeat_cooldown_s": repeat_meta["cooldown_s"],
+                        "actionability_added": bool(action_meta.get("added")),
+                        "actionability_command": action_meta.get("command"),
+                    },
+                )
+                _record_advisory_decision_ledger(
+                    stage="fallback_duplicate",
+                    outcome="blocked",
+                    tool_name=tool_name,
+                    intent_family=intent_family,
+                    task_plane=task_plane,
+                    route=route,
+                    packet_id=packet_id,
+                    advice_items=[None] if not advice_items else advice_items,
+                    gate_result=gate_result,
+                    session_id=session_id,
+                    trace_id=resolved_trace_id,
+                    extras={
+                        "error_kind": "policy",
+                        "error_code": "AE_DUPLICATE_SUPPRESSED",
                         "advisory_fingerprint": repeat_meta["fingerprint"],
                         "repeat_age_s": repeat_meta["age_s"],
                         "repeat_cooldown_s": repeat_meta["cooldown_s"],
@@ -1613,6 +1850,23 @@ def on_pre_tool(
                     **(fallback_error or {}),
                 },
             )
+            _record_advisory_decision_ledger(
+                stage="fallback_emit" if fallback_emitted else "fallback_emit_failed",
+                outcome="emitted" if fallback_emitted else "blocked",
+                tool_name=tool_name,
+                intent_family=intent_family,
+                task_plane=task_plane,
+                route=route,
+                packet_id=packet_id,
+                advice_items=advice_items,
+                gate_result=gate_result,
+                session_id=session_id,
+                trace_id=resolved_trace_id,
+                extras={
+                    "event": "fallback_emit" if fallback_emitted else "fallback_emit_failed",
+                    "advice_text_preview": fallback_text[:140],
+                },
+            )
             return fallback_text
 
         advice_by_id = {str(getattr(item, "advice_id", "")): item for item in advice_items}
@@ -1680,6 +1934,26 @@ def on_pre_tool(
                         advice_items=advice_items,
                         extras={
                             "suppressed_count": len(suppressed),
+                            "suppressed": suppressed[:8],
+                            "cooldown_s": round(float(cooldown), 2),
+                            "dedupe_scope": dedupe_scope,
+                        },
+                    )
+                    _record_advisory_decision_ledger(
+                        stage="global_dedupe_suppressed",
+                        outcome="blocked",
+                        tool_name=tool_name,
+                        intent_family=intent_family,
+                        task_plane=task_plane,
+                        route=route,
+                        packet_id=packet_id,
+                        advice_items=advice_items,
+                        gate_result=gate_result,
+                        session_id=session_id,
+                        trace_id=resolved_trace_id,
+                        extras={
+                            "error_kind": "policy",
+                            "error_code": "AE_GLOBAL_DEDUPE_SUPPRESSED",
                             "suppressed": suppressed[:8],
                             "cooldown_s": round(float(cooldown), 2),
                             "dedupe_scope": dedupe_scope,
@@ -1811,6 +2085,30 @@ def on_pre_tool(
                     "top_authority": str(getattr(gate_result.emitted[0], "authority", "")) if gate_result.emitted else "",
                 },
             )
+            _record_advisory_decision_ledger(
+                stage="duplicate_suppressed",
+                outcome="blocked",
+                tool_name=tool_name,
+                intent_family=intent_family,
+                task_plane=task_plane,
+                route=route,
+                packet_id=packet_id,
+                advice_items=advice_items,
+                gate_result=gate_result,
+                session_id=session_id,
+                trace_id=resolved_trace_id,
+                extras={
+                    "error_kind": "policy",
+                    "error_code": "AE_DUPLICATE_SUPPRESSED",
+                    "advisory_fingerprint": repeat_meta["fingerprint"],
+                    "repeat_age_s": repeat_meta["age_s"],
+                    "repeat_cooldown_s": repeat_meta["cooldown_s"],
+                    "actionability_added": bool(action_meta.get("added")),
+                    "actionability_command": action_meta.get("command"),
+                    "top_advice_id": str(getattr(gate_result.emitted[0], "advice_id", "")) if gate_result.emitted else "",
+                    "top_authority": str(getattr(gate_result.emitted[0], "authority", "")) if gate_result.emitted else "",
+                },
+            )
             save_state(state)
             _log_engine_event(
                 "duplicate_suppressed",
@@ -1860,11 +2158,16 @@ def on_pre_tool(
                 effective_text = " ".join(fragments)
         effective_action_meta = _ensure_actionability(effective_text, tool_name, task_plane) if emitted else {"text": effective_text, "added": False, "command": ""}
         effective_text = str(effective_action_meta.get("text") or effective_text)
-        if emitted:
-            shown_ids = [d.advice_id for d in gate_result.emitted]
-            dedupe_scope = _dedupe_scope_key(session_id)
-            session_lineage = _session_lineage(session_id)
-            mark_advice_shown(state, shown_ids)
+            if emitted:
+                shown_ids = [d.advice_id for d in gate_result.emitted]
+                dedupe_scope = _dedupe_scope_key(session_id)
+                session_lineage = _session_lineage(session_id)
+                mark_advice_shown(
+                    state,
+                    shown_ids,
+                    tool_name=tool_name,
+                    task_phase=state.task_phase,
+                )
             suppress_tool_advice(state, tool_name, duration_s=get_tool_cooldown_s())
             # Track retrieval only for delivered advice items (strict attribution).
             try:
@@ -2054,8 +2357,25 @@ def on_pre_tool(
                 "remaining_ms_before_synth": round(float(remaining_ms), 2),
                 "emitted_authorities": [
                     str(getattr(decision, "authority", "") or "").strip().lower()
-                    for decision in list(getattr(gate_result, "emitted", []) or [])[:4]
+                for decision in list(getattr(gate_result, "emitted", []) or [])[:4]
                 ],
+            },
+        )
+        _record_advisory_decision_ledger(
+            stage="emitted" if emitted else "synth_empty",
+            outcome="emitted" if emitted else "none",
+            tool_name=tool_name,
+            intent_family=intent_family,
+            task_plane=task_plane,
+            route=route,
+            packet_id=packet_id,
+            advice_items=advice_items,
+            gate_result=gate_result,
+            session_id=session_id,
+            trace_id=resolved_trace_id,
+            extras={
+                "delivery_mode": "live" if emitted else "none",
+                "emitted_text_preview": effective_text[:220],
             },
         )
         # Safety gate: block unsafe content before delivery
@@ -2072,6 +2392,23 @@ def on_pre_tool(
 
     except Exception as e:
         log_debug("advisory_engine", f"on_pre_tool failed for {tool_name}", e)
+        _record_advisory_decision_ledger(
+            stage="engine_error",
+            outcome="error",
+            tool_name=tool_name,
+            intent_family=intent_family,
+            task_plane=task_plane,
+            route=route,
+            packet_id=packet_id if "packet_id" in locals() else None,
+            advice_items=None,
+            gate_result=None,
+            session_id=session_id,
+            trace_id=resolved_trace_id if "resolved_trace_id" in locals() else None,
+            extras={
+                "event": "engine_error",
+                "error": str(e),
+            },
+        )
         _log_engine_event(
             "engine_error",
             tool_name,
@@ -2436,6 +2773,8 @@ def get_engine_status() -> Dict[str, Any]:
         status["prefetch_worker"] = get_worker_status()
     except Exception:
         status["prefetch_worker"] = {"error": "unavailable"}
+
+    status["decision_ledger"] = _decision_ledger_status()
 
     try:
         if ENGINE_LOG.exists():
