@@ -114,6 +114,7 @@ benchmarks/logs/
 sandbox/spark_sandbox/
 sandbox/spark_sandbox_diff.json
 node_modules/
+_pw_smoke.js
 
 # OSS launch hygiene (removed from public share)
 trace_hud/
