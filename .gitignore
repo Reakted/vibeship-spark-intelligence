@@ -125,3 +125,21 @@ logs/
 dist/
 build/
 vibeship_spark.egg-info/
+
+# Local test/debug scratch files
+_test_*.txt
+*_test_output.txt
+*_test_err.txt
+*_test_out.txt
+*.scratch
+*.local
+
+# MCP server config (may contain API keys in env fields)
+.mcp.json
+
+# Runtime-modified files (Spark hook writes to these)
+# CLAUDE.md is committed clean; local changes from hook are ignored
+# PROJECT.md same
+
+# Any file with local Windows paths in name
+C?UsersUSER*
