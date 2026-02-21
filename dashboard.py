@@ -2961,6 +2961,28 @@ def generate_html():
         return String(s ?? '').replace(/[&<>"']/g, (c) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}}[c]));
       }}
 
+      function sanitizeHtmlFragment(html) {{
+        const tpl = document.createElement('template');
+        tpl.innerHTML = String(html ?? '');
+        tpl.content.querySelectorAll('script,style,iframe,object,embed,link[rel="import"]').forEach((node) => node.remove());
+        tpl.content.querySelectorAll('*').forEach((node) => {{
+          Array.from(node.attributes || []).forEach((attr) => {{
+            const name = String(attr.name || '').toLowerCase();
+            const value = String(attr.value || '');
+            if (name.startsWith('on')) node.removeAttribute(attr.name);
+            if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\\s*javascript:/i.test(value)) {{
+              node.removeAttribute(attr.name);
+            }}
+          }});
+        }});
+        return tpl.innerHTML;
+      }}
+
+      function setSafeHTML(el, html) {{
+        if (!el) return;
+        el.innerHTML = sanitizeHtmlFragment(html);
+      }}
+
       // Surprises pagination state
       const SURPRISES_PER_PAGE = 6;
       let surprisesData = [];
@@ -2988,14 +3010,14 @@ def generate_html():
         const empty = $('surprises-empty');
         console.log('List element:', list, 'Empty element:', empty);
         if (total === 0) {{
-          if (list) list.innerHTML = '';
+          setSafeHTML(list, '');
           if (empty) empty.style.display = '';
         }} else {{
           if (empty) empty.style.display = 'none';
           const html = renderSurpriseItems(pageItems);
           console.log('Generated HTML length:', html.length);
           if (list) {{
-            list.innerHTML = html;
+            setSafeHTML(list, html);
           }} else {{
             console.error('surprises-list element not found!');
           }}
@@ -3071,12 +3093,12 @@ def generate_html():
         const oppEl = $('opp-enabled');
         if (oppEl) {{
           oppEl.className = `card-status ${{oppEnabled ? 'live' : 'offline'}}`;
-          oppEl.innerHTML = `<span class="status-dot"></span> ${{oppEnabled ? 'Active' : 'Disabled'}}`;
+          setSafeHTML(oppEl, `<span class="status-dot"></span> ${{oppEnabled ? 'Active' : 'Disabled'}}`);
         }}
         if ($('opp-adoption')) $('opp-adoption').textContent = `${{Math.round((Number(opp.adoption_rate) || 0) * 100)}}%`;
         if ($('opp-scanned')) $('opp-scanned').textContent = `${{Number(opp.scanned_recent || 0)}}`;
         if ($('opp-acted')) $('opp-acted').textContent = `${{Number(opp.acted_total || 0)}}`;
-        if ($('opp-list')) $('opp-list').innerHTML = renderOpportunityItems(opp.latest || []);
+        setSafeHTML($('opp-list'), renderOpportunityItems(opp.latest || []));
 
         // Update footer systems status
         const footerSys = $('footer-systems');
@@ -3103,7 +3125,7 @@ def generate_html():
             const advCls = advState === 'live' || advState === 'fallback' ? 'ok' : 'error';
             badges += `<span class="system-badge ${{advCls}}"><span class="system-dot"></span>Advisory ${{advState}}</span> `;
           }}
-          footerSys.innerHTML = badges;
+          setSafeHTML(footerSys, badges);
         }}
       }}
 
@@ -3614,9 +3636,26 @@ def generate_ops_html():
         return String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
       }
 
+      function sanitizeHtmlFragment(html) {
+        const tpl = document.createElement('template');
+        tpl.innerHTML = String(html ?? '');
+        tpl.content.querySelectorAll('script,style,iframe,object,embed,link[rel="import"]').forEach((node) => node.remove());
+        tpl.content.querySelectorAll('*').forEach((node) => {
+          Array.from(node.attributes || []).forEach((attr) => {
+            const name = String(attr.name || '').toLowerCase();
+            const value = String(attr.value || '');
+            if (name.startsWith('on')) node.removeAttribute(attr.name);
+            if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\\s*javascript:/i.test(value)) {
+              node.removeAttribute(attr.name);
+            }
+          });
+        });
+        return tpl.innerHTML;
+      }
+
       function setHTML(id, html) {
         const el = $(id);
-        if (el) el.innerHTML = html;
+        if (el) el.innerHTML = sanitizeHtmlFragment(html);
       }
 
       function fmtTime(ts) {
@@ -4260,6 +4299,23 @@ def _base_page(title: str, active: str, body: str, data: Dict[str, Any], endpoin
     const DASHBOARD_AUTH_TOKEN = {dashboard_auth_token};
     const $ = (id) => document.getElementById(id);
     const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"\\'":"&#39;"}}[char]));
+    const sanitizeHtmlFragment = (html) => {{
+      const tpl = document.createElement('template');
+      tpl.innerHTML = String(html ?? '');
+      tpl.content.querySelectorAll('script,style,iframe,object,embed,link[rel="import"]').forEach((node) => node.remove());
+      tpl.content.querySelectorAll('*').forEach((node) => {{
+        Array.from(node.attributes || []).forEach((attr) => {{
+          const name = String(attr.name || '').toLowerCase();
+          const value = String(attr.value || '');
+          if (name.startsWith('on')) node.removeAttribute(attr.name);
+          if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\\s*javascript:/i.test(value)) {{
+            node.removeAttribute(attr.name);
+          }}
+        }});
+      }});
+      return tpl.innerHTML;
+    }};
+    const setSafeHTML = (el, html) => {{ if (!el) return; el.innerHTML = sanitizeHtmlFragment(html); }};
     const authHeaders = () => {{
       const headers = {{ 'Content-Type': 'application/json' }};
       if (DASHBOARD_AUTH_TOKEN) {{
@@ -4280,10 +4336,10 @@ def _base_page(title: str, active: str, body: str, data: Dict[str, Any], endpoin
       const el = $(id);
       if (!el) return;
       if (!items || !items.length) {{
-        el.innerHTML = '<div class="muted">No activity yet.</div>';
+        setSafeHTML(el, '<div class="muted">No activity yet.</div>');
         return;
       }}
-      el.innerHTML = items.map(render).join('');
+      setSafeHTML(el, items.map(render).join(''));
     }};
     const updateFunnel = (f) => {{
       if (!f) return;

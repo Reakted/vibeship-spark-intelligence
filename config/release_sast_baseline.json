@@ -1,0 +1,48 @@
+{
+  "generated_at_epoch": 1771716943,
+  "source": "scripts/public_release_safety_check.py",
+  "rules": [
+    "S603",
+    "S607",
+    "S608",
+    "S609",
+    "S610",
+    "S611",
+    "S612",
+    "S701",
+    "S702"
+  ],
+  "targets": [
+    "lib",
+    "hooks",
+    "adapters",
+    "dashboard.py",
+    "sparkd.py",
+    "bridge_worker.py",
+    "spark_watchdog.py",
+    "spark_scheduler.py",
+    "spark_pulse.py",
+    "tracer_dashboard.py",
+    "tracer_terminal.py",
+    "meta_ralph_dashboard.py",
+    "mind_server.py",
+    "cli.py"
+  ],
+  "ruff_fingerprints": [
+    "S603|lib/clawdbot_memory_setup.py|`subprocess` call: check for execution of untrusted input",
+    "S603|lib/llm.py|`subprocess` call: check for execution of untrusted input",
+    "S603|lib/service_control.py|`subprocess` call: check for execution of untrusted input",
+    "S603|spark_pulse.py|`subprocess` call: check for execution of untrusted input",
+    "S603|spark_scheduler.py|`subprocess` call: check for execution of untrusted input",
+    "S603|spark_watchdog.py|`subprocess` call: check for execution of untrusted input",
+    "S603|tracer_terminal.py|`subprocess` call: check for execution of untrusted input",
+    "S607|lib/llm.py|Starting a process with a partial executable path",
+    "S607|lib/service_control.py|Starting a process with a partial executable path",
+    "S607|spark_watchdog.py|Starting a process with a partial executable path",
+    "S608|dashboard.py|Possible SQL injection vector through string-based query construction",
+    "S608|lib/depth_forge_scorer.py|Possible SQL injection vector through string-based query construction",
+    "S608|lib/memory_store.py|Possible SQL injection vector through string-based query construction",
+    "S608|lib/observatory/explorer.py|Possible SQL injection vector through string-based query construction",
+    "S608|lib/run_log.py|Possible SQL injection vector through string-based query construction"
+  ]
+}

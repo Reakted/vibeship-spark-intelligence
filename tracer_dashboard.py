@@ -1162,6 +1162,28 @@ def generate_html() -> str:
             return div.innerHTML;
         }
         
+        function sanitizeHtmlFragment(html) {
+            const tpl = document.createElement('template');
+            tpl.innerHTML = String(html || '');
+            tpl.content.querySelectorAll('script,style,iframe,object,embed,link[rel="import"]').forEach((node) => node.remove());
+            tpl.content.querySelectorAll('*').forEach((node) => {
+                Array.from(node.attributes || []).forEach((attr) => {
+                    const name = String(attr.name || '').toLowerCase();
+                    const value = String(attr.value || '');
+                    if (name.startsWith('on')) node.removeAttribute(attr.name);
+                    if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\\s*javascript:/i.test(value)) {
+                        node.removeAttribute(attr.name);
+                    }
+                });
+            });
+            return tpl.innerHTML;
+        }
+        
+        function setSafeHTML(el, html) {
+            if (!el) return;
+            el.innerHTML = sanitizeHtmlFragment(html);
+        }
+        
         // Update dashboard
         async function updateDashboard() {
             try {
@@ -1189,14 +1211,14 @@ def generate_html() -> str:
                 const activeList = document.getElementById('active-traces');
                 document.getElementById('active-count').textContent = data.active.length;
                 if (data.active.length > 0) {
-                    activeList.innerHTML = data.active.map(renderActiveTrace).join('');
+                    setSafeHTML(activeList, data.active.map(renderActiveTrace).join(''));
                 } else {
-                    activeList.innerHTML = `
+                    setSafeHTML(activeList, `
                         <li class="empty-state">
                             <div class="empty-state-icon">◌</div>
                             <p>No active traces</p>
                         </li>
-                    `;
+                    `);
                 }
                 
                 // Update blocked traces
@@ -1205,7 +1227,7 @@ def generate_html() -> str:
                 document.getElementById('blocked-count').textContent = data.blocked.length;
                 if (data.blocked.length > 0) {
                     blockedSection.style.display = 'block';
-                    blockedList.innerHTML = data.blocked.map(renderBlockedTrace).join('');
+                    setSafeHTML(blockedList, data.blocked.map(renderBlockedTrace).join(''));
                 } else {
                     blockedSection.style.display = 'none';
                 }
@@ -1214,17 +1236,17 @@ def generate_html() -> str:
                 const completedList = document.getElementById('completed-traces');
                 document.getElementById('completed-count').textContent = data.completed.length;
                 if (data.completed.length > 0) {
-                    completedList.innerHTML = data.completed.map(renderCompletedTrace).join('');
+                    setSafeHTML(completedList, data.completed.map(renderCompletedTrace).join(''));
                 } else {
-                    completedList.innerHTML = `
+                    setSafeHTML(completedList, `
                         <li class="empty-state">
                             <p>No completed traces</p>
                         </li>
-                    `;
+                    `);
                 }
                 
                 // Update phase chart
-                document.getElementById('phase-chart').innerHTML = renderPhaseChart(data.phase_chart);
+                setSafeHTML(document.getElementById('phase-chart'), renderPhaseChart(data.phase_chart));
                 
                 // Update footer
                 document.getElementById('last-update').textContent = 'Updated: ' + new Date().toLocaleTimeString();
@@ -1539,6 +1561,23 @@ def generate_scorer_html() -> str:
             return Math.round(n/3600) + 'h';
         }
         function escapeHtml(text) { if (!text) return ''; const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
+        function sanitizeHtmlFragment(html) {
+            const tpl = document.createElement('template');
+            tpl.innerHTML = String(html || '');
+            tpl.content.querySelectorAll('script,style,iframe,object,embed,link[rel="import"]').forEach((node) => node.remove());
+            tpl.content.querySelectorAll('*').forEach((node) => {
+                Array.from(node.attributes || []).forEach((attr) => {
+                    const name = String(attr.name || '').toLowerCase();
+                    const value = String(attr.value || '');
+                    if (name.startsWith('on')) node.removeAttribute(attr.name);
+                    if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\\s*javascript:/i.test(value)) {
+                        node.removeAttribute(attr.name);
+                    }
+                });
+            });
+            return tpl.innerHTML;
+        }
+        function setSafeHTML(el, html) { if (!el) return; el.innerHTML = sanitizeHtmlFragment(html); }
         function effectTag(effect) {
             const e = String(effect || 'neutral').toLowerCase();
             const cls = (e === 'positive') ? 'pos' : (e === 'negative') ? 'neg' : 'neu';
@@ -1560,7 +1599,7 @@ def generate_scorer_html() -> str:
             const body = document.getElementById('items-body');
             if (!data || !data.ok) {
                 meta.textContent = (data && data.hint) ? data.hint : 'No report.';
-                body.innerHTML = `<tr><td colspan="6" class="muted">${escapeHtml(meta.textContent)}</td></tr>`;
+                setSafeHTML(body, `<tr><td colspan="6" class="muted">${escapeHtml(meta.textContent)}</td></tr>`);
                 return;
             }
             const k = data.kpis || {};
@@ -1578,7 +1617,7 @@ def generate_scorer_html() -> str:
                 const conf = (it.confidence === null || it.confidence === undefined) ? '-' : String(it.confidence);
                 return `<tr><td>${statusTag(it.status)}</td><td>${effectTag(it.effect)}</td><td class="muted">${escapeHtml(latency)}</td><td class="muted">${escapeHtml(conf)}</td><td class="rec">${escapeHtml(it.recommendation || '')}<div class="small muted">${escapeHtml(it.match_type || '')}${it.effect_reason ? ' | ' + escapeHtml(it.effect_reason) : ''}</div></td><td class="muted">${escapeHtml(it.tool || '')}</td></tr>`;
             }).join('');
-            body.innerHTML = rows || `<tr><td colspan="6" class="muted">No items for filters.</td></tr>`;
+            setSafeHTML(body, rows || `<tr><td colspan="6" class="muted">No items for filters.</td></tr>`);
         }
 
         async function refresh() {

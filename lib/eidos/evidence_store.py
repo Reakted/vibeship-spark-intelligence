@@ -19,6 +19,7 @@ Retention Policy:
 
 import hashlib
 import json
+import re
 import sqlite3
 import time
 import zlib
@@ -26,6 +27,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class EvidenceType(Enum):
@@ -51,6 +54,13 @@ RETENTION_POLICY = {
     EvidenceType.SECURITY_EVENT: 90 * 24 * 3600,   # 90 days
     EvidenceType.USER_FLAGGED: None,          # Permanent
 }
+
+
+def _safe_sql_identifier(name: str) -> Optional[str]:
+    ident = str(name or "").strip()
+    if not ident or _SQL_IDENTIFIER_RE.fullmatch(ident) is None:
+        return None
+    return ident
 
 
 @dataclass
@@ -193,8 +203,12 @@ class EvidenceStore:
 
     def _column_exists(self, conn: sqlite3.Connection, table: str, column: str) -> bool:
         try:
-            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-            return any(r[1] == column for r in rows)
+            safe_table = _safe_sql_identifier(table)
+            safe_column = _safe_sql_identifier(column)
+            if not safe_table or not safe_column:
+                return False
+            rows = conn.execute(f'PRAGMA table_info("{safe_table}")').fetchall()
+            return any(r[1] == safe_column for r in rows)
         except Exception:
             return False
 

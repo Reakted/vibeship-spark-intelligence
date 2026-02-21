@@ -26,6 +26,8 @@ from .models import (
     Budget, Phase, Outcome, Evaluation, DistillationType, ActionType
 )
 
+_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 def _normalize_distillation_statement(text: str) -> str:
     """Normalize statements so semantically identical distillations collapse."""
@@ -49,6 +51,13 @@ def _merge_unique_str(items_a: List[str], items_b: List[str]) -> List[str]:
         if v not in out:
             out.append(v)
     return out
+
+
+def _safe_sql_identifier(name: str) -> Optional[str]:
+    ident = str(name or "").strip()
+    if not ident or _SQL_IDENTIFIER_RE.fullmatch(ident) is None:
+        return None
+    return ident
 
 
 class EidosStore:
@@ -188,8 +197,12 @@ class EidosStore:
 
     def _column_exists(self, conn: sqlite3.Connection, table: str, column: str) -> bool:
         try:
-            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-            return any(r[1] == column for r in rows)
+            safe_table = _safe_sql_identifier(table)
+            safe_column = _safe_sql_identifier(column)
+            if not safe_table or not safe_column:
+                return False
+            rows = conn.execute(f'PRAGMA table_info("{safe_table}")').fetchall()
+            return any(r[1] == safe_column for r in rows)
         except Exception:
             return False
 
@@ -815,10 +828,9 @@ class EidosStore:
                 if ratio < 0.15:
                     low_ids.append(row["distillation_id"])
             if low_ids:
-                placeholders = ",".join("?" * len(low_ids))
-                conn.execute(
-                    f"DELETE FROM distillations WHERE distillation_id IN ({placeholders})",
-                    low_ids,
+                conn.executemany(
+                    "DELETE FROM distillations WHERE distillation_id = ?",
+                    [(dist_id,) for dist_id in low_ids],
                 )
                 pruned["low_success"] = len(low_ids)
 

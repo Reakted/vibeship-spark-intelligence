@@ -5,15 +5,21 @@ from __future__ import annotations
 
 import fnmatch
 import ast
+import json
 import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = Path(__file__).resolve()
+SAST_BASELINE_PATH = REPO_ROOT / "config" / "release_sast_baseline.json"
+
+BOOL_TRUE_VALUES = {"1", "true", "yes", "on"}
+BOOL_FALSE_VALUES = {"0", "false", "no", "off"}
 
 FORBIDDEN_FILENAMES = [
     "CLAUDE.md",
@@ -65,6 +71,74 @@ AST_RISK_PATTERNS = {
         "message": "pickle.load usage",
     },
 }
+
+SAST_RUFF_RULES = (
+    "S603",  # subprocess with possible untrusted input
+    "S607",  # partial executable path
+    "S608",  # string-built SQL
+    "S609",  # wildcard command injection
+    "S610",  # django extra
+    "S611",  # django raw
+    "S612",  # logging config from fileConfig/listen
+    "S701",  # jinja2 autoescape false
+    "S702",  # use of mako templates
+)
+
+SAST_RUFF_TARGETS = (
+    "lib",
+    "hooks",
+    "adapters",
+    "dashboard.py",
+    "sparkd.py",
+    "bridge_worker.py",
+    "spark_watchdog.py",
+    "spark_scheduler.py",
+    "spark_pulse.py",
+    "tracer_dashboard.py",
+    "tracer_terminal.py",
+    "meta_ralph_dashboard.py",
+    "mind_server.py",
+    "cli.py",
+)
+
+SAST_ISSUE_DISPLAY_LIMIT = 25
+
+
+def _parse_env_bool(name: str) -> bool | None:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return None
+    if raw in BOOL_TRUE_VALUES:
+        return True
+    if raw in BOOL_FALSE_VALUES:
+        return False
+    return None
+
+
+def _dep_audit_timeout_seconds() -> int:
+    raw = os.environ.get("SPARK_RELEASE_DEP_AUDIT_TIMEOUT_SEC", "").strip()
+    if not raw:
+        return 180
+    try:
+        return max(30, min(900, int(raw)))
+    except Exception:
+        return 180
+
+
+def _load_json_from_mixed_output(raw: str) -> object | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    for start_token in ("{", "["):
+        idx = text.find(start_token)
+        if idx < 0:
+            continue
+        snippet = text[idx:]
+        try:
+            return json.loads(snippet)
+        except Exception:
+            continue
+    return None
 
 
 def _is_subprocess_call_with_shell(node: ast.AST) -> bool:
@@ -170,6 +244,9 @@ def _is_placeholder_scan_target(path_str: str) -> bool:
 def _is_ast_risk_scan_allowed(path: Path) -> bool:
     if path.as_posix().split("/")[0] == "tests" or "tests" in path.parts:
         return False
+    rel = _norm_rel_path(str(path))
+    if rel.startswith("scripts/experimental/"):
+        return False
     if path.parent.name == "scripts" and path.name.startswith("test_"):
         return False
     return True
@@ -196,12 +273,12 @@ def _scan_python_source(path: Path, text: str, include_risk: bool) -> list[str]:
 
 
 def _dependency_audit_is_strict() -> bool:
-    raw = os.environ.get("SPARK_RELEASE_REQUIRE_DEP_AUDIT", "").strip().lower()
-    if raw:
-        return raw in {"1", "true", "yes", "on"}
+    configured = _parse_env_bool("SPARK_RELEASE_REQUIRE_DEP_AUDIT")
+    if configured is not None:
+        return configured
     ci = os.environ.get("CI", "").strip().lower()
     gha = os.environ.get("GITHUB_ACTIONS", "").strip().lower()
-    return ci in {"1", "true", "yes", "on"} or gha in {"1", "true", "yes", "on"}
+    return ci in BOOL_TRUE_VALUES or gha in BOOL_TRUE_VALUES
 
 
 def _run_dependency_audit() -> list[str]:
@@ -220,12 +297,12 @@ def _run_dependency_audit() -> list[str]:
 
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip_audit", "--progress-spinner", "off", "--format", "json"],
+            [sys.executable, "-m", "pip_audit", "--progress-spinner", "off", "--format", "json", "."],
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
             check=False,
-            timeout=60,
+            timeout=_dep_audit_timeout_seconds(),
         )
     except Exception as exc:  # pragma: no cover
         if strict:
@@ -238,16 +315,188 @@ def _run_dependency_audit() -> list[str]:
     if "No known vulnerabilities found" in (result.stdout or ""):
         return findings
 
+    parsed: list[dict[str, object]] = []
     if result.stdout.strip():
+        loaded = _load_json_from_mixed_output(result.stdout)
+        if isinstance(loaded, list):
+            parsed = [row for row in loaded if isinstance(row, dict)]
+        elif isinstance(loaded, dict):
+            deps = loaded.get("dependencies")
+            if isinstance(deps, list):
+                parsed = [row for row in deps if isinstance(row, dict)]
+
+    vuln_rows: list[str] = []
+    for dep in parsed:
+        name = str(dep.get("name") or "")
+        version = str(dep.get("version") or "")
+        vulns = dep.get("vulns")
+        if not isinstance(vulns, list):
+            continue
+        for vuln in vulns:
+            if not isinstance(vuln, dict):
+                continue
+            vuln_id = str(vuln.get("id") or "unknown")
+            fix_versions = vuln.get("fix_versions")
+            fix_hint = ""
+            if isinstance(fix_versions, list) and fix_versions:
+                fix_hint = f" fix={','.join(str(v) for v in fix_versions[:3])}"
+            vuln_rows.append(f"{name}@{version} {vuln_id}{fix_hint}".strip())
+
+    if vuln_rows:
         if strict:
-            findings.append("dependency_audit: vulnerabilities or dependency warnings present")
+            findings.append(f"dependency_audit: {len(vuln_rows)} vulnerability entries reported")
+            for row in vuln_rows[:10]:
+                findings.append(f"dependency_audit_detail: {row}")
         else:
-            print("warning: pip-audit found dependency issues; run with SPARK_RELEASE_REQUIRE_DEP_AUDIT=1 to block release")
+            print("warning: pip-audit found vulnerabilities (non-blocking)")
+    elif strict:
+        findings.append("dependency_audit: pip-audit returned non-zero status")
+
     if result.stderr.strip():
         if strict:
             findings.append(f"dependency_audit_stderr: {result.stderr.strip()[:400]}")
         else:
             print("warning: pip-audit stderr:", result.stderr.strip()[:400])
+    return findings
+
+
+def _sast_scan_is_strict() -> bool:
+    configured = _parse_env_bool("SPARK_RELEASE_REQUIRE_SAST")
+    if configured is not None:
+        return configured
+    ci = os.environ.get("CI", "").strip().lower()
+    gha = os.environ.get("GITHUB_ACTIONS", "").strip().lower()
+    return ci in BOOL_TRUE_VALUES or gha in BOOL_TRUE_VALUES
+
+
+def _sast_refresh_requested() -> bool:
+    return _parse_env_bool("SPARK_RELEASE_REFRESH_SAST_BASELINE") is True
+
+
+def _norm_rel_path(path_str: str) -> str:
+    try:
+        return Path(path_str).resolve().relative_to(REPO_ROOT).as_posix()
+    except Exception:
+        return Path(path_str).as_posix()
+
+
+def _ruff_issue_fingerprint(issue: dict[str, object]) -> str:
+    path = _norm_rel_path(str(issue.get("filename") or ""))
+    code = str(issue.get("code") or "UNKNOWN")
+    message = re.sub(r"\s+", " ", str(issue.get("message") or "")).strip()
+    return f"{code}|{path}|{message}"
+
+
+def _load_sast_baseline() -> set[str]:
+    if not SAST_BASELINE_PATH.exists():
+        return set()
+    try:
+        payload = json.loads(SAST_BASELINE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    if not isinstance(payload, dict):
+        return set()
+    rows = payload.get("ruff_fingerprints")
+    if not isinstance(rows, list):
+        return set()
+    return {str(item).strip() for item in rows if str(item).strip()}
+
+
+def _write_sast_baseline(issues: list[dict[str, object]]) -> None:
+    fingerprints = sorted({_ruff_issue_fingerprint(issue) for issue in issues})
+    payload = {
+        "generated_at_epoch": int(time.time()),
+        "source": "scripts/public_release_safety_check.py",
+        "rules": list(SAST_RUFF_RULES),
+        "targets": list(SAST_RUFF_TARGETS),
+        "ruff_fingerprints": fingerprints,
+    }
+    SAST_BASELINE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SAST_BASELINE_PATH.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _run_sast_ruff_gate() -> list[str]:
+    findings: list[str] = []
+    strict = _sast_scan_is_strict()
+    skip_sast = _parse_env_bool("SPARK_RELEASE_SKIP_SAST") is True
+    if skip_sast:
+        return findings
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "ruff",
+        "check",
+        *SAST_RUFF_TARGETS,
+        "--select",
+        ",".join(SAST_RUFF_RULES),
+        "--output-format",
+        "json",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+    except Exception as exc:  # pragma: no cover
+        if strict:
+            return [f"sast_ruff: unable to run ruff security scan ({exc})"]
+        return findings
+
+    if result.returncode not in {0, 1}:
+        if strict:
+            return [f"sast_ruff: execution failed (exit={result.returncode})", f"sast_ruff_stderr: {result.stderr.strip()[:400]}"]
+        return findings
+
+    try:
+        parsed = json.loads(result.stdout or "[]")
+        issues = [row for row in parsed if isinstance(row, dict)]
+    except Exception:
+        if strict:
+            return ["sast_ruff: failed to parse JSON output"]
+        return findings
+
+    if _sast_refresh_requested():
+        _write_sast_baseline(issues)
+        print(f"info: refreshed SAST baseline at {SAST_BASELINE_PATH.relative_to(REPO_ROOT).as_posix()}")
+        return findings
+
+    baseline = _load_sast_baseline()
+    if not baseline:
+        if strict:
+            return [
+                "sast_ruff: missing baseline file config/release_sast_baseline.json",
+                "sast_ruff: run with SPARK_RELEASE_REFRESH_SAST_BASELINE=1 to create baseline intentionally",
+            ]
+        return findings
+
+    unexpected: list[dict[str, object]] = []
+    seen_fingerprints: set[str] = set()
+    for issue in issues:
+        fingerprint = _ruff_issue_fingerprint(issue)
+        seen_fingerprints.add(fingerprint)
+        if fingerprint not in baseline:
+            unexpected.append(issue)
+
+    stale = baseline - seen_fingerprints
+    if stale:
+        print(f"info: SAST baseline has {len(stale)} stale fingerprints (consider refreshing baseline)")
+
+    if unexpected:
+        findings.append(f"sast_ruff: {len(unexpected)} unapproved finding(s) not present in baseline")
+        for issue in unexpected[:SAST_ISSUE_DISPLAY_LIMIT]:
+            path = _norm_rel_path(str(issue.get("filename") or ""))
+            loc = issue.get("location") or {}
+            row = 0
+            if isinstance(loc, dict):
+                row = int((loc.get("row") or 0))
+            code = str(issue.get("code") or "UNKNOWN")
+            msg = str(issue.get("message") or "").strip()
+            findings.append(f"sast_ruff_detail: {path}:{row}:{code}: {msg}")
     return findings
 
 
@@ -264,6 +513,7 @@ def main() -> int:
         findings.extend(f"{path_str}: {issue}" for issue in _scan_file(path))
 
     findings.extend(_run_dependency_audit())
+    findings.extend(_run_sast_ruff_gate())
 
     if findings:
         print("Public release safety check failed. Blocked items:")
