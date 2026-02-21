@@ -104,6 +104,8 @@ MIN_VALIDATIONS_FOR_STRONG_ADVICE = 2
 MAX_ADVICE_ITEMS = 8
 ADVICE_CACHE_TTL_SECONDS = 120  # 2 minutes (lowered from 5 for fresher advice)
 MIN_RANK_SCORE = 0.45  # Lowered from 0.60 — downstream gates already filter effectively
+CATEGORY_EFFECTIVENESS_MIN_SURFACE = 6
+CATEGORY_EFFECTIVENESS_DECAY_SECONDS = 14 * 24 * 3600
 MIND_MAX_STALE_SECONDS = float(os.environ.get("SPARK_ADVISOR_MIND_MAX_STALE_S", "0"))
 MIND_STALE_ALLOW_IF_EMPTY = os.environ.get("SPARK_ADVISOR_MIND_STALE_ALLOW_IF_EMPTY", "1") != "0"
 MIND_MIN_SALIENCE = float(os.environ.get("SPARK_ADVISOR_MIND_MIN_SALIENCE", "0.5"))
@@ -512,6 +514,15 @@ def _parse_bool(value: Any, default: bool) -> bool:
     return bool(default)
 
 
+def _coerce_advisory_category_value(raw: Any, *, fallback: str = "general") -> str:
+    category = str(raw or "").strip().lower()
+    if not category or category == "none":
+        category = str(fallback or "general").strip().lower() or "general"
+    if category.startswith("eidos"):
+        category = category.replace(":", "_")
+    return category[:64]
+
+
 def _safe_float(value: Any, default: float) -> float:
     try:
         return float(value)
@@ -878,7 +889,7 @@ def record_recent_delivery(
     advisory_readiness = advisory_readiness or []
     advisory_quality = advisory_quality or []
     categories = categories or []
-    cat_items = [str(c).strip().lower() or "general" for c in categories if categories]
+    cat_items = [_coerce_advisory_category_value(c, fallback="general") for c in categories] if categories else []
     if not cat_items:
         cat_items = ["general"] * len(advice_ids)
     if len(cat_items) < len(advice_ids):
@@ -1419,13 +1430,50 @@ class SparkAdvisor:
 
     @staticmethod
     def _coerce_advisory_category(raw: Any, *, fallback: str = "general") -> str:
-        category = str(raw or "").strip().lower()
-        if not category:
-            return fallback
-        # Keep storage categories stable and concise.
-        if category.startswith("eidos"):
-            category = category.replace(":", "_")
-        return category[:64]
+        return _coerce_advisory_category_value(raw, fallback=fallback)
+
+    def _category_boost_from_effectiveness(self, category: str) -> float:
+        """Compute a bounded multiplier for category-level demonstrated utility."""
+        if not isinstance(self.effectiveness, dict):
+            return 1.0
+        cat = self._coerce_advisory_category(category, fallback="general")
+        buckets = self.effectiveness.get("by_category") or {}
+        if not isinstance(buckets, dict):
+            return 1.0
+        row = self._coerce_category_bucket(buckets.get(cat, {}))
+        surfaced = float(row.get("surfaced", 0) or 0.0)
+        if surfaced <= 0:
+            return 1.0
+        total = float(row.get("total", 0) or 0.0)
+        helpful = float(row.get("helpful", 0) or 0.0)
+        readiness_sum = float(row.get("readiness_sum", 0.0) or 0.0)
+        readiness_count = float(row.get("readiness_count", 0) or 0.0)
+        quality_sum = float(row.get("quality_sum", 0.0) or 0.0)
+        quality_count = float(row.get("quality_count", 0) or 0.0)
+        if total <= 0 and readiness_count <= 0 and quality_count <= 0:
+            return 1.0
+
+        follow_rate = total / surfaced
+        helpful_rate = helpful / total if total > 0 else 0.0
+        readiness_avg = readiness_sum / max(1.0, readiness_count)
+        quality_avg = quality_sum / max(1.0, quality_count)
+
+        evidence = min(1.0, surfaced / max(1, CATEGORY_EFFECTIVENESS_MIN_SURFACE))
+        signal = (
+            (0.35 * follow_rate)
+            + (0.35 * helpful_rate)
+            + (0.15 * readiness_avg)
+            + (0.15 * quality_avg)
+        )
+        multiplier = 0.85 + (0.35 * evidence * signal)
+
+        last_ts = float(row.get("last_ts", 0.0) or 0.0)
+        if last_ts > 0:
+            age = max(0.0, time.time() - last_ts)
+            recency = 1.0 - min(age / max(1.0, float(CATEGORY_EFFECTIVENESS_DECAY_SECONDS)), 0.20)
+            multiplier *= max(0.9, recency)
+
+        return max(0.9, min(1.2, multiplier))
 
     def _advice_category(self, advice: Advice) -> str:
         if advice is not None and str(getattr(advice, "category", "") or "").strip():
@@ -4563,6 +4611,10 @@ class SparkAdvisor:
             helpful_rate = source_stats.get("helpful", 0) / source_stats["total"]
             base_score *= (0.8 + helpful_rate * 0.4)  # 0.8x to 1.2x
 
+        # Category-level boost based on demonstrated post-tool usefulness.
+        category = self._advice_category(a)
+        base_score *= self._category_boost_from_effectiveness(category)
+
         # Emotional priority boost: bridge pipeline emotional salience into ranking.
         # Capped at +20% to keep emotion as a tiebreaker, not a dominator.
         ep = float(getattr(a, "emotional_priority", 0.0) or 0.0)
@@ -5271,6 +5323,7 @@ Output only JSON with `order` as a list of 0-based indices (descending by releva
             readiness_count = float(row.get("readiness_count", 0) or 0.0)
             quality_sum = float(row.get("quality_sum", 0.0) or 0.0)
             quality_count = float(row.get("quality_count", 0) or 0.0)
+            category_boost = self._category_boost_from_effectiveness(str(category))
             category_report[str(category)] = {
                 "surfaced": int(surfaced),
                 "followed": int(total_seen),
@@ -5279,6 +5332,7 @@ Output only JSON with `order` as a list of 0-based indices (descending by releva
                 "helpful_rate": round(helpful_seen / max(1.0, total_seen), 4) if total_seen else 0.0,
                 "avg_readiness": round(readiness_sum / max(1.0, readiness_count), 4),
                 "avg_quality": round(quality_sum / max(1.0, quality_count), 4),
+                "category_boost": round(category_boost, 4),
             }
 
         return {
