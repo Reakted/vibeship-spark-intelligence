@@ -110,10 +110,81 @@ Your Agent (Claude Code / Cursor / OpenClaw)
   -> pre-tool advisory surfaced + context files refreshed
 ```
 
+## Obsidian Observatory
+
+Spark ships with an [Obsidian](https://obsidian.md) integration that turns the entire intelligence pipeline into a human-readable vault you can browse, search, and query.
+
+### What you get
+
+- **Flow Dashboard** — Mermaid diagram of all 12 pipeline stages with live metrics
+- **Stage Detail Pages** — per-stage health, recent activity, upstream/downstream links
+- **Explorer** — browse individual cognitive insights, EIDOS episodes, distillations, Meta-Ralph verdicts, promotions, advisory decisions, feedback signals, routing, and tuneable evolution
+- **Canvas View** — spatial layout of the full pipeline (Obsidian Canvas)
+- **Dataview Dashboard** — pre-built queries for daily monitoring (requires Dataview plugin)
+- **Tuneable Impact Analysis** — cross-references parameter changes with follow-rate outcomes
+
+### Quick start
+
+```bash
+# Generate the observatory (creates ~465 markdown files in < 1 second)
+python scripts/generate_observatory.py --force --verbose
+
+# Open the vault in Obsidian:
+# File > Open vault > Open folder as vault > select the generated vault directory
+```
+
+The observatory auto-syncs every 120 seconds when the pipeline is running. No manual regeneration needed.
+
+### What's inside
+
+```
+Spark-Intelligence-Observatory/
+  _observatory/
+    flow.md              # Main dashboard + Mermaid pipeline diagram
+    flow.canvas          # Spatial Canvas view
+    stages/              # 12 stage detail pages
+    explore/             # 10 browsable data stores
+      cognitive/         # Individual insights (with detail pages)
+      distillations/     # EIDOS distillations (with detail pages)
+      episodes/          # EIDOS episodes + steps (with detail pages)
+      verdicts/          # Meta-Ralph verdicts (with detail pages)
+      decisions/         # Advisory emit/suppress/block decisions
+      feedback/          # Implicit feedback (followed/ignored signals)
+      routing/           # Retrieval router decisions
+      tuning/            # Tuneable evolution + impact analysis
+      promotions/        # Promotion log
+      advisory/          # Advisory effectiveness
+  Dashboard.md           # Dataview dashboard (safe to customize)
+  packets/               # Advisory packets (existing)
+  watchtower.md          # Advisory watchtower (existing)
+```
+
+### Configuration
+
+All observatory settings are in the `observatory` section of `tuneables.json`:
+
+```json
+{
+  "observatory": {
+    "enabled": true,
+    "auto_sync": true,
+    "sync_cooldown_s": 120,
+    "vault_dir": "path/to/your/vault",
+    "generate_canvas": true,
+    "max_recent_items": 20,
+    "explore_cognitive_max": 200,
+    "explore_episodes_max": 100
+  }
+}
+```
+
+Full guide: `docs/OBSIDIAN_OBSERVATORY_GUIDE.md`
+
 ## Documentation
 
 - **5-minute start**: `docs/GETTING_STARTED_5_MIN.md`
 - **Full setup**: `docs/QUICKSTART.md`
+- **Obsidian Observatory**: `docs/OBSIDIAN_OBSERVATORY_GUIDE.md`
 - **Docs index**: `docs/DOCS_INDEX.md`
 - **Website**: [spark.vibeship.co](https://spark.vibeship.co)
 - **Contributing**: `CONTRIBUTING.md` (local setup, PR flow, and safety expectations)

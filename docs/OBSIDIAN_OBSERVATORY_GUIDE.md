@@ -57,7 +57,10 @@ Spark-Intelligence-Observatory/
       promotions/                   # Promotion log entries (index only)
       advisory/                     # Advisory effectiveness breakdown (index only)
       routing/                      # Retrieval router decisions (index only)
-      tuning/                       # Tuneable evolution history (index only)
+      tuning/                       # Tuneable evolution history + impact analysis (index only)
+      decisions/                    # Advisory decision ledger - emit/suppress/block (index only)
+      feedback/                     # Implicit feedback loop - followed/ignored (index only)
+  Dashboard.md                      # Personal Dataview dashboard (NOT auto-generated, safe to edit)
   packets/                          # Advisory packets (existing, separate system)
     index.md
     <packet_id>.md
@@ -143,7 +146,9 @@ Open `_observatory/explore/_index.md` to see all browsable data stores.
 | **Promotion Log** | `~/.spark/promotion_log.jsonl` | No (index table) | Target distribution, recent activity |
 | **Advisory** | `~/.spark/advisor/effectiveness.json` | No (index table) | Source effectiveness, follow rate, recent advice |
 | **Retrieval Routing** | `~/.spark/advisor/retrieval_router.jsonl` | No (index table) | Route distribution, reasons, complexity scores |
-| **Tuneable Evolution** | `~/.spark/auto_tune_log.jsonl` | No (index table) | Parameter changes over time, reasons, confidence |
+| **Tuneable Evolution** | `~/.spark/auto_tune_log.jsonl` | No (index table) | Parameter changes, impact analysis (before/after follow rate) |
+| **Advisory Decisions** | `~/.spark/advisory_decision_ledger.jsonl` | No (index table) | Emit/suppress/block decisions, suppression reasons, source counts |
+| **Implicit Feedback** | `~/.spark/advisor/implicit_feedback.jsonl` | No (index table) | Followed/ignored signals, per-tool follow rates, source effectiveness |
 
 ### Navigating Detail Pages
 
@@ -226,6 +231,8 @@ Edit either file's `observatory` section. Runtime config takes priority.
 | `explore_advice_max` | int | `200` | 1–5000 | Max advisory log entries exported |
 | `explore_routing_max` | int | `100` | 1–5000 | Max retrieval routing decisions exported |
 | `explore_tuning_max` | int | `200` | 1–5000 | Max tuneable evolution entries exported |
+| `explore_decisions_max` | int | `200` | 1–5000 | Max advisory decision ledger entries exported |
+| `explore_feedback_max` | int | `200` | 1–5000 | Max implicit feedback entries exported |
 
 ### Example: Increase explorer limits
 
@@ -283,6 +290,21 @@ The **Graph Analysis** plugin helps visualize clusters of related insights, epis
 ### Obsidian Git
 
 Use **Obsidian Git** to version-control your vault. This lets you track how your intelligence data evolves over time.
+
+## Dataview Dashboard
+
+The vault includes a `Dashboard.md` file at the vault root. This is a **personal note** — it's not auto-generated and won't be overwritten by the observatory. It contains pre-built Dataview queries for:
+
+- High-reliability insights (90%+)
+- Promoted insights
+- Recent successful and failed episodes
+- Meta-Ralph verdict summary
+- Top distillations by confidence and retrieval count
+- Advisory effectiveness, implicit feedback, and decision outcomes
+- System evolution (tuneable changes, routing health)
+- Custom query templates you can fill in
+
+Pin it as a tab alongside `flow.md` for a complete monitoring setup.
 
 ## Dataview Query Examples
 
