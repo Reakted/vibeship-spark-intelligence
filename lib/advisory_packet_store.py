@@ -73,6 +73,7 @@ REQUIRED_PACKET_FIELDS = {
     "lineage",
     "usage_count",
     "emit_count",
+    "deliver_count",
     "helpful_count",
     "unhelpful_count",
     "noisy_count",
@@ -203,7 +204,7 @@ def _build_lookup_payload(
             "task_plane": str(row.get("task_plane") or ""),
             "effectiveness_score": float(row.get("effectiveness_score", 0.0) or 0.0),
             "advisory_text_preview": str(row.get("advisory_text_preview") or ""),
-        }, ensure_ascii=False, separators=(",", ":"))
+        }, ensure_ascii=False, separators=(",", ":")))
     prompt_lines.append("Return only JSON. No markdown. Example: [\"pkt_abc\", \"pkt_def\"]")
     return "\n".join(prompt_lines)
 
@@ -423,6 +424,7 @@ def _normalize_packet(packet: Dict[str, Any]) -> Dict[str, Any]:
     out["last_read_route"] = str(out.get("last_read_route", "") or "")
     out["usage_count"] = max(0, _to_int(out.get("usage_count", 0), 0))
     out["emit_count"] = max(0, _to_int(out.get("emit_count", 0), 0))
+    out["deliver_count"] = max(0, _to_int(out.get("deliver_count", 0), 0))
     out["helpful_count"] = max(0, _to_int(out.get("helpful_count", 0), 0))
     out["unhelpful_count"] = max(0, _to_int(out.get("unhelpful_count", 0), 0))
     out["noisy_count"] = max(0, _to_int(out.get("noisy_count", 0), 0))
@@ -518,6 +520,7 @@ def _obsidian_payload(packet: Dict[str, Any]) -> str:
         f"- Categories: {category_line}",
         f"- Effectiveness: {float(packet.get('effectiveness_score', 0.5) or 0.5):.3f}",
         f"- Usage: {int(packet.get('usage_count', 0) or 0)}",
+        f"- Deliveries: {int(packet.get('deliver_count', 0) or 0)}",
         f"- Emitted: {int(packet.get('emit_count', 0) or 0)}",
         f"- Feedback: {int(packet.get('feedback_count', 0) or 0)}",
         f"- Helpful: {int(packet.get('helpful_count', 0) or 0)}",
@@ -976,6 +979,7 @@ def build_packet(
         "last_read_route": "",
         "usage_count": 0,
         "emit_count": 0,
+        "deliver_count": 0,
         "helpful_count": 0,
         "unhelpful_count": 0,
         "noisy_count": 0,
@@ -1047,6 +1051,7 @@ def save_packet(packet: Dict[str, Any]) -> str:
         "last_read_route": str(packet.get("last_read_route") or ""),
         "usage_count": int(packet.get("usage_count", 0) or 0),
         "emit_count": int(packet.get("emit_count", 0) or 0),
+        "deliver_count": int(packet.get("deliver_count", 0) or 0),
         "feedback_count": int(packet.get("feedback_count", 0) or 0),
         "helpful_count": int(packet.get("helpful_count", 0) or 0),
         "unhelpful_count": int(packet.get("unhelpful_count", 0) or 0),
@@ -1151,7 +1156,7 @@ def _candidate_match_score(
     if match_score < RELAXED_MIN_MATCH_SCORE:
         return None
 
-    effectiveness = max(0.0, min(1.0, float(row.get("effectiveness_score", 0.5) or 0.5))
+    effectiveness = max(0.0, min(1.0, float(row.get("effectiveness_score", 0.5) or 0.5)))
     score += effectiveness * RELAXED_EFFECTIVENESS_WEIGHT
     if effectiveness < RELAXED_LOW_EFFECTIVENESS_THRESHOLD:
         score -= RELAXED_LOW_EFFECTIVENESS_PENALTY
@@ -1330,6 +1335,7 @@ def lookup_relaxed_candidates(
             "read_count": int(row.get("read_count", 0) or 0),
             "usage_count": int(row.get("usage_count", 0) or 0),
             "emit_count": int(row.get("emit_count", 0) or 0),
+            "deliver_count": int(row.get("deliver_count", 0) or 0),
             "fresh_until_ts": float(row.get("fresh_until_ts", 0.0) or 0.0),
             "advisory_text_preview": preview,
             "invalidated": bool(row.get("invalidated", False)),
@@ -1419,12 +1425,20 @@ def get_advisory_catalog(
                 "read_count": int(row.get("read_count", 0) or 0),
                 "usage_count": int(row.get("usage_count", 0) or 0),
                 "emit_count": int(row.get("emit_count", 0) or 0),
+                "deliver_count": int(row.get("deliver_count", 0) or 0),
                 "source_summary": _safe_list(row.get("source_summary"), max_items=10),
                 "category_summary": _safe_list(row.get("category_summary"), max_items=8),
                 "packet_meta_only": True,
             })
 
-    out.sort(key=lambda r: (float(r.get("readiness_score", 0.0) or 0.0, float(r.get("updated_ts", 0.0) or 0.0), str(r.get("packet_id") or "")), reverse=True)
+    out.sort(
+        key=lambda r: (
+            float(r.get("readiness_score", 0.0) or 0.0),
+            float(r.get("updated_ts", 0.0) or 0.0),
+            str(r.get("packet_id") or ""),
+        ),
+        reverse=True,
+    )
     return out[:limit_rows]
 
 
@@ -1520,6 +1534,7 @@ def record_packet_usage(
     packet["usage_count"] = int(packet.get("usage_count", 0) or 0) + 1
     if emitted:
         packet["emit_count"] = int(packet.get("emit_count", 0) or 0) + 1
+        packet["deliver_count"] = int(packet.get("deliver_count", 0) or 0) + 1
     packet["last_route"] = str(route or packet.get("last_route") or "")
     packet["last_used_ts"] = _now()
     packet = _normalize_packet(packet)
@@ -1530,6 +1545,7 @@ def record_packet_usage(
         "read_count": int(packet.get("read_count", 0) or 0),
         "usage_count": int(packet.get("usage_count", 0) or 0),
         "emit_count": int(packet.get("emit_count", 0) or 0),
+        "deliver_count": int(packet.get("deliver_count", 0) or 0),
     }
 
 
@@ -1984,6 +2000,7 @@ def get_store_status() -> Dict[str, Any]:
         queue_depth = 0
     usage_total = sum(int((row or {}).get("usage_count", 0) or 0) for row in meta.values())
     emit_total = sum(int((row or {}).get("emit_count", 0) or 0) for row in meta.values())
+    deliver_total = sum(int((row or {}).get("deliver_count", 0) or 0) for row in meta.values())
     read_total = sum(int((row or {}).get("read_count", 0) or 0) for row in meta.values())
     feedback_total = sum(int((row or {}).get("feedback_count", 0) or 0) for row in meta.values())
     noisy_total = sum(int((row or {}).get("noisy_count", 0) or 0) for row in meta.values())
@@ -2064,9 +2081,12 @@ def get_store_status() -> Dict[str, Any]:
         "usage_total": usage_total,
         "read_total": read_total,
         "emit_total": emit_total,
+        "deliver_total": deliver_total,
         "feedback_total": feedback_total,
         "noisy_total": noisy_total,
-        "hit_rate": (emit_total / max(usage_total, 1)) if usage_total > 0 else None,
+        "emit_hit_rate": (emit_total / max(usage_total, 1)) if usage_total > 0 else None,
+        "deliver_hit_rate": (deliver_total / max(usage_total, 1)) if usage_total > 0 else None,
+        "hit_rate": (deliver_total / max(usage_total, 1)) if usage_total > 0 else None,
         "avg_effectiveness_score": round(float(avg_effectiveness), 3),
         "lookup_rerank_enabled": bool(PACKET_LOOKUP_LLM_ENABLED),
         "config": get_packet_store_config(),
