@@ -94,6 +94,8 @@ Your Agent (Claude Code / Cursor / OpenClaw)
 ## Responsible Use
 
 This is a self-evolving system. If you are planning a public release or high-autonomy deployment:
+- Read first: `docs/AI_MANIFESTO.md`
+- Read first: https://aimanifesto.vibeship.co/
 - `docs/RESPONSIBLE_PUBLIC_RELEASE.md`
 - `docs/security/THREAT_MODEL.md`
 - `SECURITY.md` for vulnerability reporting
