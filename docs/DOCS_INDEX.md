@@ -31,4 +31,3 @@
 - `docs/OPEN_CORE_FREEMIUM_MODEL.md`
 - `docs/SPARK_LIGHTWEIGHT_OPERATING_MODE.md`
 - `docs/security/THREAT_MODEL.md`
-- `docs/security/SECRETS_AND_RELEASE_CHECKLIST.md`

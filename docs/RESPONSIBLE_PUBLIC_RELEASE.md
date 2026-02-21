@@ -7,7 +7,6 @@ This repo is dual-use: the same autonomy/memory infrastructure that helps develo
 
 Related:
 - Threat model: `docs/security/THREAT_MODEL.md`
-- Pre-public checklist: `docs/security/SECRETS_AND_RELEASE_CHECKLIST.md`
 
 ## 1) Non-Negotiable Reality
 

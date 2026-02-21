@@ -49,5 +49,4 @@ Recommended reading order for the integration set:
 - `docs/OSS_BOUNDARY.md`
 - `docs/OPEN_CORE_FREEMIUM_MODEL.md`
 - `docs/security/THREAT_MODEL.md`
-- `docs/security/SECRETS_AND_RELEASE_CHECKLIST.md`
 - `docs/RESPONSIBLE_PUBLIC_RELEASE.md`

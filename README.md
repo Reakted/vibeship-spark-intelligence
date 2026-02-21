@@ -26,7 +26,6 @@ Not a chatbot. Not a wrapper. A learning engine.
 This repo is dual-use. If you are planning a public release or high-autonomy deployment, read:
 - `docs/RESPONSIBLE_PUBLIC_RELEASE.md`
 - `docs/security/THREAT_MODEL.md`
-- `docs/security/SECRETS_AND_RELEASE_CHECKLIST.md`
 - `docs/research/AGI_GUARDRAILS_IMMUTABILITY.md`
 
 Vulnerability reporting: `SECURITY.md`

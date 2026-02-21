@@ -1,13 +1,13 @@
 # OSS-only Manifest (Spark Public Launch)
 
-Date: Friday, 2026-02-20  
+Date: Saturday, 2026-02-21  
 Branch context: `vibeship-spark-intelligence` public cleanup for Spark OSS launch
 
 ## 1) What is public in this repo
 
 The repository now ships only the Spark OSS core needed for:
 - local reasoning loops
-- open-claw integration
+- OpenClaw integration
 - Claude/Cursor and compatible agent workflows
 - developer experimentation and contribution
 
@@ -40,6 +40,13 @@ These paths are removed from the repo and should not be reintroduced:
 - `.pytest_cache/`
 - `.spark/`
 - `vibeship_spark.egg-info/`
+- `CORE_SELF_EVOLUTION_PROMPT.md`
+- `docs/security/SECRETS_AND_RELEASE_CHECKLIST.md`
+- `docs/token/TOKEN_LAUNCH_COMMS_AND_RISK.md`
+- `sandbox/spark_sandbox/report.json`
+- `sandbox/spark_sandbox_baseline.json`
+- `sandbox/spark_sandbox_diff.json`
+- Any unmasked launch-risk docs and local diagnostics generated for private runs
 
 ## 4) Required launch docs (read-first)
 
@@ -53,8 +60,18 @@ Use this sequence first for release understanding:
 - `TUNEABLES.md`
 - `OPENCLAW_IMPLEMENTATION_TASKS.md`
 - `SPARK_LEARNING_GUIDE.md`
-- `CORE_SELF_EVOLUTION_PROMPT.md`
 - `PRODUCTION_READINESS.md`
+
+## 4.1) Agent-first docs map
+
+The quickest OSS onboarding stack:
+- `README.md` and `docs/OSS_BOUNDARY.md` for scope and limits
+- `docs/LAUNCH_DOCUMENTATION_MAP.md` and `docs/DOCS_INDEX.md` for where each topic lives
+- `Intelligence_Flow.md` and `Intelligence_Flow_Map.md` for inference/advisor wiring
+- `TUNEABLES.md` for operational knobs and expected behaviors
+- `OPENCLAW_IMPLEMENTATION_TASKS.md` + `docs/openclaw/` for OpenClaw bridge details
+- `SPARK_LEARNING_GUIDE.md` for tuning and maintenance
+- `PRODUCTION_READINESS.md` for hardening and launch checks
 
 ## 5) Premium-capability summary
 
