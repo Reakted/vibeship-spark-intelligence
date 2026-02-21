@@ -110,8 +110,8 @@ class SessionState:
     phase_confidence: float = 0.5
     phase_history: List[str] = field(default_factory=list)  # last 5 phases
 
-    # Advice already emitted (advice_id set)
-    shown_advice_ids: List[str] = field(default_factory=list)
+    # Advice already emitted: advice_id → timestamp (TTL-based, re-eligible after cooldown)
+    shown_advice_ids: Dict[str, float] = field(default_factory=dict)
     last_advisory_packet_id: str = ""
     last_advisory_route: str = ""
     last_advisory_tool: str = ""
@@ -133,6 +133,10 @@ class SessionState:
     def from_dict(cls, d: dict) -> "SessionState":
         valid_keys = cls.__dataclass_fields__
         filtered = {k: v for k, v in d.items() if k in valid_keys}
+        # Backwards compat: old state files stored shown_advice_ids as a list
+        raw_shown = filtered.get("shown_advice_ids")
+        if isinstance(raw_shown, list):
+            filtered["shown_advice_ids"] = {str(aid): 0.0 for aid in raw_shown}
         return cls(**filtered)
 
 
@@ -247,15 +251,25 @@ def record_user_intent(state: SessionState, intent: str) -> None:
         state.intent_updated_at = time.time()
 
 
-def mark_advice_shown(state: SessionState, advice_ids: List[str]) -> None:
-    """Record that advice was emitted to Claude."""
-    for aid in advice_ids:
-        if aid not in state.shown_advice_ids:
-            state.shown_advice_ids.append(aid)
+SHOWN_ADVICE_TTL_S = 600  # Re-eligible after 10 minutes
 
-    # Keep bounded
+
+def mark_advice_shown(state: SessionState, advice_ids: List[str]) -> None:
+    """Record that advice was emitted to Claude (with timestamp for TTL)."""
+    now = time.time()
+    for aid in advice_ids:
+        state.shown_advice_ids[str(aid)] = now
+
+    # Evict expired entries to keep bounded
     if len(state.shown_advice_ids) > MAX_SHOWN_ADVICE:
-        state.shown_advice_ids = state.shown_advice_ids[-MAX_SHOWN_ADVICE:]
+        cutoff = now - SHOWN_ADVICE_TTL_S
+        state.shown_advice_ids = {
+            k: v for k, v in state.shown_advice_ids.items() if v > cutoff
+        }
+        # If still too large after TTL eviction, keep most recent
+        if len(state.shown_advice_ids) > MAX_SHOWN_ADVICE:
+            sorted_items = sorted(state.shown_advice_ids.items(), key=lambda x: x[1])
+            state.shown_advice_ids = dict(sorted_items[-MAX_SHOWN_ADVICE:])
 
 
 def suppress_tool_advice(state: SessionState, tool_name: str, duration_s: float = 300) -> None:

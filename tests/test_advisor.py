@@ -226,8 +226,10 @@ class TestSourceBoostAndRanking:
     def test_bank_source_penalized(self, monkeypatch, tmp_path):
         adv = _build_advisor(monkeypatch, tmp_path)
         with patch("lib.meta_ralph.get_meta_ralph", return_value=_DummyRalph()):
-            a_bank = _make_advice(source="bank", confidence=0.8, context_match=0.8)
-            a_cognitive = _make_advice(source="cognitive", confidence=0.8, context_match=0.8)
+            # Use low-actionability text so source_quality tier differentiates
+            low_text = "data observations noted"
+            a_bank = _make_advice(source="bank", confidence=0.8, context_match=0.8, text=low_text)
+            a_cognitive = _make_advice(source="cognitive", confidence=0.8, context_match=0.8, text=low_text)
             score_bank = adv._rank_score(a_bank)
             score_cog = adv._rank_score(a_cognitive)
         assert score_bank < score_cog
@@ -244,12 +246,12 @@ class TestSourceBoostAndRanking:
         scores = [adv._rank_score(a) for a in ranked]
         assert scores == sorted(scores, reverse=True)
 
-    def test_emotional_priority_provides_boost(self, monkeypatch, tmp_path):
+    def test_higher_confidence_provides_boost(self, monkeypatch, tmp_path):
         adv = _build_advisor(monkeypatch, tmp_path)
         with patch("lib.meta_ralph.get_meta_ralph", return_value=_DummyRalph()):
-            a_none = _make_advice(emotional_priority=0.0, insight_key="k1")
-            a_high = _make_advice(emotional_priority=1.0, insight_key="k2")
-            assert adv._rank_score(a_high) > adv._rank_score(a_none)
+            a_low = _make_advice(confidence=0.3, insight_key="k1")
+            a_high = _make_advice(confidence=0.9, insight_key="k2")
+            assert adv._rank_score(a_high) > adv._rank_score(a_low)
 
     def test_low_signal_text_heavily_penalized(self, monkeypatch, tmp_path):
         adv = _build_advisor(monkeypatch, tmp_path)

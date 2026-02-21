@@ -60,7 +60,7 @@ except Exception:
 MAX_EMIT_PER_CALL = 2
 
 # Cooldown: don't emit for same tool within N seconds
-TOOL_COOLDOWN_S = 30
+TOOL_COOLDOWN_S = 10
 
 # Don't repeat the same advice within N seconds
 ADVICE_REPEAT_COOLDOWN_S = 300  # 5 minutes
@@ -411,16 +411,32 @@ def _evaluate_single(
     context_match = getattr(advice, "context_match", 0.5) or 0.5
     insight_key = getattr(advice, "insight_key", "") or ""
 
-    # Base score from advisor ranking
-    base_score = confidence * context_match
+    # Additive base score (aligned with advisor's 3-factor model).
+    # Items reaching the gate already passed Meta-Ralph + cognitive filter + advisor ranking,
+    # so the 0.15 floor reflects that quality is pre-validated (0.30 * 0.50 quality default).
+    base_score = 0.45 * min(1.0, context_match) + 0.25 * min(1.0, confidence) + 0.15
 
-    # ---- Filter 1: Already shown? ----
-    if state and advice_id in (state.shown_advice_ids or []):
+    # ---- Filter 1: Already shown recently? (TTL-based) ----
+    from .advisory_state import SHOWN_ADVICE_TTL_S
+    shown_ids = state.shown_advice_ids if state else {}
+    if isinstance(shown_ids, dict) and advice_id in shown_ids:
+        shown_at = float(shown_ids.get(advice_id, 0.0) or 0.0)
+        if shown_at > 0 and (time.time() - shown_at) < SHOWN_ADVICE_TTL_S:
+            return GateDecision(
+                advice_id=advice_id,
+                authority=AuthorityLevel.SILENT,
+                emit=False,
+                reason=f"shown {int(time.time() - shown_at)}s ago (TTL {SHOWN_ADVICE_TTL_S}s)",
+                adjusted_score=0.0,
+                original_score=base_score,
+            )
+    elif isinstance(shown_ids, list) and advice_id in shown_ids:
+        # Backwards compat: old list format, treat as permanently shown
         return GateDecision(
             advice_id=advice_id,
             authority=AuthorityLevel.SILENT,
             emit=False,
-            reason="already shown this session",
+            reason="already shown this session (legacy)",
             adjusted_score=0.0,
             original_score=base_score,
         )

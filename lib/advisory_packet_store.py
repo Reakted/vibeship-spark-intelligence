@@ -708,7 +708,7 @@ def _render_obsidian_index(lines: List[str], catalog: List[Dict[str, Any]]) -> N
             f"| readiness={float(row.get('readiness_score') or 0.0):.2f} "
             f"| eff={float(row.get('effectiveness_score') or 0.0):.2f} "
             f"| reads={int(row.get('read_count', 0) or 0)} "
-            f"| deliveries={int(row.get('deliver_count', row.get('emit_count', 0)) or 0} "
+            f"| deliveries={int(row.get('deliver_count', row.get('emit_count', 0)) or 0)} "
             f"| updated={updated_text}"
         )
         lines.append(f"   - sources: {_render_tags(_safe_list(row.get('source_summary'), max_items=10))}")

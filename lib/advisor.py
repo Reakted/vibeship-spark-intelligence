@@ -36,6 +36,7 @@ from .cognitive_learner import get_cognitive_learner, CognitiveCategory
 from .mind_bridge import get_mind_bridge, HAS_REQUESTS
 from .memory_banks import retrieve as bank_retrieve, infer_project_key
 from .advisory_quarantine import record_quarantine_item
+from .distillation_transformer import transform_for_advisory as _transform_distillation
 
 # EIDOS integration for distillation retrieval
 try:
@@ -53,6 +54,7 @@ ADVICE_LOG = ADVISOR_DIR / "advice_log.jsonl"
 EFFECTIVENESS_FILE = ADVISOR_DIR / "effectiveness.json"
 ADVISOR_METRICS = ADVISOR_DIR / "metrics.json"
 RECENT_ADVICE_LOG = ADVISOR_DIR / "recent_advice.jsonl"
+EFFECTIVENESS_SCHEMA_VERSION = 2
 RECENT_ADVICE_MAX_AGE_S = 1200  # 20 min (was 15 min) - Ralph Loop tuning for better acted-on rate
 RECENT_ADVICE_MAX_LINES = 200
 CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
@@ -103,9 +105,10 @@ MIN_VALIDATIONS_FOR_STRONG_ADVICE = 2
 # Some experiments may tune this lower via config.
 MAX_ADVICE_ITEMS = 8
 ADVICE_CACHE_TTL_SECONDS = 120  # 2 minutes (lowered from 5 for fresher advice)
-MIN_RANK_SCORE = 0.45  # Lowered from 0.60 — downstream gates already filter effectively
+MIN_RANK_SCORE = 0.35  # Additive 3-factor scoring: avg good insight ~0.50, weak ~0.35
 CATEGORY_EFFECTIVENESS_MIN_SURFACE = 6
 CATEGORY_EFFECTIVENESS_DECAY_SECONDS = 14 * 24 * 3600
+CATEGORY_EFFECTIVENESS_STALE_SECONDS = 180 * 24 * 3600
 MIND_MAX_STALE_SECONDS = float(os.environ.get("SPARK_ADVISOR_MIND_MAX_STALE_S", "0"))
 MIND_STALE_ALLOW_IF_EMPTY = os.environ.get("SPARK_ADVISOR_MIND_STALE_ALLOW_IF_EMPTY", "1") != "0"
 MIND_MIN_SALIENCE = float(os.environ.get("SPARK_ADVISOR_MIND_MIN_SALIENCE", "0.5"))
@@ -944,7 +947,7 @@ def record_recent_delivery(
         "advisory_readiness": [round(max(0.0, min(1.0, float(r))), 4) for r in advisory_readiness],
         "advisory_quality": [
             {
-                "unified_score": round(max(0.0, min(1.0, float(q.get("unified_score", 0.0) or 0.0)), 4),
+                "unified_score": round(max(0.0, min(1.0, float(q.get("unified_score", 0.0) or 0.0))), 4),
                 "domain": str(q.get("domain", "general") or "general").strip().lower(),
             }
             for q in advisory_quality
@@ -1076,6 +1079,49 @@ class SparkAdvisor:
         bucket["quality_count"] = max(0, bucket["quality_count"])
         return bucket
 
+    def _decayed_category_bucket(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Decay stale category counters to avoid over-weighting stale historical signal."""
+        bucket = dict(self._coerce_category_bucket(row))
+        last_ts = float(bucket.get("last_ts", 0.0) or 0.0)
+        if last_ts <= 0:
+            if bucket["surfaced"] > 0:
+                # Legacy rows without timestamps should remain usable while aging starts now.
+                bucket["last_ts"] = time.time()
+            return bucket
+
+        age = max(0.0, time.time() - last_ts)
+        stale_window = max(1.0, float(CATEGORY_EFFECTIVENESS_STALE_SECONDS))
+        if age >= stale_window:
+            return {
+                "surfaced": 0,
+                "total": 0,
+                "helpful": 0,
+                "readiness_sum": 0.0,
+                "readiness_count": 0,
+                "quality_sum": 0.0,
+                "quality_count": 0,
+                "last_ts": bucket.get("last_ts", 0.0),
+            }
+
+        decay = 0.5 ** (age / max(1.0, float(CATEGORY_EFFECTIVENESS_DECAY_SECONDS)))
+        if decay >= 0.999:
+            return bucket
+
+        def _decay_count(value: float) -> int:
+            return int(round(float(value) * decay))
+
+        bucket["surfaced"] = max(0, _decay_count(bucket["surfaced"]))
+        bucket["total"] = max(0, _decay_count(bucket["total"]))
+        bucket["helpful"] = max(0, _decay_count(bucket["helpful"]))
+        bucket["readiness_sum"] = float(bucket["readiness_sum"]) * decay
+        bucket["readiness_count"] = max(0, _decay_count(bucket["readiness_count"]))
+        bucket["quality_sum"] = float(bucket["quality_sum"]) * decay
+        bucket["quality_count"] = max(0, _decay_count(bucket["quality_count"]))
+        bucket["helpful"] = min(bucket["helpful"], bucket["total"])
+        bucket["readiness_sum"] = max(0.0, bucket["readiness_sum"])
+        bucket["quality_sum"] = max(0.0, bucket["quality_sum"])
+        return bucket
+
     def _load_effectiveness(self) -> Dict[str, Any]:
         """Load effectiveness tracking data."""
         if EFFECTIVENESS_FILE.exists():
@@ -1091,11 +1137,13 @@ class SparkAdvisor:
             "by_source": {},
             "by_category": {},
             "recent_outcomes": {},
+            "schema_version": EFFECTIVENESS_SCHEMA_VERSION,
         })
 
     def _normalize_effectiveness(self, data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Normalize and enforce invariants for effectiveness counters."""
         src = data if isinstance(data, dict) else {}
+        schema_version = int(src.get("schema_version", 1) or 1)
 
         def _as_int(value: Any) -> int:
             try:
@@ -1120,13 +1168,17 @@ class SparkAdvisor:
             by_source[str(key)] = {"total": total, "helpful": helpful}
 
         by_category = {}
+        now = time.time()
         raw_by_category = src.get("by_category")
         if isinstance(raw_by_category, dict):
             for cat, row in raw_by_category.items():
                 category = str(cat or "").strip().lower()
                 if not category:
                     continue
-                by_category[category] = self._coerce_category_bucket(row)
+                bucket = self._coerce_category_bucket(row)
+                if schema_version < EFFECTIVENESS_SCHEMA_VERSION and bucket["last_ts"] <= 0 and bucket["surfaced"] > 0:
+                    bucket["last_ts"] = now
+                by_category[category] = self._decayed_category_bucket(bucket)
 
         recent_outcomes: Dict[str, Dict[str, Any]] = {}
         raw_recent = src.get("recent_outcomes") or {}
@@ -1161,6 +1213,8 @@ class SparkAdvisor:
             "by_source": by_source,
             "by_category": by_category,
             "recent_outcomes": recent_outcomes,
+            "schema_version": EFFECTIVENESS_SCHEMA_VERSION,
+            "schema_last_migrated_at": now,
         }
 
     def _load_metrics(self) -> Dict[str, Any]:
@@ -1252,6 +1306,8 @@ class SparkAdvisor:
 
             # Merge: take max of counters (monotonically increasing)
             merged = {
+                "schema_version": EFFECTIVENESS_SCHEMA_VERSION,
+                "schema_last_migrated_at": time.time(),
                 "total_advice_given": max(
                     disk_data.get("total_advice_given", 0),
                     mem_data.get("total_advice_given", 0)
@@ -1507,7 +1563,7 @@ class SparkAdvisor:
         adv_q = getattr(advice, "advisory_quality", None)
         if isinstance(adv_q, dict):
             return {
-                "unified_score": round(max(0.0, min(1.0, float(adv_q.get("unified_score", 0.0) or 0.0)), 4),
+                "unified_score": round(max(0.0, min(1.0, float(adv_q.get("unified_score", 0.0) or 0.0))), 4),
                 "domain": str(adv_q.get("domain", "general") or "general").strip().lower(),
             }
         return {"unified_score": 0.0, "domain": "general"}
@@ -2376,7 +2432,7 @@ class SparkAdvisor:
         # Build semantic context: include key tool_input values so trigger
         # rules can match against actual commands/paths, not just task_context.
         _input_hint = ""
-        if tool_input:
+        if tool_input and isinstance(tool_input, dict):
             for _k in ("command", "file_path", "url", "pattern", "query"):
                 if _k in tool_input:
                     _input_hint = str(tool_input[_k])[:200]
@@ -2494,7 +2550,7 @@ class SparkAdvisor:
         # Fast LLM-assisted rerank for shortlists where ranking quality can materially
         # improve relevance without requiring full cross-encoder cost.
         policy = self._effective_retrieval_policy(tool_name=tool_name, context=context)
-        min_candidates = max(MAX_ADVICE_ITEMS, int(policy.get("minimax_fast_rerank_min_items", 12) or 12)
+        min_candidates = max(MAX_ADVICE_ITEMS, int(policy.get("minimax_fast_rerank_min_items", 12) or 12))
         if len(advice_list) > min_candidates:
             should_use_minimax, rerank_gate_meta = self._should_use_minimax_fast_rerank(
                 tool_name=tool_name,
@@ -2520,7 +2576,7 @@ class SparkAdvisor:
                         "order_len": int(rerank_meta.get("order_len", 0)),
                         "elapsed_ms": int(rerank_meta.get("elapsed_ms", 0)),
                         "complexity_score": int((rerank_gate_meta.get("analysis") or {}).get("score", 0)),
-                        "complexity_threshold": int(rerank_gate_meta.get("analysis") or {}).get("threshold", 0),
+                        "complexity_threshold": int((rerank_gate_meta.get("analysis") or {}).get("threshold", 0)),
                     }
                 )
             else:
@@ -3727,6 +3783,16 @@ class SparkAdvisor:
                 # Determine advice type label based on distillation type
                 type_label = d.type.value.upper() if hasattr(d.type, 'value') else str(d.type)
 
+                # Transform raw statement into advisory-ready text
+                try:
+                    aq = _transform_distillation(d.statement, source="eidos")
+                    if aq.suppressed:
+                        continue  # Skip distillations that fail advisory quality
+                    # Prefer composed advisory text over raw template
+                    advice_text = aq.advisory_text or d.statement
+                except Exception:
+                    advice_text = d.statement
+
                 # Add reason from distillation confidence and proven effectiveness
                 reason = f"Confidence: {d.confidence:.0%}"
                 if d.times_used > 0:
@@ -3735,7 +3801,7 @@ class SparkAdvisor:
                     reason += f", {d.validation_count} validations"
 
                 # Compute real context match instead of hardcoding 0.85
-                eidos_match = self._calculate_context_match(d.statement, context)
+                eidos_match = self._calculate_context_match(advice_text, context)
 
                 # Bridge emotional priority: try exact match on action text,
                 # else try substring match on statement
@@ -3755,12 +3821,12 @@ class SparkAdvisor:
 
                 advice.append(Advice(
                     advice_id=self._generate_advice_id(
-                        f"[EIDOS {type_label}] {d.statement}",
+                        f"[EIDOS {type_label}] {advice_text}",
                         insight_key=f"eidos:{d.type.value}:{d.distillation_id[:8]}",
                         source="eidos",
                     ),
                     insight_key=f"eidos:{d.type.value}:{d.distillation_id[:8]}",
-                    text=f"[EIDOS {type_label}] {d.statement}",
+                    text=f"[EIDOS {type_label}] {advice_text}",
                     confidence=blended_conf,
                     source="eidos",
                     context_match=eidos_match,
@@ -4517,75 +4583,67 @@ class SparkAdvisor:
                 return True
         return False
 
-    # Source quality tiers (Task #10: boost validated sources)
-    _SOURCE_BOOST = {
-        "eidos": 1.4,           # EIDOS distillations are validated patterns
-        "self_awareness": 1.3,  # Tool-specific cautions from past failures
-        "convo": 1.2,           # Conversation intelligence (ConvoIQ)
-        "engagement": 1.15,     # Engagement pulse predictions
-        "niche": 1.1,           # Niche intelligence network
-        "cognitive": 1.0,       # Standard cognitive insights
-        "mind": 1.15,           # Mind memories (boosted 2026-02-21 pipeline audit)
-        "bank": 0.9,            # Memory banks (less curated)
-        "chip": 1.15,           # Domain-specific chip intelligence
-        "semantic": 1.05,       # Semantic retrieval of cognitive insights
-        "semantic-hybrid": 1.08,  # Backward-compatible label for hybrid retrieval
-        "semantic-agentic": 1.12,  # Agentic retrieval over semantic shortlist
-        "trigger": 1.2,         # Explicit trigger rules
-        "opportunity": 1.18,    # Socratic opportunity prompts
-        "replay": 1.22,         # Strict outcome-backed counterfactual replay
+    # Source quality tiers — normalized 0-1 for additive scoring
+    _SOURCE_QUALITY = {
+        "eidos": 0.90,            # EIDOS distillations are validated patterns
+        "replay": 0.85,           # Strict outcome-backed counterfactual replay
+        "self_awareness": 0.80,   # Tool-specific cautions from past failures
+        "trigger": 0.75,          # Explicit trigger rules
+        "opportunity": 0.72,      # Socratic opportunity prompts
+        "convo": 0.70,            # Conversation intelligence (ConvoIQ)
+        "engagement": 0.65,       # Engagement pulse predictions
+        "mind": 0.65,             # Mind memories
+        "chip": 0.65,             # Domain-specific chip intelligence
+        "semantic-agentic": 0.62, # Agentic retrieval over semantic shortlist
+        "niche": 0.60,            # Niche intelligence network
+        "semantic-hybrid": 0.58,  # Hybrid retrieval
+        "semantic": 0.55,         # Semantic retrieval of cognitive insights
+        "cognitive": 0.50,        # Standard cognitive insights
+        "bank": 0.40,             # Memory banks (less curated)
     }
 
     def _rank_score(self, a: Advice) -> float:
-        """Compute a relevance score for a single advice item."""
-        base_score = a.confidence * a.context_match
+        """Compute a relevance score using 3-factor additive model.
 
-        if self._is_low_signal_struggle_text(a.text):
-            base_score *= 0.05
-        elif self._is_transcript_artifact(a.text):
-            base_score *= 0.4
-        elif self._is_metadata_pattern(a.text):
-            base_score *= 0.6
+        Three independent dimensions:
+          - Relevance (0.45): Is this about what the user is doing right now?
+          - Quality   (0.30): Is this a well-structured, actionable insight?
+          - Trust     (0.25): Has this been proven/validated to work?
 
-        # Source quality boost (Task #10)
-        base_score *= self._SOURCE_BOOST.get(a.source, 1.0)
+        Noise penalties applied multiplicatively AFTER the additive blend,
+        so garbage still gets crushed to near-zero.
+        """
+        # --- Dimension 1: Relevance (context_match) ---
+        relevance = max(0.0, min(1.0, float(a.context_match or 0.0)))
 
-        # Actionability boost (Task #9) — use embedded dims when available
+        # --- Dimension 2: Quality (best of actionability/unified_score + source tier) ---
         adv_q = getattr(a, "advisory_quality", None) or {}
         if isinstance(adv_q, dict) and adv_q.get("unified_score"):
-            # Use transformer's unified score directly (already blends all 5 dims)
-            actionability = float(adv_q["unified_score"])
+            text_quality = float(adv_q["unified_score"])
         else:
-            actionability = self._score_actionability(a.text)
-        base_score *= (0.5 + actionability)  # 0.5x to 1.5x based on actionability
+            text_quality = self._score_actionability(a.text)
 
-        readiness = float(getattr(a, "advisory_readiness", 0.0) or 0.0)
-        if not readiness and isinstance(adv_q, dict):
-            readiness = float(adv_q.get("unified_score", 0.0) or 0.0)
-        if readiness > 0:
-            base_score *= (0.5 + min(0.5, readiness))  # 0.5x to 1.0x based on readiness
-        else:
-            base_score *= 0.85  # Unknown readiness — mild penalty, not 0.5x
+        source_quality = self._SOURCE_QUALITY.get(a.source, 0.50)
+        quality = max(text_quality, source_quality)
 
-        # Insight-level outcome boost (Task #11)
+        # --- Dimension 3: Trust (best of confidence, effectiveness) ---
+        trust = max(0.0, min(1.0, float(a.confidence or 0.0)))
+
+        # Check ralph insight-level effectiveness
         try:
             from .meta_ralph import get_meta_ralph
             ralph = get_meta_ralph()
         except Exception:
             ralph = None
         if ralph and a.insight_key:
-            insight_effectiveness = ralph.get_insight_effectiveness(a.insight_key)
-            if insight_effectiveness > 0:
-                base_score *= (0.5 + insight_effectiveness)  # 0.5x to 1.5x
-            # else: no data yet — skip penalty entirely instead of *0.5
+            insight_eff = ralph.get_insight_effectiveness(a.insight_key)
+            if insight_eff > 0:
+                trust = max(trust, insight_eff)
 
-        # EIDOS store-backed effectiveness boost.
-        # The SQLite store tracks times_helped/times_used across all sessions,
-        # providing richer signal than Meta-Ralph's in-memory outcomes.
+        # Check EIDOS store effectiveness (richer signal for eidos items)
         if a.source == "eidos" and a.insight_key and a.insight_key.startswith("eidos:"):
             try:
                 from .eidos.store import get_store as _get_eidos_store
-                from .eidos.models import DistillationType as _DType
                 _estore = _get_eidos_store()
                 _parts = a.insight_key.split(":")
                 if len(_parts) >= 3:
@@ -4593,35 +4651,28 @@ class SparkAdvisor:
                     if _fid:
                         _dist = _estore.get_distillation(_fid)
                         if _dist:
-                            _eff = _dist.effectiveness  # 0.0-1.0
-                            # POLICY distillations get floor boost (always >=1.15x)
-                            _floor = 1.15 if _dist.type == _DType.POLICY else 1.0
-                            # Effectiveness range: 0.7x (bad) to 1.3x (proven)
-                            _mult = max(_floor, 0.7 + _eff * 0.6)
-                            # High-validation bonus (5+ validations = 1.1x)
+                            trust = max(trust, _dist.effectiveness)
                             if _dist.validation_count >= 5:
-                                _mult *= 1.1
-                            base_score *= _mult
+                                trust = min(1.0, trust + 0.10)
             except Exception:
                 pass
 
-        # Boost based on source-level past effectiveness (fallback)
-        source_stats = self.effectiveness.get("by_source", {}).get(a.source, {})
-        if source_stats.get("total", 0) > 0:
-            helpful_rate = source_stats.get("helpful", 0) / source_stats["total"]
-            base_score *= (0.8 + helpful_rate * 0.4)  # 0.8x to 1.2x
+        # Default trust when no data: 0.5 (neutral, not penalizing)
+        if trust < 0.1:
+            trust = 0.50
 
-        # Category-level boost based on demonstrated post-tool usefulness.
-        category = self._advice_category(a)
-        base_score *= self._category_boost_from_effectiveness(category)
+        # --- Additive blend ---
+        score = (0.45 * relevance) + (0.30 * quality) + (0.25 * trust)
 
-        # Emotional priority boost: bridge pipeline emotional salience into ranking.
-        # Capped at +20% to keep emotion as a tiebreaker, not a dominator.
-        ep = float(getattr(a, "emotional_priority", 0.0) or 0.0)
-        if ep > 0.0:
-            base_score *= (1.0 + min(0.20, ep * 0.20))
+        # --- Noise penalties (multiplicative, crush garbage to near-zero) ---
+        if self._is_low_signal_struggle_text(a.text):
+            score *= 0.05
+        elif self._is_transcript_artifact(a.text):
+            score *= 0.40
+        elif self._is_metadata_pattern(a.text):
+            score *= 0.60
 
-        return base_score
+        return score
 
     def _rank_advice(self, advice_list: List[Advice]) -> List[Advice]:
         """Rank advice by relevance, actionability, and effectiveness."""
