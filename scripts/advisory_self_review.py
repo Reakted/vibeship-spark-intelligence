@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Generate a trace-backed advisory self-review report.
 
 Focus: no new feature logic; summarize what already happened in runtime logs.
@@ -10,7 +10,7 @@ import argparse
 import json
 import time
 from collections import Counter, defaultdict
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -110,7 +110,7 @@ def summarize_recent_advice(
             continue
         seen.add(trace_id)
         ts = _to_ts(row.get("ts"))
-        iso = datetime.fromtimestamp(ts, UTC).isoformat() if ts > 0 else "unknown"
+        iso = datetime.fromtimestamp(ts, timezone.utc).isoformat() if ts > 0 else "unknown"
         advice_texts = row.get("advice_texts") or []
         sources = row.get("sources") or []
         trace_examples.append(
@@ -254,7 +254,7 @@ def summarize_outcomes(path: Path, window_s: float, now_ts: float) -> Dict[str, 
 
 
 def build_report(summary: Dict[str, Any], window_hours: float, now_ts: float) -> str:
-    iso_now = datetime.fromtimestamp(now_ts, UTC).isoformat()
+    iso_now = datetime.fromtimestamp(now_ts, timezone.utc).isoformat()
     ra = summary["recent_advice"]
     ra_nonbench = summary.get("recent_advice_nonbench") or {}
     en = summary["engine"]
@@ -374,7 +374,7 @@ def generate_summary(window_hours: float) -> Dict[str, Any]:
     spark_dir = Path.home() / ".spark"
     return {
         "window_hours": float(window_hours),
-        "generated_at": datetime.fromtimestamp(now_ts, UTC).isoformat(),
+        "generated_at": datetime.fromtimestamp(now_ts, timezone.utc).isoformat(),
         "recent_advice": summarize_recent_advice(
             spark_dir / "advisor" / "recent_advice.jsonl",
             window_s=window_s,
@@ -401,7 +401,7 @@ def generate_summary(window_hours: float) -> Dict[str, Any]:
 
 def write_report(summary: Dict[str, Any], out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     stamp = now.strftime("%Y-%m-%d_%H%M%S")
     out_file = out_dir / f"{stamp}_advisory_self_review.md"
     report = build_report(summary, float(summary["window_hours"]), now.timestamp())
@@ -440,3 +440,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

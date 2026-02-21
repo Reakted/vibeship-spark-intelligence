@@ -46,6 +46,18 @@ from lib.diagnostics import setup_component_logging
 
 PORT = META_RALPH_PORT
 
+# Security headers for browser surfaces
+META_RALPH_CSP = (
+    "default-src 'self'; "
+    "base-uri 'self'; "
+    "img-src 'self' data:; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "frame-ancestors 'none';"
+)
+
 
 def load_json(path: Path) -> Dict:
     """Load JSON file safely."""
@@ -784,6 +796,16 @@ HTML_TEMPLATE = """
             return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
         }
 
+        function esc(text) {
+            if (text === null || text === undefined) return '';
+            return String(text)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
         async function loadData() {
             try {
                 const resp = await fetch('/api/data');
@@ -845,13 +867,15 @@ HTML_TEMPLATE = """
                 let sourceHtml = '';
                 for (const [name, info] of Object.entries(sources).sort((a, b) => b[1].count - a[1].count).slice(0, 8)) {
                     const pct = (info.count / maxCount * 100);
+                    const safeName = esc(name);
+                    const safeCount = Number(info.count || 0);
                     sourceHtml += `
                         <div class="source-bar">
-                            <div class="source-name">${name}</div>
+                            <div class="source-name">${safeName}</div>
                             <div class="source-fill">
                                 <div class="source-fill-inner" style="width: ${pct}%"></div>
                             </div>
-                            <div class="source-count">${info.count}</div>
+                            <div class="source-count">${safeCount}</div>
                         </div>
                     `;
                 }
@@ -860,16 +884,22 @@ HTML_TEMPLATE = """
                 // Recommendations
                 let recsHtml = '';
                 for (const rec of data.recommendations) {
+                    const priority = esc(rec.priority || 'medium');
+                    const dimension = esc(rec.dimension || 'unknown');
+                    const score = Number(rec.score || 0);
+                    const issue = esc(rec.issue || '');
+                    const fix = esc(rec.fix || '');
+                    const ralphSays = esc(rec.ralph_says || '');
                     recsHtml += `
-                        <div class="recommendation ${rec.priority}">
+                        <div class="recommendation ${priority}">
                             <div class="rec-header">
-                                <span class="rec-priority ${rec.priority}">${rec.priority}</span>
-                                <span class="rec-dimension">${rec.dimension}</span>
-                                <span class="rec-score">(${rec.score})</span>
+                                <span class="rec-priority ${priority}">${priority}</span>
+                                <span class="rec-dimension">${dimension}</span>
+                                <span class="rec-score">(${score})</span>
                             </div>
-                            <div class="rec-issue">Issue: ${rec.issue}</div>
-                            <div class="rec-fix">Fix: ${rec.fix}</div>
-                            <div class="rec-ralph">Ralph says: "${rec.ralph_says}"</div>
+                            <div class="rec-issue">Issue: ${issue}</div>
+                            <div class="rec-fix">Fix: ${fix}</div>
+                            <div class="rec-ralph">Ralph says: "${ralphSays}"</div>
                         </div>
                     `;
                 }
@@ -880,23 +910,36 @@ HTML_TEMPLATE = """
                 for (const roast of r.recent_roasts) {
                     const verdictClass = roast.verdict || 'unknown';
                     const scores = roast.scores;
-                    const traceLink = roast.trace_id ? `<a href="__SPARK_DASHBOARD_URL__/mission?trace_id=${roast.trace_id}" target="_blank">trace</a>` : '-';
+                    const traceId = String(roast.trace_id || '');
+                    const safeTraceId = esc(traceId);
+                    const safeVerdict = esc(verdictClass);
+                    const totalScore = Number(roast.total_score || 0);
+                    const act = Number(scores.act || 0);
+                    const nov = Number(scores.nov || 0);
+                    const rea = Number(scores.rea || 0);
+                    const spe = Number(scores.spe || 0);
+                    const out = Number(scores.out || 0);
+                    const issues = (roast.issues || []).slice(0, 2).map(String).map(esc).join(', ');
+                    const roastText = esc(roast.text || '');
+                    const traceLink = traceId
+                        ? `<a href="__SPARK_DASHBOARD_URL__/mission?trace_id=${encodeURIComponent(traceId)}" rel="noopener noreferrer" target="_blank">trace</a>`
+                        : '-';
                     tbody += `
                         <tr>
                             <td>${formatTime(roast.timestamp)}</td>
-                            <td><span class="verdict-badge ${verdictClass}">${roast.verdict || '?'}</span></td>
-                            <td style="font-weight:bold;color:#60a5fa">${roast.total_score}</td>
+                            <td><span class="verdict-badge ${safeVerdict}">${safeVerdict || '?'}</span></td>
+                            <td style="font-weight:bold;color:#60a5fa">${totalScore}</td>
                             <td>
                                 <div class="score-pills">
-                                    <span class="score-pill ${getScoreClass(scores.act)}">A:${scores.act}</span>
-                                    <span class="score-pill ${getScoreClass(scores.nov)}">N:${scores.nov}</span>
-                                    <span class="score-pill ${getScoreClass(scores.rea)}">R:${scores.rea}</span>
-                                    <span class="score-pill ${getScoreClass(scores.spe)}">S:${scores.spe}</span>
-                                    <span class="score-pill ${getScoreClass(scores.out)}">O:${scores.out}</span>
+                                    <span class="score-pill ${getScoreClass(act)}">A:${act}</span>
+                                    <span class="score-pill ${getScoreClass(nov)}">N:${nov}</span>
+                                    <span class="score-pill ${getScoreClass(rea)}">R:${rea}</span>
+                                    <span class="score-pill ${getScoreClass(spe)}">S:${spe}</span>
+                                    <span class="score-pill ${getScoreClass(out)}">O:${out}</span>
                                 </div>
                             </td>
-                            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${roast.text}</td>
-                            <td class="issues-list">${roast.issues.slice(0,2).join(', ')}</td>
+                            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${roastText}</td>
+                            <td class="issues-list">${issues || '-'}</td>
                             <td>${traceLink}</td>
                         </tr>
                     `;
@@ -925,6 +968,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         """Suppress default logging."""
         pass
+
+    def send_response(self, code, message=None):  # type: ignore[override]
+        super().send_response(code, message)
+        self.send_header("Content-Security-Policy", META_RALPH_CSP)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Frame-Options", "DENY")
 
     def do_GET(self):
         parsed = urlparse(self.path)

@@ -80,7 +80,6 @@ Canonical navigation hub. Start here.
 ## Emotions and personality
 - `docs/SPARK_EMOTIONS_V2.md` — Canonical emotion model
 - `docs/SPARK_EMOTIONS_IMPLEMENTATION.md`
-- `SPARK_STORY_BIBLE.md` — Brand narrative canon
 
 ## Launch
 - `docs/launch/LAUNCH_SCOPE_AND_GATES.md`

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -61,7 +61,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
     except Exception:
         return None
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=UTC)
+        ts = ts.replace(tzinfo=timezone.utc)
     return ts
 
 
@@ -88,7 +88,7 @@ def _load_rows(path: Path, limit: int, max_age_days: int = 0) -> List[Dict[str, 
     rows: List[Dict[str, Any]] = []
     cutoff = None
     if max_age_days and max_age_days > 0:
-        cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
     try:
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
     except Exception:
@@ -358,7 +358,7 @@ def main() -> int:
     )
 
     report = {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "limits": limits,
         "active_only": bool(args.active_only),
         "project_path": str(args.project_path),
@@ -399,4 +399,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 

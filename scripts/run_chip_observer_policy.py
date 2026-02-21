@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Generate keep/disable observer policy from recent diagnostics windows.
 
 Policy is derived from observer KPI trends across the last N diagnostic reports.
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -182,7 +182,7 @@ def _policy_payload(
             keep_observers.append(f"{chip_id}/{observer}")
 
     return {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "windows_analyzed": int(windows),
         "source_reports": report_paths,
         "thresholds": thresholds,
@@ -278,7 +278,7 @@ def main() -> int:
     )
 
     report = {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "source_reports": [fp.name for fp, _ in loaded],
         "windows_analyzed": int(args.windows),
         "thresholds": thresholds,
@@ -313,3 +313,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

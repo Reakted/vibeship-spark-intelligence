@@ -15,6 +15,7 @@ This is intentionally dependency-free.
 import atexit
 import json
 import os
+import secrets
 import time
 from collections import defaultdict, deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -36,6 +37,12 @@ from lib.diagnostics import setup_component_logging
 from lib.ports import SPARKD_PORT
 
 PORT = SPARKD_PORT
+TOKEN_FILE = Path.home() / ".spark" / "sparkd.token"
+_ALLOWED_POST_HOSTS = {
+    f"127.0.0.1:{PORT}",
+    f"localhost:{PORT}",
+    f"[::1]:{PORT}",
+}
 TOKEN = os.environ.get("SPARKD_TOKEN")
 MAX_BODY_BYTES = int(os.environ.get("SPARKD_MAX_BODY_BYTES", "262144"))
 INVALID_EVENTS_FILE = Path.home() / ".spark" / "invalid_events.jsonl"
@@ -55,6 +62,64 @@ OPENCLAW_RUNTIME_DEFAULTS = {
 }
 _OPENCLAW_RUNTIME_CFG_CACHE = dict(OPENCLAW_RUNTIME_DEFAULTS)
 _OPENCLAW_RUNTIME_CFG_MTIME = None
+
+
+def _read_token_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+        return raw if raw else None
+    except Exception:
+        return None
+
+
+def _resolve_token() -> str:
+    if env_token := os.environ.get("SPARKD_TOKEN"):
+        return env_token.strip()
+
+    existing = _read_token_file(TOKEN_FILE)
+    if existing:
+        return existing
+
+    generated = secrets.token_urlsafe(24)
+    try:
+        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TOKEN_FILE.write_text(generated, encoding="utf-8")
+    except Exception:
+        pass
+    return generated
+
+
+def _normalize_origin(raw: str) -> str | None:
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    if parsed.netloc:
+        return parsed.netloc
+    return None
+
+
+def _is_allowed_origin(headers) -> bool:
+    if headers is None:
+        return False
+
+    for header_name in ("Origin", "Referer"):
+        raw = headers.get(header_name)
+        if not raw:
+            continue
+        normalized = _normalize_origin(raw)
+        if normalized is None:
+            return False
+        if normalized in _ALLOWED_POST_HOSTS:
+            return True
+        return False
+
+    host = (headers.get("Host") or "").strip()
+    return host in _ALLOWED_POST_HOSTS
+
+
+TOKEN = _resolve_token()
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -114,9 +179,7 @@ def _text(handler: BaseHTTPRequestHandler, code: int, body: str):
 
 
 def _is_authorized(handler: BaseHTTPRequestHandler) -> bool:
-    """Authorize request when SPARKD_TOKEN is configured."""
-    if not TOKEN:
-        return True
+    """Require Bearer token for mutating POST endpoints."""
     auth = (handler.headers.get("Authorization") or "").strip()
     return auth == f"Bearer {TOKEN}"
 
@@ -504,6 +567,9 @@ class Handler(BaseHTTPRequestHandler):
         if not allow_remote and remote not in {'127.0.0.1', '::1'}:
             return _json(self, 403, {'ok': False, 'error': 'remote POST forbidden'})
 
+        if not _is_allowed_origin(self.headers):
+            return _json(self, 403, {'ok': False, 'error': 'origin not allowed'})
+
         client_ip = self.client_address[0] if self.client_address else "unknown"
         allowed, retry_after = _allow_rate_limited_request(client_ip)
         if not allowed:
@@ -513,7 +579,7 @@ class Handler(BaseHTTPRequestHandler):
                 "retry_after_s": retry_after,
             })
 
-        # If SPARKD_TOKEN is set, all mutating POST endpoints require auth.
+        # Mutable POST endpoints require bearer token auth.
         if not _is_authorized(self):
             return _json(self, 401, {"ok": False, "error": "unauthorized"})
 

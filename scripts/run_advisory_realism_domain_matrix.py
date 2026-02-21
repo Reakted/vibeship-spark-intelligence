@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Run advisory realism benchmark across per-domain slices.
 
 This extends realism evaluation from one mixed case file into many
@@ -13,7 +13,7 @@ import re
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
@@ -286,7 +286,7 @@ def main() -> int:
     }
 
     report = {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "cases_path": str(Path(args.cases)),
         "profiles": profile_names,
         "repeats": int(args.repeats),
@@ -316,3 +316,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -263,6 +263,7 @@ def synthesize_advisory(
         if "Project: " in project_ctx:
             project_name = project_ctx.split("Project: ")[1].split(" (")[0]
 
+    project_context = f"PROJECT CONTEXT:\n{project_ctx}" if project_ctx else ""
     prompt = f"""You are Spark Intelligence, observing a live coding session on {project_name}.
 
 SYSTEM INVENTORY (what actually exists — do NOT reference anything outside this list):
@@ -277,7 +278,7 @@ WHAT'S HAPPENING NOW (patterns from this session):
 LEARNED INSIGHTS (from past sessions):
 {insight_text}
 
-{f"PROJECT CONTEXT:\n{project_ctx}" if project_ctx else ""}
+{project_context}
 {f"ADDITIONAL CONTEXT: {context}" if context else ""}
 
 CRITICAL RULES:
@@ -469,12 +470,13 @@ def distill_eidos(
 
     obs_text = "\n".join(f"- {o}" for o in raw_observations[:24])
 
+    current_self_mode = f"CURRENT SELF-MODEL:\n{current_eidos[:700]}" if current_eidos else ""
     prompt = f"""You are distilling Spark behavior observations into a structured advisory-ready format.
 
 OBSERVATIONS:
 {obs_text}
 
-{f"CURRENT SELF-MODEL:\n{current_eidos[:700]}" if current_eidos else ""}
+{current_self_mode}
 
 Return ONLY valid JSON with this exact shape:
 {{

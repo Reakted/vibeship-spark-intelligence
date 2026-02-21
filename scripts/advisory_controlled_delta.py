@@ -1,10 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
 import time
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -270,7 +270,7 @@ def run_workload(
     advice_rows = _collect_rows_since(feedback_requests, start_ts)
 
     return {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "start_ts": start_ts,
         "end_ts": end_ts,
         "rounds": rounds,
@@ -320,7 +320,7 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     trace_prefix = str(args.trace_prefix or "").strip() or f"delta-{args.label}-{ts}"
     # Default bench sessions bypass global/low-auth dedupe guards so controlled runs can measure emissions.
     session_prefix = str(args.session_prefix or "").strip() or f"advisory-bench-{args.label}"
@@ -349,3 +349,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -39,6 +39,22 @@ from trace_hud.id_connector import IDConnector, TraceContext
 from lib.diagnostics import setup_component_logging
 
 PORT = 8777
+TRACER_TOKEN = os.environ.get("SPARK_TRACER_TOKEN") or os.environ.get("SPARKD_TOKEN")
+TRACER_ALLOWED_ORIGINS = {
+    f"http://127.0.0.1:{PORT}",
+    f"http://localhost:{PORT}",
+    f"http://[::1]:{PORT}",
+}
+TRACER_CSP = (
+    "default-src 'self'; "
+    "base-uri 'self'; "
+    "img-src 'self' data:; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "frame-ancestors 'none';"
+)
 SPARK_DIR = Path.home() / ".spark"
 TRACER_STORE_DIR = SPARK_DIR / "tracer"
 AUTO_SCORER_LATEST = TRACER_STORE_DIR / "advisory_auto_score_latest.json"
@@ -55,6 +71,36 @@ _id_connector: Optional[IDConnector] = None
 _poll_thread: Optional[threading.Thread] = None
 _scorer_thread: Optional[threading.Thread] = None
 _running = False
+
+
+def _normalize_origin(raw: Optional[str]) -> Optional[str]:
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _is_allowed_origin(headers) -> bool:
+    for header_name in ("Origin", "Referer"):
+        value = headers.get(header_name) if headers is not None else None
+        if value:
+            normalized = _normalize_origin(value)
+            if not normalized:
+                return False
+            if normalized in TRACER_ALLOWED_ORIGINS:
+                return True
+            return False
+    host = headers.get("Host") if headers is not None else None
+    return host in {value.replace("http://", "").replace("https://", "") for value in TRACER_ALLOWED_ORIGINS}
+
+
+def _is_authorized(headers) -> bool:
+    if not TRACER_TOKEN:
+        return False
+    token = (headers.get("Authorization") or "").strip() if headers is not None else ""
+    return token == f"Bearer {TRACER_TOKEN}"
 
 
 def get_tracer_components():
@@ -1004,15 +1050,15 @@ def generate_html() -> str:
             return `
                 <li class="trace-item">
                     <div class="trace-header">
-                        <span class="trace-id">${trace.trace_id}</span>
-                        <span class="trace-phase ${trace.phase}">${trace.phase}</span>
+                        <span class="trace-id">${escapeHtml(trace.trace_id || '')}</span>
+                        <span class="trace-phase ${escapeHtml(trace.phase || '')}">${escapeHtml(trace.phase || '')}</span>
                     </div>
                     <div class="trace-intent">${escapeHtml(trace.intent)}</div>
                     <div class="trace-meta">
                         ${actionHtml}
                         ${blockerHtml}
                         <span>${formatDuration(trace.duration_ms)}</span>
-                        ${trace.files && trace.files.length ? `<span>${trace.files.length} files</span>` : ''}
+                        ${trace.files && trace.files.length ? `<span>${Number(trace.files.length || 0)} files</span>` : ''}
                     </div>
                     ${lessonHtml}
                 </li>
@@ -1028,7 +1074,7 @@ def generate_html() -> str:
             return `
                 <li class="trace-item">
                     <div class="trace-header">
-                        <span class="trace-id">${trace.trace_id}</span>
+                        <span class="trace-id">${escapeHtml(trace.trace_id || '')}</span>
                         <span class="badge fail">Blocked</span>
                     </div>
                     <div class="trace-intent">${escapeHtml(trace.intent)}</div>
@@ -1052,7 +1098,7 @@ def generate_html() -> str:
             return `
                 <li class="trace-item">
                     <div class="trace-header">
-                        <span class="trace-id">${trace.trace_id}</span>
+                        <span class="trace-id">${escapeHtml(trace.trace_id || '')}</span>
                         <span class="badge ${statusClass}">${statusText}</span>
                     </div>
                     <div class="trace-intent">${escapeHtml(trace.intent)}</div>
@@ -1077,11 +1123,11 @@ def generate_html() -> str:
                 const pct = maxCount > 0 ? (phase.count / maxCount * 100) : 0;
                 return `
                     <div class="phase-bar">
-                        <div class="phase-label">${phase.phase}</div>
+                        <div class="phase-label">${escapeHtml(phase.phase || '')}</div>
                         <div class="phase-track">
                             <div class="phase-fill" style="width: ${pct}%"></div>
                         </div>
-                        <div class="phase-count">${phase.count}</div>
+                        <div class="phase-count">${Number(phase.count || 0)}</div>
                     </div>
                 `;
             }).join('');
@@ -1766,6 +1812,13 @@ def get_session_timeline(session_id: str) -> Dict[str, Any]:
 
 class TracerHandler(SimpleHTTPRequestHandler):
     """HTTP handler for tracer dashboard."""
+    def send_response(self, code, message=None):  # type: ignore[override]
+        super().send_response(code, message)
+        self.send_header("Content-Security-Policy", TRACER_CSP)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+        self.send_header("X-Frame-Options", "DENY")
+
     
     def log_message(self, format, *args):
         # Suppress default logging
@@ -1920,6 +1973,20 @@ class TracerHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({'ok': False, 'error': 'remote POST forbidden'}).encode())
+            return
+
+        if not _is_allowed_origin(self.headers):
+            self.send_response(403)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'ok': False, 'error': 'origin not allowed'}).encode())
+            return
+
+        if not _is_authorized(self.headers):
+            self.send_response(401)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'ok': False, 'error': 'unauthorized'}).encode())
             return
 
         try:

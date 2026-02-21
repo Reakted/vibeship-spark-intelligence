@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Run a 3-pass selective-AI tune loop and apply the best candidate."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -24,7 +24,7 @@ class Candidate:
 
 
 def _utc_stamp() -> str:
-    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -89,7 +89,7 @@ def _apply_candidate(tuneables: Dict[str, Any], candidate: Candidate) -> Dict[st
     advisory_engine["selective_ai_min_authority"] = str(candidate.selective_ai_min_authority)
     advisory_engine["selective_ai_min_remaining_ms"] = int(candidate.selective_ai_min_remaining_ms)
     out["advisory_engine"] = advisory_engine
-    out["updated_at"] = datetime.now(UTC).isoformat()
+    out["updated_at"] = datetime.now(timezone.utc).isoformat()
     return out
 
 
@@ -125,7 +125,7 @@ def _render_report(result: Dict[str, Any]) -> str:
     lines: List[str] = []
     lines.append("# Selective-AI Tune Loop Report")
     lines.append("")
-    lines.append(f"- Generated (UTC): `{result['generated_at_utc']}`")
+    lines.append(f"- Generated (timezone.utc): `{result['generated_at_utc']}`")
     lines.append(f"- Rounds per pass: `{result['rounds']}`")
     lines.append(f"- Tuneables backup: `{result['tuneables_backup']}`")
     lines.append(f"- Winner: `{result['winner']['candidate']['name']}`")
@@ -206,7 +206,7 @@ def main() -> int:
     _write_json(tuneables_path, tuned_winner)
 
     result = {
-        "generated_at_utc": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "rounds": rounds,
         "tuneables_backup": str(backup_path),
         "passes": pass_rows,
@@ -226,3 +226,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

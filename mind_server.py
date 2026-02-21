@@ -18,6 +18,7 @@ server zero-dependency. We can upgrade to embeddings later.
 
 import json
 import os
+import secrets
 import sqlite3
 import uuid
 from datetime import datetime
@@ -29,6 +30,12 @@ from lib.ports import MIND_PORT
 
 PORT = MIND_PORT
 DB_PATH = Path.home() / ".mind" / "lite" / "memories.db"
+TOKEN_FILE = Path.home() / ".spark" / "mind_server.token"
+_ALLOWED_POST_HOSTS = {
+    f"127.0.0.1:{PORT}",
+    f"localhost:{PORT}",
+    f"[::1]:{PORT}",
+}
 TOKEN = os.environ.get("MIND_TOKEN")
 MAX_BODY_BYTES = int(os.environ.get("MIND_MAX_BODY_BYTES", "262144"))
 MAX_CONTENT_CHARS = int(os.environ.get("MIND_MAX_CONTENT_CHARS", "4000"))
@@ -37,6 +44,67 @@ _FTS_AVAILABLE = None
 _FTS_SCHEMA = None  # legacy | extended
 _FTS_TRIGGERS = None
 _RRF_K = 60
+
+
+def _read_token_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+        return raw if raw else None
+    except Exception:
+        return None
+
+
+def _resolve_token() -> str:
+    if env_token := os.environ.get("MIND_TOKEN"):
+        return env_token.strip()
+
+    existing = _read_token_file(TOKEN_FILE)
+    if existing:
+        return existing
+
+    generated = secrets.token_urlsafe(24)
+    try:
+        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TOKEN_FILE.write_text(generated, encoding="utf-8")
+    except Exception:
+        pass
+    return generated
+
+
+def _normalize_origin(raw: str) -> str | None:
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    if parsed.netloc:
+        return parsed.netloc
+    return None
+
+
+def _is_allowed_origin(headers) -> bool:
+    if headers is None:
+        return False
+    for header_name in ("Origin", "Referer"):
+        raw = headers.get(header_name)
+        if not raw:
+            continue
+        normalized = _normalize_origin(raw)
+        if normalized is None:
+            return False
+        if normalized in _ALLOWED_POST_HOSTS:
+            return True
+        return False
+    host = (headers.get("Host") or "").strip()
+    return host in _ALLOWED_POST_HOSTS
+
+
+def _is_authorized(headers) -> bool:
+    token = (headers.get("Authorization") or "").strip() if headers is not None else ""
+    return token == f"Bearer {TOKEN}"
+
+
+TOKEN = _resolve_token()
 
 
 def _ensure_db(conn: sqlite3.Connection):
@@ -217,11 +285,11 @@ class Handler(BaseHTTPRequestHandler):
         if not allow_remote and remote not in {'127.0.0.1', '::1'}:
             return self._json(403, {'error': 'remote_post_forbidden'})
 
-        # Optional auth: if MIND_TOKEN is set, require Authorization: Bearer <token>
-        if TOKEN:
-            auth = (self.headers.get("Authorization") or "").strip()
-            if auth != f"Bearer {TOKEN}":
-                return self._json(401, {"error": "unauthorized"})
+        if not _is_allowed_origin(self.headers):
+            return self._json(403, {'error': 'origin_not_allowed'})
+
+        if not _is_authorized(self.headers):
+            return self._json(401, {"error": "unauthorized"})
 
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length > MAX_BODY_BYTES:

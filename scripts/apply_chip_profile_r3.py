@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Apply the promoted R3 chip profile to user tuneables.
 
 Writes chip_merge quality limits into ~/.spark/tuneables.json so merge/distillation
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -39,7 +39,7 @@ def apply_r3(path: Path) -> Dict[str, Any]:
     current = dict(data.get("chip_merge") or {})
     current.update(R3_CHIP_MERGE)
     data["chip_merge"] = current
-    data["updated_at"] = datetime.now(UTC).isoformat()
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return data
@@ -63,3 +63,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

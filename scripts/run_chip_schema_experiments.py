@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Run A/B/C/D schema-capture experiments for chip learning quality.
 
 This benchmark is intentionally isolated from live runtime files:
@@ -18,7 +18,7 @@ import re
 import sys
 import tempfile
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List
 
@@ -548,7 +548,7 @@ def main() -> int:
         min_candidate_merge_eligible=float(args.min_candidate_merge_eligible),
     )
     report = {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "plan_path": str(plan_path),
         "chips": chips,
         "events_per_chip": int(args.events_per_chip),
@@ -589,3 +589,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

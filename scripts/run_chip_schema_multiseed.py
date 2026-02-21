@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Run chip schema experiments across multiple random seeds.
 
 This reduces overfitting to a single synthetic seed and reports:
@@ -15,7 +15,7 @@ import json
 import math
 import sys
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -149,13 +149,13 @@ def _render_markdown(report: Dict[str, Any]) -> str:
         f"({int(report.get('promotion_pass_count', 0))}/{int(report.get('seed_count', 0))})"
     )
     lines.append("")
-    lines.append("| Rank | Experiment | Win Rate | Objective (mean±sd) | Coverage (mean±sd) | Schema Statement | Merge Eligible | Non-Telemetry | Payload Valid |")
+    lines.append("| Rank | Experiment | Win Rate | Objective (meanÂ±sd) | Coverage (meanÂ±sd) | Schema Statement | Merge Eligible | Non-Telemetry | Payload Valid |")
     lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
     for idx, row in enumerate(report.get("aggregated") or [], start=1):
         lines.append(
             f"| {idx} | `{row.get('id','')}` ({row.get('mode','')}) | {float(row.get('win_rate',0.0)):.2%} | "
-            f"{float(row.get('objective_mean',0.0)):.4f} ± {float(row.get('objective_stdev',0.0)):.4f} | "
-            f"{float(row.get('coverage_mean',0.0)):.2%} ± {float(row.get('coverage_stdev',0.0)):.2%} | "
+            f"{float(row.get('objective_mean',0.0)):.4f} Â± {float(row.get('objective_stdev',0.0)):.4f} | "
+            f"{float(row.get('coverage_mean',0.0)):.2%} Â± {float(row.get('coverage_stdev',0.0)):.2%} | "
             f"{float(row.get('schema_statement_mean',0.0)):.2%} | {float(row.get('merge_eligible_mean',0.0)):.2%} | "
             f"{float(row.get('non_telemetry_mean',0.0)):.2%} | {float(row.get('payload_valid_mean',0.0)):.2%} |"
         )
@@ -238,7 +238,7 @@ def main() -> int:
 
     aggregated = _aggregate(seed_reports)
     report = {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "plan_path": str(plan_path),
         "chips": chips,
         "events_per_chip": int(args.events_per_chip),
@@ -282,3 +282,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

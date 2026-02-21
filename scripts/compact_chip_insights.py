@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -30,7 +30,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
     except Exception:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
+        parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
 
 
@@ -80,7 +80,7 @@ def _read_jsonl_rows(path: Path) -> Tuple[List[Dict[str, Any]], int]:
 def _filter_rows(rows: List[Dict[str, Any]], max_age_days: int) -> List[Dict[str, Any]]:
     if max_age_days <= 0:
         return rows
-    cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
     kept: List[Dict[str, Any]] = []
     for row in rows:
         ts = _parse_timestamp(row.get("timestamp"))
@@ -177,7 +177,7 @@ def main() -> int:
 
     archive_dir: Path | None = None
     if bool(args.archive):
-        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         archive_dir = Path.home() / ".spark" / "archive" / "chip_insights" / stamp
 
     print(f"chip_dir={chip_dir}")
@@ -224,4 +224,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 

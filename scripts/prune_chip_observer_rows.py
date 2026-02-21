@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 
@@ -151,7 +151,7 @@ def main() -> int:
 
     archive_dir: Path | None = None
     if bool(args.archive):
-        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         archive_dir = Path.home() / ".spark" / "archive" / "chip_insights_prune" / stamp
         archive_dir.mkdir(parents=True, exist_ok=True)
 
@@ -215,4 +215,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 

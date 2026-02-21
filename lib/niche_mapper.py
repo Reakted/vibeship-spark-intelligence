@@ -103,7 +103,7 @@ class NicheMapper:
         self.accounts: Dict[str, TrackedAccount] = {}
         self.hubs: Dict[str, ConversationHub] = {}
         self.opportunities: List[EngagementOpportunity] = []
-        self.x_voice = get_x_voice()
+        self.x_voice = get_x_voice() if callable(get_x_voice) else None
         self._load()
 
     def _load(self):
@@ -193,9 +193,10 @@ class NicheMapper:
         self.accounts[handle] = account
 
         # Sync warmth with XVoice
-        xv_warmth = self.x_voice.get_user_warmth(handle)
-        if xv_warmth != "cold":
-            account.warmth = xv_warmth
+        if callable(self.x_voice):
+            xv_warmth = self.x_voice.get_user_warmth(handle)
+            if xv_warmth != "cold":
+                account.warmth = xv_warmth
 
         self._save()
         return account
@@ -258,10 +259,12 @@ class NicheMapper:
             "sustained": "sustained_engagement",
         }
         xv_event = warmth_events.get(event_type, event_type)
-        self.x_voice.update_warmth(handle, xv_event)
+        if callable(self.x_voice):
+            self.x_voice.update_warmth(handle, xv_event)
 
         # Sync warmth from XVoice
-        account.warmth = self.x_voice.get_user_warmth(handle)
+        if callable(self.x_voice):
+            account.warmth = self.x_voice.get_user_warmth(handle)
 
         self._save()
 

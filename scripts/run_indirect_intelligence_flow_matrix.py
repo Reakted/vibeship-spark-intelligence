@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Run A/B/C/D optimization matrices for indirect intelligence-flow tuning.
 
 This script executes four matrices:
@@ -21,7 +21,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -44,7 +44,7 @@ class Arm:
 
 
 def now_utc() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def read_json(path: Path, default: Any) -> Any:
@@ -86,7 +86,7 @@ def run_cmd(
     timeout_s: int = 900,
 ) -> Dict[str, Any]:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    started = datetime.now(UTC)
+    started = datetime.now(timezone.utc)
     proc = subprocess.run(
         cmd,
         cwd=ROOT_DIR,
@@ -95,7 +95,7 @@ def run_cmd(
         timeout=timeout_s,
         env=os.environ.copy(),
     )
-    ended = datetime.now(UTC)
+    ended = datetime.now(timezone.utc)
     log_path = LOG_DIR / f"{log_name}.log"
     combined = []
     combined.append(f"$ {' '.join(cmd)}")
@@ -567,7 +567,7 @@ def execute_matrix(
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Run indirect intelligence flow A/B/C/D matrices")
-    ap.add_argument("--run-id", default=f"indirect_matrix_v1_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}")
+    ap.add_argument("--run-id", default=f"indirect_matrix_v1_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}")
     ap.add_argument("--timeout-s", type=int, default=900, help="Per-command timeout in seconds")
     args = ap.parse_args()
 
@@ -623,3 +623,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

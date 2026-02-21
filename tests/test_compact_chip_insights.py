@@ -1,8 +1,8 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib.util
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -33,10 +33,11 @@ def test_retain_rows_prefers_schema_rows():
 
 def test_filter_rows_applies_age_window():
     mod = _load_module()
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     rows = [
         {"timestamp": (now - timedelta(days=40)).isoformat()},
         {"timestamp": (now - timedelta(days=1)).isoformat()},
     ]
     kept = mod._filter_rows(rows, max_age_days=20)
     assert len(kept) == 1
+

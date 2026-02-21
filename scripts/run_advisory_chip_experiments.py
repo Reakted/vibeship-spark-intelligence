@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Run multi-style chip experiments for advisory realism benchmarks.
 
 Supports:
@@ -17,7 +17,7 @@ import random
 import re
 import sys
 import tempfile
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -528,7 +528,7 @@ def main() -> int:
     ranked = sorted(results, key=lambda r: (_safe_float(r.get("objective"), 0.0), _safe_float(r.get("high_value_rate"), 0.0)), reverse=True)
 
     report = {
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "plan_path": str(plan_path),
         "cases_path": str(cases_path),
         "profiles": profile_names,
@@ -565,3 +565,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
