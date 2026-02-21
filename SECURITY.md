@@ -2,39 +2,35 @@
 
 ## Reporting a Vulnerability
 
-If you believe you found a security vulnerability or a safety-critical issue:
-- Do not open a public GitHub issue with exploit details.
-- Instead, email a private report to the maintainers.
+If you find a security vulnerability or safety-critical issue, please submit a **Pull Request** with:
 
-Before any public launch, set a dedicated security contact email and (optionally) a PGP key:
-- Security contact: `security@vibeship.co`
-- PGP (optional): add fingerprint + public key here
+- A clear description of the issue and its impact
+- The affected component(s)
+- Minimal reproduction steps
+- Your suggested fix
 
-Include:
-- what you found (impact, affected component)
-- minimal reproduction steps
-- suggested fix if you have one
+For sensitive vulnerabilities that should not be disclosed publicly before a fix is available, use [GitHub's private vulnerability reporting](https://github.com/vibeforge1111/vibeship-spark-intelligence/security/advisories/new) or email `security@vibeship.co`.
 
 ## Scope
 
 This repo handles:
-- local event capture (Claude Code hooks, OpenClaw tailer)
-- processing and memory/distillation loops (Spark / EIDOS)
-- local dashboards and notifications
+- Local event capture (Claude Code hooks)
+- Processing and memory/distillation loops (Spark / EIDOS)
+- Local dashboards and notifications
 
 Security-sensitive areas:
-- hook inputs (prompt injection via tool metadata)
-- any code execution surfaces (shell/tool runners)
-- any network clients (Mind bridge, notify/wake endpoints)
-- any persisted files under `~/.spark/` and `~/.openclaw/`
+- Hook inputs (prompt injection via tool metadata)
+- Any code execution surfaces (shell/tool runners)
+- Any network clients (Mind bridge, notify/wake endpoints)
+- Any persisted files under `~/.spark/`
 
-## Coordinated Disclosure (Suggested Defaults)
+## Response Timeline
 
-- Acknowledge within: 72 hours
-- Initial assessment within: 7 days
+- Acknowledge: within 72 hours
+- Initial assessment: within 7 days
 - Patch target for critical issues: 14 days (best-effort)
 
 ## Hard Rules
 
-- Never ask reporters to publish exploit details.
+- Never ask reporters to publish exploit details before a fix is available.
 - Never request real secrets from reporters.
