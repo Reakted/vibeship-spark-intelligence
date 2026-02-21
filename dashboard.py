@@ -137,6 +137,13 @@ def _is_authorized(headers) -> bool:
     return token == f"Bearer {DASHBOARD_TOKEN}"
 
 
+def _is_csrf_safe(headers) -> bool:
+    fetch_site = (headers.get("Sec-Fetch-Site") or "").strip().lower() if headers is not None else ""
+    if not fetch_site:
+        return True
+    return fetch_site in {"same-origin", "same-site", "none"}
+
+
 def get_eidos_status():
     """Get EIDOS system status for dashboard footer."""
     if not HAS_EIDOS:
@@ -5094,6 +5101,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         allow_remote = str(os.environ.get('SPARK_DASHBOARD_ALLOW_REMOTE_POST') or '').strip().lower() in {'1','true','yes','on'}
         if not allow_remote and remote not in {'127.0.0.1', '::1'}:
             self._send_json(403, {'ok': False, 'error': 'remote POST forbidden'})
+            return
+
+        if not _is_csrf_safe(self.headers):
+            self._send_json(403, {'ok': False, 'error': 'csrf forbidden'})
             return
 
         if not _is_allowed_origin(self.headers):

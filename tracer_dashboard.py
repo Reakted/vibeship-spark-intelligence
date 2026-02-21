@@ -103,6 +103,13 @@ def _is_authorized(headers) -> bool:
     return token == f"Bearer {TRACER_TOKEN}"
 
 
+def _is_csrf_safe(headers) -> bool:
+    fetch_site = (headers.get("Sec-Fetch-Site") or "").strip().lower() if headers is not None else ""
+    if not fetch_site:
+        return True
+    return fetch_site in {"same-origin", "same-site", "none"}
+
+
 def get_tracer_components():
     """Get or initialize tracer components."""
     global _tracer_state, _tracer_collector, _tracer_store, _id_connector
@@ -1973,6 +1980,13 @@ class TracerHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({'ok': False, 'error': 'remote POST forbidden'}).encode())
+            return
+
+        if not _is_csrf_safe(self.headers):
+            self.send_response(403)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'ok': False, 'error': 'csrf forbidden'}).encode())
             return
 
         if not _is_allowed_origin(self.headers):
