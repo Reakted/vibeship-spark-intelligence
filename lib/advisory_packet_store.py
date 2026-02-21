@@ -122,6 +122,10 @@ def _obsidian_packets_dir() -> Path:
     return _obsidian_export_dir() / "packets"
 
 
+def _obsidian_index_file() -> Path:
+    return _obsidian_packets_dir() / "index.md"
+
+
 def _obsidian_enabled() -> bool:
     return bool(OBSIDIAN_EXPORT_ENABLED)
 
@@ -918,7 +922,7 @@ def _sync_obsidian_catalog() -> Optional[str]:
 
         lines: List[str] = []
         _render_obsidian_index(lines, catalog)
-        target = _obsidian_packets_dir() / "index.md"
+        target = _obsidian_index_file()
         target.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return str(target)
     except Exception:
@@ -948,7 +952,7 @@ def _export_packet_to_obsidian(packet: Dict[str, Any], *, force: bool = False) -
         all_exports.sort(key=lambda p: p.stat().st_mtime)
         keep = max(1, OBSIDIAN_EXPORT_MAX_PACKETS)
         # Keep the catalog file if it exists.
-        catalog_name = OBSIDIAN_INDEX_FILE.name.lower()
+        catalog_name = _obsidian_index_file().name.lower()
         if len(all_exports) > keep:
             for stale in all_exports[: len(all_exports) - keep]:
                 if stale.name.lower() == catalog_name:
@@ -2393,7 +2397,7 @@ def get_store_status() -> Dict[str, Any]:
         "obsidian_auto_export": bool(OBSIDIAN_AUTO_EXPORT),
         "obsidian_export_dir": str(_obsidian_export_dir()),
         "obsidian_export_dir_exists": bool(_obsidian_export_dir().exists()),
-        "obsidian_index_file": str(OBSIDIAN_INDEX_FILE),
+        "obsidian_index_file": str(_obsidian_index_file()),
         "decision_ledger": _decision_ledger_meta(),
         "index_file": str(INDEX_FILE),
     }

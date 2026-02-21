@@ -280,7 +280,53 @@ All tunable via `~/.spark/tuneables.json` (sections: `advisor`, `advisory_engine
 | `SPARK_ADVISORY_GLOBAL_DEDUPE` | 1 | Cross-session dedupe |
 | `SPARK_ADVISORY_GLOBAL_DEDUPE_COOLDOWN_S` | 600 | Dedupe window |
 
----
+## Obsidian Watchtower (Observation Tower)
+
+The watchtower is the packet-first observability layer: every emitted advisory packet is exported as Markdown for easy review in Obsidian.
+
+- Packet export is controlled in `advisory_packet_store` tuneables:
+  - `obsidian_enabled`
+  - `obsidian_auto_export`
+  - `obsidian_export_dir`
+  - `obsidian_export_max_packets`
+- Exports land under:
+  - `<obsidian_export_dir>\packets\`
+  - `index.md` inside that folder
+
+### Setup on Windows
+
+1. Create/open your vault folder path.
+2. Set Spark export target:
+   - `python scripts/set_obsidian_watchtower.py --vault-dir "C:\\Users\\USER\\Documents\\Obsidian Vault\\Spark-Intelligence-Observatory" --enable --auto-export --write`
+3. Open Obsidian and add/open that folder as a vault/subfolder.
+4. Open `packets\\index.md` from that same folder.
+
+### Quick checks
+
+- Show current settings:
+  - `python scripts/set_obsidian_watchtower.py --show`
+- Repoint without writing:
+  - `python scripts/set_obsidian_watchtower.py --vault-dir "<new-path>"`
+- Apply changes:
+  - add `--write`
+- Disable temporarily:
+  - `python scripts/set_obsidian_watchtower.py --disable --write`
+- Enable temporarily:
+  - `python scripts/set_obsidian_watchtower.py --enable --write`
+
+### Expected output
+
+- `.\Spark-Intelligence-Observatory\packets\index.md` updates with:
+  - summary
+  - decision-ledger tail
+  - ready/invalid packets
+- Per-packet files appear as:
+  - `pkt_<id>.md`
+
+For best-practice usage (daily/weekly workflows, triage pattern, and noise control),
+see: `docs/ADVISORY_OBSIDIAN_PLAYBOOK.md`.
+
+--- 
 
 ## Log Files
 
