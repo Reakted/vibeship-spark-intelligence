@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a minimal, release-confidence pytest baseline."""
+"""Run the release pytest baseline with optional non-blocking checks."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BASELINE_TARGETS_FILE = Path(__file__).resolve().parent / "test_baseline_targets.txt"
+BASELINE_OPTIONAL_TARGETS_FILE = Path(__file__).resolve().parent / "test_baseline_optional_targets.txt"
 
 
 def _load_targets() -> list[str]:
@@ -18,6 +19,19 @@ def _load_targets() -> list[str]:
 
     targets: list[str] = []
     for raw_line in BASELINE_TARGETS_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        targets.append(line)
+    return targets
+
+
+def _load_optional_targets() -> list[str]:
+    if not BASELINE_OPTIONAL_TARGETS_FILE.exists():
+        return []
+
+    targets: list[str] = []
+    for raw_line in BASELINE_OPTIONAL_TARGETS_FILE.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -39,6 +53,25 @@ def _validate_targets(targets: list[str]) -> int:
     return 0
 
 
+def _validate_optional_targets(targets: list[str]) -> list[str]:
+    missing: list[str] = []
+    for target in targets:
+        if not (REPO_ROOT / target).exists():
+            missing.append(target)
+    return missing
+
+
+def _run_pytest(targets: list[str], *, allow_failure: bool = False) -> tuple[int, int]:
+    if not targets:
+        return (0, 0)
+
+    cmd = [sys.executable, "-m", "pytest", "-q", *targets]
+    result = subprocess.run(cmd, cwd=REPO_ROOT)
+    if result.returncode != 0:
+        return (result.returncode if not allow_failure else 0, result.returncode)
+    return (0, 0)
+
+
 def main() -> int:
     targets = _load_targets()
     if not targets:
@@ -48,14 +81,31 @@ def main() -> int:
     code = _validate_targets(targets)
     if code:
         return code
-
-    cmd = [sys.executable, "-m", "pytest", "-q", *targets]
-    result = subprocess.run(cmd, cwd=REPO_ROOT)
-    if result.returncode != 0:
+    mandatory_code, _ = _run_pytest(targets, allow_failure=False)
+    if mandatory_code != 0:
         print("Release baseline tests failed.")
-        return result.returncode
+        return mandatory_code
 
-    print("Release baseline passed.")
+    optional_targets = _load_optional_targets()
+    optional_missing = _validate_optional_targets(optional_targets)
+    if optional_missing:
+        print("Optional baseline target missing (skipping):")
+        for path in optional_missing:
+            print(f"- {path}")
+        optional_targets = [t for t in optional_targets if t not in optional_missing]
+
+    if optional_targets:
+        _, optional_raw = _run_pytest(optional_targets, allow_failure=True)
+    else:
+        optional_raw = 0
+    if optional_targets:
+        if optional_raw == 0:
+            # Keep output consistent for CI logs.
+            print("Release optional baseline checks passed.")
+        else:
+            print("Release optional baseline checks reported failures (non-blocking).")
+
+    print("Release mandatory baseline passed.")
     return 0
 
 
