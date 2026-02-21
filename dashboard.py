@@ -4497,8 +4497,9 @@ def generate_mission_html() -> str:
         const ok = info.healthy || info.running;
         const pill = ok ? "ok" : "danger";
         const safeName = safeText(name || "");
+        const safePid = safeText(info.pid || "");
         const details = [];
-        if (info.pid) details.push(`pid ${info.pid}`);
+        if (safePid) details.push(`pid ${safePid}`);
         if (info.heartbeat_age_s !== undefined && info.heartbeat_age_s !== null) {
           details.push(`heartbeat ${Math.round(info.heartbeat_age_s)}s`);
         }
@@ -4510,7 +4511,7 @@ def generate_mission_html() -> str:
       const queue = data.queue || {};
       const queueItems = [
         `<div class="row"><span>events</span><span class="mono">${queue.event_count ?? 0}</span></div>`,
-        `<div class="row"><span>oldest event</span><span class="mono">${queue.oldest_age ?? "Ã¢â‚¬â€"}</span></div>`,
+        `<div class="row"><span>oldest event</span><span class="mono">${safeText(queue.oldest_age ?? "Ã¢â‚¬â€")}</span></div>`,
         `<div class="row"><span>invalid events</span><span class="mono">${queue.invalid_events ?? 0}</span></div>`,
         `<div class="row"><span>lock present</span><span class="mono">${queue.lock_present ? "yes" : "no"}</span></div>`
       ];
@@ -4519,7 +4520,7 @@ def generate_mission_html() -> str:
 
       const bridge = data.bridge || {};
       const bridgeItems = [
-        `<div class="row"><span>last run</span><span class="mono">${bridge.last_run || "Ã¢â‚¬â€"}</span></div>`,
+        `<div class="row"><span>last run</span><span class="mono">${safeText(bridge.last_run || "Ã¢â‚¬â€")}</span></div>`,
         `<div class="row"><span>patterns</span><span class="mono">${bridge.pattern_processed ?? 0}</span></div>`,
         `<div class="row"><span>content learned</span><span class="mono">${bridge.content_learned ?? 0}</span></div>`,
         `<div class="row"><span>errors</span><span class="mono">${(bridge.errors || []).length}</span></div>`
@@ -4551,7 +4552,7 @@ def generate_mission_html() -> str:
         }
         const recent = ep.recent_steps_detail || [];
         for (const s of recent) {
-          details.push(`<div class="row"><span>${safeText(s.intent || "step")}</span><span class="mono">${s.trace_id || "â€”"}</span>${traceButton(s.trace_id)}</div>`);
+          details.push(`<div class="row"><span>${safeText(s.intent || "step")}</span><span class="mono">${safeText(s.trace_id || "â€”")}</span>${traceButton(s.trace_id)}</div>`);
         }
         renderList("episode-details", details, (x) => x);
       } else {
@@ -4591,7 +4592,7 @@ def generate_mission_html() -> str:
       renderList("watchers-feed", data.watchers || [], (w) => `
         <div class="row">
           <span>${safeText(w.watcher || "")}</span>
-          <span class="pill ${w.severity === "force" ? "danger" : w.severity === "block" ? "warn" : "warn"}">${w.severity}</span>
+          <span class="pill ${w.severity === "force" ? "danger" : w.severity === "block" ? "warn" : "warn"}">${safeText(w.severity || "")}</span>
           <span class="muted">${safeText(w.message || "")}</span>
           ${traceButton(w.trace_id)}
         </div>
