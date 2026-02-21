@@ -323,11 +323,15 @@ def _load_engine_config(path: Optional[Path] = None) -> Dict[str, Any]:
         return {}
     try:
         data = json.loads(tuneables.read_text(encoding="utf-8-sig"))
-    except Exception:
+    except UnicodeDecodeError:
         try:
             data = json.loads(tuneables.read_text(encoding="utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+            log_debug("advisory_engine", f"failed to load engine config from {tuneables}", e)
             return {}
+    except (json.JSONDecodeError, OSError) as e:
+        log_debug("advisory_engine", f"failed to load engine config from {tuneables}", e)
+        return {}
     cfg = data.get("advisory_engine") or {}
     return cfg if isinstance(cfg, dict) else {}
 
@@ -379,7 +383,7 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
         try:
             MAX_ENGINE_MS = max(250.0, min(20000.0, float(cfg.get("max_ms"))))
             applied.append("max_ms")
-        except Exception:
+        except (ValueError, TypeError):
             warnings.append("invalid_max_ms")
 
     if "include_mind" in cfg:
@@ -417,7 +421,7 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
                 100.0, min(5000.0, float(cfg.get("live_quick_min_remaining_ms")))
             )
             applied.append("live_quick_min_remaining_ms")
-        except Exception:
+        except (ValueError, TypeError):
             warnings.append("invalid_live_quick_min_remaining_ms")
 
     if "fallback_rate_guard_enabled" in cfg:
@@ -434,7 +438,7 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
                 min(1.0, float(cfg.get("fallback_rate_max_ratio") or FALLBACK_RATE_GUARD_MAX_RATIO)),
             )
             applied.append("fallback_rate_max_ratio")
-        except Exception:
+        except (ValueError, TypeError):
             warnings.append("invalid_fallback_rate_max_ratio")
 
     if "fallback_rate_window" in cfg:
@@ -443,14 +447,14 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
                 10, min(500, int(cfg.get("fallback_rate_window") or FALLBACK_RATE_GUARD_WINDOW))
             )
             applied.append("fallback_rate_window")
-        except Exception:
+        except (ValueError, TypeError):
             warnings.append("invalid_fallback_rate_window")
 
     if "prefetch_inline_max_jobs" in cfg:
         try:
             INLINE_PREFETCH_MAX_JOBS = max(1, min(20, int(cfg.get("prefetch_inline_max_jobs") or 1)))
             applied.append("prefetch_inline_max_jobs")
-        except Exception:
+        except (ValueError, TypeError):
             warnings.append("invalid_prefetch_inline_max_jobs")
 
     if "actionability_enforce" in cfg:
@@ -481,7 +485,7 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
                 min(8000.0, float(cfg.get("selective_ai_min_remaining_ms") or SELECTIVE_AI_MIN_REMAINING_MS)),
             )
             applied.append("selective_ai_min_remaining_ms")
-        except Exception:
+        except (ValueError, TypeError):
             warnings.append("invalid_selective_ai_min_remaining_ms")
 
     if "selective_ai_min_authority" in cfg:
@@ -506,7 +510,7 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
                 min(86400.0, float(cfg.get("delivery_stale_s") or DELIVERY_STALE_SECONDS)),
             )
             applied.append("delivery_stale_s")
-        except Exception:
+        except (ValueError, TypeError):
             warnings.append("invalid_delivery_stale_s")
 
     if "advisory_text_repeat_cooldown_s" in cfg:
@@ -516,7 +520,7 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
                 min(86400.0, float(cfg.get("advisory_text_repeat_cooldown_s") or 0.0)),
             )
             applied.append("advisory_text_repeat_cooldown_s")
-        except Exception:
+        except (ValueError, TypeError):
             warnings.append("invalid_advisory_text_repeat_cooldown_s")
     return {"applied": applied, "warnings": warnings}
 
