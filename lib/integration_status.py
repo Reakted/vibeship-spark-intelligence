@@ -25,6 +25,8 @@ EVENTS_FILE = QUEUE_DIR / "events.jsonl"
 ADVICE_LOG = SPARK_DIR / "advisor" / "advice_log.jsonl"
 RECENT_ADVICE = SPARK_DIR / "advisor" / "recent_advice.jsonl"
 EFFECTIVENESS = SPARK_DIR / "advisor" / "effectiveness.json"
+CODEX_CONTEXT_FILE = Path("SPARK_CONTEXT_FOR_CODEX.md")
+CODEX_PAYLOAD_FILE = Path("SPARK_ADVISORY_PAYLOAD.json")
 
 
 def check_settings_json() -> Tuple[bool, str]:
@@ -178,6 +180,51 @@ def check_advisory_packet_store() -> Tuple[bool, str]:
     )
 
 
+def _codex_sync_enabled() -> bool:
+    if os.getenv("SPARK_CODEX_CMD") or os.getenv("CODEX_CMD"):
+        return True
+    sync_targets = os.getenv("SPARK_SYNC_TARGETS", "").strip().lower()
+    if not sync_targets:
+        return False
+    targets = {s.strip() for s in sync_targets.split(",") if s.strip()}
+    return "codex" in targets
+
+
+def check_codex_sync_outputs() -> Tuple[bool, str]:
+    """Check Codex adapter sync artifacts in the current working project."""
+    if not _codex_sync_enabled():
+        return True, "Codex sync not configured"
+
+    context_path = (Path.cwd() / CODEX_CONTEXT_FILE).resolve()
+    payload_path = (Path.cwd() / CODEX_PAYLOAD_FILE).resolve()
+
+    if not context_path.exists() and not payload_path.exists():
+        return False, "No Codex sync artifacts in current directory"
+    if not context_path.exists():
+        return False, f"Missing Codex context file: {context_path.name}"
+    if not payload_path.exists():
+        return False, f"Missing Codex advisory payload: {payload_path.name}"
+
+    try:
+        payload_text = payload_path.read_text(encoding="utf-8")
+        payload = json.loads(payload_text)
+        if not isinstance(payload, dict):
+            return False, "SPARK_ADVISORY_PAYLOAD.json is not a JSON object"
+        if not payload.get("schema_version"):
+            return False, "SPARK_ADVISORY_PAYLOAD.json missing schema_version"
+    except Exception as e:
+        return False, f"Error reading SPARK_ADVISORY_PAYLOAD.json: {e}"
+
+    age_hours = (time.time() - context_path.stat().st_mtime) / 3600
+    if age_hours > 24:
+        return False, (
+            f"Codex context stale ({age_hours:.1f}h ago); run `spark-codex` or "
+            "`python -m spark.cli sync-context`"
+        )
+
+    return True, f"Codex sync present at {context_path.name} and {payload_path.name}"
+
+
 def check_pre_tool_events(minutes: int = 60) -> Tuple[bool, str]:
     """Check specifically for pre_tool events."""
     if not EVENTS_FILE.exists():
@@ -220,6 +267,7 @@ def get_full_status() -> Dict:
         ("Pre/Post Tool Events", check_pre_tool_events(60)),
         ("Advice Log", check_advice_log_growing()),
         ("Advisory Packet Store", check_advisory_packet_store()),
+        ("Codex Sync Outputs", check_codex_sync_outputs()),
         ("Effectiveness Tracking", check_effectiveness()),
     ]
 
@@ -304,6 +352,22 @@ def print_status():
     b) Verify packet TTL is not too short for your workflow
     c) Trim invalidation rules if too many packets become invalidated
     d) Inspect ~/.spark/advice_packets/index.json for unexpected corruption
+""")
+                elif "Codex Sync Outputs" in check["check"] and not check["ok"]:
+                    if "Codex sync not configured" in check["message"]:
+                        print("""
+  - Codex sync is disabled in this run context. Enable if you want this check:
+    a) Launch with `spark-codex` wrapper, or
+    b) Set SPARK_SYNC_TARGETS=codex
+    c) Or set SPARK_CODEX_CMD / CODEX_CMD
+""")
+                    else:
+                        print("""
+  - Codex sync artifacts missing or stale. Recommended checks:
+    a) Run `python -m spark.cli sync-context` in this directory
+    b) Ensure SPARK_SYNC_TARGETS includes `codex`
+    c) Verify `SPARK_CONTEXT_FOR_CODEX.md` and `SPARK_ADVISORY_PAYLOAD.json` exist
+    d) Confirm payload parses and includes `schema_version`
 """)
 
     print("=" * 60 + "\n")

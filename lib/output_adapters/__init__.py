@@ -5,6 +5,7 @@ from .cursor import write as write_cursor
 from .windsurf import write as write_windsurf
 from .clawdbot import write as write_clawdbot
 from .openclaw import write as write_openclaw
+from .codex import write as write_codex
 from .exports import write_exports
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     "write_windsurf",
     "write_clawdbot",
     "write_openclaw",
+    "write_codex",
     "write_exports",
 ]

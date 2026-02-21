@@ -18,6 +18,7 @@ from .output_adapters import (
     write_windsurf,
     write_clawdbot,
     write_openclaw,
+    write_codex,
     write_exports,
 )
 from .project_context import get_project_context, filter_insights_for_context
@@ -38,7 +39,7 @@ CHIP_INSIGHTS_DIR = Path.home() / ".spark" / "chip_insights"
 TUNEABLES_FILE = Path.home() / ".spark" / "tuneables.json"
 
 CORE_SYNC_ADAPTERS = ("openclaw", "exports")
-OPTIONAL_SYNC_ADAPTERS = ("claude_code", "cursor", "windsurf", "clawdbot")
+OPTIONAL_SYNC_ADAPTERS = ("claude_code", "cursor", "windsurf", "clawdbot", "codex")
 ALL_SYNC_ADAPTERS = CORE_SYNC_ADAPTERS + OPTIONAL_SYNC_ADAPTERS
 
 
@@ -715,6 +716,15 @@ def sync_context(
             targets["openclaw"] = "error"
     else:
         targets["openclaw"] = "disabled"
+
+    if "codex" in enabled_adapters:
+        try:
+            ok = write_codex(context, project_dir=root, advisory_payload=advisory_payload)
+            targets["codex"] = "written" if ok else "skipped"
+        except Exception:
+            targets["codex"] = "error"
+    else:
+        targets["codex"] = "disabled"
 
     if "exports" in enabled_adapters:
         try:
