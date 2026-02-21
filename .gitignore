@@ -125,6 +125,7 @@ logs/
 dist/
 build/
 vibeship_spark.egg-info/
+site/
 
 # Local test/debug scratch files
 _test_*.txt
