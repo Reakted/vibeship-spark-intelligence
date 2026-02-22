@@ -1,0 +1,650 @@
+{
+  "generated_utc": "2026-02-22T22:20:12Z",
+  "analysis_basis": {
+    "ledger_path": "C:\\Users\\USER\\.spark\\advisory_decision_ledger.jsonl",
+    "engine_path": "C:\\Users\\USER\\.spark\\advisory_engine.jsonl",
+    "implicit_path": "C:\\Users\\USER\\.spark\\advisor\\implicit_feedback.jsonl",
+    "rows": {
+      "ledger": 6597,
+      "engine": 500,
+      "implicit": 2972
+    },
+    "tuneables_mtime_unix": 1771798605.7606137
+  },
+  "windows": {
+    "h1": {
+      "rows": 64,
+      "outcomes": {
+        "emitted": 7,
+        "blocked": 57
+      },
+      "stages": {
+        "emitted": 7,
+        "gate_no_emit": 46,
+        "global_dedupe_suppressed": 11
+      },
+      "routes_top10": {
+        "packet_exact": 42,
+        "packet_relaxed": 17,
+        "live": 5
+      },
+      "tools_top10": {
+        "Grep": 29,
+        "Bash": 27,
+        "Read": 6,
+        "Task": 1,
+        "Glob": 1
+      },
+      "error_codes": {
+        "AE_GATE_SUPPRESSED": 46,
+        "AE_GLOBAL_DEDUPE_SUPPRESSED": 11
+      },
+      "suppression_reason_buckets": {
+        "budget_exhausted": 3,
+        "shown_ttl": 96,
+        "global_dedupe": 15
+      },
+      "suppression_reasons_top20": {
+        "global_dedupe:text_sig": 15,
+        "shown 307s ago (TTL 600s)": 6,
+        "shown 341s ago (TTL 600s)": 4,
+        "shown 342s ago (TTL 600s)": 4,
+        "shown 399s ago (TTL 600s)": 4,
+        "shown 400s ago (TTL 600s)": 4,
+        "shown 429s ago (TTL 600s)": 4,
+        "shown 458s ago (TTL 600s)": 4,
+        "shown 529s ago (TTL 600s)": 4,
+        "shown 35s ago (TTL 600s)": 4,
+        "shown 129s ago (TTL 600s)": 4,
+        "shown 170s ago (TTL 600s)": 4,
+        "budget exhausted (2 max)": 3,
+        "shown 41s ago (TTL 600s)": 2,
+        "shown 281s ago (TTL 600s)": 2,
+        "shown 293s ago (TTL 600s)": 2,
+        "shown 306s ago (TTL 600s)": 2,
+        "shown 308s ago (TTL 600s)": 2,
+        "shown 340s ago (TTL 600s)": 2,
+        "shown 373s ago (TTL 600s)": 2
+      },
+      "suppressed_ids_top20": {
+        "bank:bank:25778971d325": 31,
+        "eidos:eidos:policy:41e004dc": 30,
+        "eidos:eidos:heuristic:b4d223f9": 22,
+        "eidos:eidos:heuristic:e8b9a2cf": 22,
+        "baseline_emergent_other": 7,
+        "eidos:eidos:policy:01e1ad23": 1,
+        "eidos:eidos:heuristic:725d9294": 1
+      },
+      "source_counts_top10": {
+        "eidos": 83,
+        "bank": 32,
+        "baseline": 9
+      },
+      "suppressed_items_total": 114,
+      "budget_items_total": 3
+    },
+    "h6": {
+      "rows": 505,
+      "outcomes": {
+        "emitted": 147,
+        "blocked": 358
+      },
+      "stages": {
+        "emitted": 147,
+        "gate_no_emit": 239,
+        "global_dedupe_suppressed": 110,
+        "fallback_rate_limit": 9
+      },
+      "routes_top10": {
+        "packet_relaxed": 216,
+        "live": 189,
+        "packet_exact": 91,
+        "packet_relaxed_fallback": 9
+      },
+      "tools_top10": {
+        "Read": 184,
+        "Bash": 108,
+        "Edit": 91,
+        "Grep": 53,
+        "TaskUpdate": 28,
+        "Glob": 12,
+        "TaskCreate": 11,
+        "Write": 9,
+        "Task": 7,
+        "EnterPlanMode": 1
+      },
+      "error_codes": {
+        "AE_GATE_SUPPRESSED": 239,
+        "AE_GLOBAL_DEDUPE_SUPPRESSED": 110,
+        "AE_FALLBACK_RATE_LIMIT": 9
+      },
+      "suppression_reason_buckets": {
+        "budget_exhausted": 32,
+        "shown_ttl": 448,
+        "global_dedupe": 154,
+        "other": 40,
+        "tool_cooldown": 22
+      },
+      "suppression_reasons_top20": {
+        "global_dedupe:text_sig": 145,
+        "budget exhausted (2 max)": 32,
+        "test_suppressed": 18,
+        "generic Read advice while already Reading": 17,
+        "tool Edit on cooldown": 10,
+        "global_dedupe:advice_id": 9,
+        "shown 27s ago (TTL 600s)": 8,
+        "tool Bash on cooldown": 8,
+        "shown 33s ago (TTL 600s)": 7,
+        "shown 80s ago (TTL 600s)": 7,
+        "shown 72s ago (TTL 600s)": 7,
+        "shown 149s ago (TTL 600s)": 6,
+        "shown 21s ago (TTL 600s)": 6,
+        "shown 22s ago (TTL 600s)": 6,
+        "shown 24s ago (TTL 600s)": 6,
+        "shown 111s ago (TTL 600s)": 6,
+        "shown 232s ago (TTL 600s)": 6,
+        "shown 35s ago (TTL 600s)": 6,
+        "shown 307s ago (TTL 600s)": 6,
+        "shown 28s ago (TTL 600s)": 5
+      },
+      "suppressed_ids_top20": {
+        "bank:bank:25778971d325": 72,
+        "eidos:eidos:policy:41e004dc": 70,
+        "eidos:eidos:heuristic:b4d223f9": 69,
+        "eidos:eidos:heuristic:f329e577": 50,
+        "eidos:eidos:heuristic:b800a71a": 43,
+        "eidos:eidos:heuristic:6c92ac0e": 34,
+        "mind:mind:45c369f4-4cf": 32,
+        "eidos:eidos:heuristic:e8b9a2cf": 30,
+        "eidos:eidos:heuristic:f145d3b5": 29,
+        "mind:mind:d6208e86-a73": 26,
+        "eidos:eidos:heuristic:4d6ebf75": 26,
+        "baseline_emergent_other": 19,
+        "pkt-a1": 18,
+        "eidos:eidos:policy:e14c2c28": 17,
+        "eidos:eidos:heuristic:5ffd725c": 16,
+        "eidos:eidos:heuristic:023391f6": 12,
+        "mind:mind:67d5d04e-16f": 11,
+        "eidos:eidos:heuristic:2c91e417": 10,
+        "baseline_knowledge_alignment": 10,
+        "eidos:eidos:policy:cc6aa463": 9
+      },
+      "source_counts_top10": {
+        "eidos": 548,
+        "mind": 111,
+        "bank": 85,
+        "cognitive": 81,
+        "advisor": 45,
+        "baseline": 37,
+        "packet": 27,
+        "semantic-agentic": 13
+      },
+      "suppressed_items_total": 696,
+      "budget_items_total": 32
+    },
+    "h24": {
+      "rows": 4218,
+      "outcomes": {
+        "emitted": 780,
+        "blocked": 3395,
+        "error": 43
+      },
+      "stages": {
+        "emitted": 780,
+        "gate_no_emit": 2346,
+        "engine_error": 43,
+        "fallback_rate_limit": 37,
+        "global_dedupe_suppressed": 1012
+      },
+      "routes_top10": {
+        "packet_relaxed": 1787,
+        "live": 1632,
+        "packet_exact": 762,
+        "packet_relaxed_fallback": 37
+      },
+      "tools_top10": {
+        "Read": 1665,
+        "Bash": 952,
+        "Edit": 598,
+        "Grep": 359,
+        "Glob": 165,
+        "Write": 137,
+        "TaskUpdate": 118,
+        "Task": 66,
+        "TaskCreate": 57,
+        "WebFetch": 52
+      },
+      "error_codes": {
+        "AE_GATE_SUPPRESSED": 2346,
+        "AE_FALLBACK_RATE_LIMIT": 37,
+        "AE_GLOBAL_DEDUPE_SUPPRESSED": 1012
+      },
+      "suppression_reason_buckets": {
+        "budget_exhausted": 470,
+        "shown_ttl": 4012,
+        "other": 160,
+        "global_dedupe": 1363,
+        "tool_cooldown": 513,
+        "context_phase_guard": 37
+      },
+      "suppression_reasons_top20": {
+        "global_dedupe:text_sig": 1330,
+        "budget exhausted (2 max)": 470,
+        "tool Bash on cooldown": 198,
+        "tool Read on cooldown": 168,
+        "test_suppressed": 74,
+        "tool Edit on cooldown": 72,
+        "shown 28s ago (TTL 600s)": 57,
+        "shown 54s ago (TTL 600s)": 41,
+        "shown 32s ago (TTL 600s)": 39,
+        "shown 12s ago (TTL 600s)": 37,
+        "deployment advice during exploration phase": 37,
+        "shown 23s ago (TTL 600s)": 36,
+        "shown 16s ago (TTL 600s)": 35,
+        "shown 18s ago (TTL 600s)": 34,
+        "shown 20s ago (TTL 600s)": 34,
+        "shown 24s ago (TTL 600s)": 33,
+        "shown 27s ago (TTL 600s)": 33,
+        "global_dedupe:advice_id": 33,
+        "shown 34s ago (TTL 600s)": 32,
+        "shown 22s ago (TTL 600s)": 32
+      },
+      "suppressed_ids_top20": {
+        "eidos:eidos:heuristic:f145d3b5": 594,
+        "eidos:eidos:heuristic:b4d223f9": 580,
+        "eidos:eidos:heuristic:196dda21": 489,
+        "eidos:eidos:heuristic:e8b9a2cf": 444,
+        "eidos:eidos:heuristic:f329e577": 428,
+        "eidos:eidos:policy:e14c2c28": 300,
+        "eidos:eidos:heuristic:b800a71a": 283,
+        "eidos:eidos:heuristic:023391f6": 282,
+        "eidos:eidos:heuristic:5ffd725c": 253,
+        "cognitive:reasoning:large_edit_on_00-front-matter.md_(117\u219291": 241,
+        "eidos:eidos:heuristic:6c92ac0e": 241,
+        "eidos:eidos:heuristic:223fc8f9": 220,
+        "eidos:eidos:policy:cc6aa463": 190,
+        "cognitive:bench_useful_a_564": 134,
+        "bank:bank:1d9bfad87078": 131,
+        "bank:bank:25778971d325": 121,
+        "cognitive:reasoning:large_edit_on_09-the-codex-puzzles-and-p": 104,
+        "eidos:eidos:heuristic:def67524": 99,
+        "baseline_emergent_other": 92,
+        "eidos:eidos:heuristic:d1231dd3": 88
+      },
+      "source_counts_top10": {
+        "eidos": 5665,
+        "cognitive": 1057,
+        "bank": 389,
+        "baseline": 234,
+        "advisor": 176,
+        "semantic-agentic": 118,
+        "mind": 111,
+        "packet": 108,
+        "trigger": 67,
+        "chip": 47
+      },
+      "suppressed_items_total": 6555,
+      "budget_items_total": 470
+    },
+    "d7": {
+      "rows": 6597,
+      "outcomes": {
+        "error": 647,
+        "emitted": 966,
+        "blocked": 4984
+      },
+      "stages": {
+        "engine_error": 647,
+        "emitted": 966,
+        "gate_no_emit": 3551,
+        "global_dedupe_suppressed": 1324,
+        "duplicate_suppressed": 65,
+        "fallback_rate_limit": 44
+      },
+      "routes_top10": {
+        "packet_relaxed": 3111,
+        "live": 2470,
+        "packet_exact": 972,
+        "packet_relaxed_fallback": 44
+      },
+      "tools_top10": {
+        "Read": 2376,
+        "Bash": 1581,
+        "Edit": 1113,
+        "Grep": 519,
+        "Write": 288,
+        "Glob": 261,
+        "TaskUpdate": 128,
+        "Task": 91,
+        "WebFetch": 75,
+        "TaskCreate": 62
+      },
+      "error_codes": {
+        "AE_GATE_SUPPRESSED": 3551,
+        "AE_GLOBAL_DEDUPE_SUPPRESSED": 1324,
+        "AE_DUPLICATE_SUPPRESSED": 65,
+        "AE_FALLBACK_RATE_LIMIT": 44
+      },
+      "suppression_reason_buckets": {
+        "budget_exhausted": 562,
+        "shown_ttl": 5522,
+        "tool_cooldown": 660,
+        "other": 235,
+        "global_dedupe": 1750,
+        "context_phase_guard": 53
+      },
+      "suppression_reasons_top20": {
+        "global_dedupe:text_sig": 1717,
+        "budget exhausted (2 max)": 562,
+        "tool Bash on cooldown": 231,
+        "tool Read on cooldown": 189,
+        "tool Edit on cooldown": 115,
+        "test_suppressed": 88,
+        "shown 28s ago (TTL 600s)": 72,
+        "shown 32s ago (TTL 600s)": 60,
+        "shown 54s ago (TTL 600s)": 59,
+        "tool Grep on cooldown": 57,
+        "shown 24s ago (TTL 600s)": 55,
+        "deployment advice during exploration phase": 53,
+        "shown 23s ago (TTL 600s)": 51,
+        "shown 4s ago (TTL 600s)": 50,
+        "shown 20s ago (TTL 600s)": 48,
+        "shown 27s ago (TTL 600s)": 47,
+        "shown 22s ago (TTL 600s)": 47,
+        "shown 37s ago (TTL 600s)": 45,
+        "shown 12s ago (TTL 600s)": 44,
+        "shown 18s ago (TTL 600s)": 43
+      },
+      "suppressed_ids_top20": {
+        "eidos:eidos:heuristic:f145d3b5": 736,
+        "baseline_emergent_other": 718,
+        "eidos:eidos:heuristic:b4d223f9": 676,
+        "eidos:eidos:heuristic:f329e577": 533,
+        "eidos:eidos:heuristic:e8b9a2cf": 503,
+        "eidos:eidos:heuristic:196dda21": 494,
+        "eidos:eidos:heuristic:023391f6": 459,
+        "eidos:eidos:policy:e14c2c28": 339,
+        "eidos:eidos:heuristic:5ffd725c": 332,
+        "eidos:eidos:heuristic:b800a71a": 283,
+        "cognitive:reasoning:large_edit_on_00-front-matter.md_(117\u219291": 268,
+        "eidos:eidos:heuristic:6c92ac0e": 268,
+        "eidos:eidos:policy:cc6aa463": 266,
+        "eidos:eidos:heuristic:223fc8f9": 220,
+        "eidos:eidos:heuristic:d1231dd3": 182,
+        "cognitive:bench_useful_a_564": 168,
+        "cognitive:meta_learning:you're_not_pausing_much,_to_be_honest._y": 159,
+        "bank:bank:1d9bfad87078": 131,
+        "cognitive:reasoning:large_edit_on_09-the-codex-puzzles-and-p": 129,
+        "bank:bank:25778971d325": 121
+      },
+      "source_counts_top10": {
+        "eidos": 6946,
+        "cognitive": 1434,
+        "baseline": 1053,
+        "bank": 414,
+        "advisor": 190,
+        "semantic-agentic": 131,
+        "packet": 122,
+        "trigger": 120,
+        "mind": 111,
+        "chip": 47
+      },
+      "suppressed_items_total": 8782,
+      "budget_items_total": 562
+    }
+  },
+  "post_tuneables_cutover": {
+    "rows": 7,
+    "outcomes": {
+      "emitted": 1,
+      "blocked": 6
+    },
+    "stages": {
+      "emitted": 1,
+      "global_dedupe_suppressed": 6
+    },
+    "routes_top10": {
+      "packet_relaxed": 7
+    },
+    "tools_top10": {
+      "Bash": 7
+    },
+    "error_codes": {
+      "AE_GLOBAL_DEDUPE_SUPPRESSED": 6
+    },
+    "suppression_reason_buckets": {
+      "global_dedupe": 6
+    },
+    "suppression_reasons_top20": {
+      "global_dedupe:text_sig": 6
+    },
+    "suppressed_ids_top20": {
+      "baseline_emergent_other": 6
+    },
+    "source_counts_top10": {
+      "baseline": 7
+    },
+    "suppressed_items_total": 6,
+    "budget_items_total": 0
+  },
+  "feedback": {
+    "h1": {
+      "rows": 38,
+      "signals": {
+        "followed": 38
+      },
+      "success": {
+        "True": 38
+      },
+      "tools_top10": {
+        "Bash": 20,
+        "Grep": 18
+      },
+      "follow_rate": 1.0
+    },
+    "h6": {
+      "rows": 255,
+      "signals": {
+        "followed": 254,
+        "unhelpful": 1
+      },
+      "success": {
+        "True": 254,
+        "False": 1
+      },
+      "tools_top10": {
+        "Bash": 76,
+        "Read": 66,
+        "Edit": 44,
+        "Grep": 41,
+        "TaskUpdate": 21,
+        "Write": 4,
+        "TaskCreate": 2,
+        "Task": 1
+      },
+      "follow_rate": 1.0
+    },
+    "h24": {
+      "rows": 2264,
+      "signals": {
+        "followed": 2190,
+        "unhelpful": 74
+      },
+      "success": {
+        "True": 2190,
+        "False": 74
+      },
+      "tools_top10": {
+        "Read": 836,
+        "Bash": 684,
+        "Grep": 251,
+        "Edit": 196,
+        "Glob": 73,
+        "TaskUpdate": 62,
+        "Write": 54,
+        "WebFetch": 42,
+        "Task": 30,
+        "TaskCreate": 20
+      },
+      "follow_rate": 1.0
+    },
+    "d7": {
+      "rows": 2972,
+      "signals": {
+        "followed": 2859,
+        "unhelpful": 113
+      },
+      "success": {
+        "True": 2859,
+        "False": 113
+      },
+      "tools_top10": {
+        "Read": 1008,
+        "Bash": 988,
+        "Grep": 320,
+        "Edit": 274,
+        "Glob": 120,
+        "TaskUpdate": 67,
+        "Write": 62,
+        "WebFetch": 51,
+        "Task": 40,
+        "TaskCreate": 20
+      },
+      "follow_rate": 1.0
+    }
+  },
+  "engine": {
+    "h1": {
+      "rows": 68,
+      "events": {
+        "user_prompt_prefetch": 4,
+        "emitted": 7,
+        "no_emit": 46,
+        "global_dedupe_suppressed": 11
+      },
+      "gate_reasons_top20": {
+        "shown 307s ago (TTL 600s)": 3,
+        "shown 341s ago (TTL 600s)": 2,
+        "shown 342s ago (TTL 600s)": 2,
+        "shown 399s ago (TTL 600s)": 2,
+        "shown 400s ago (TTL 600s)": 2,
+        "shown 429s ago (TTL 600s)": 2,
+        "shown 458s ago (TTL 600s)": 2,
+        "shown 529s ago (TTL 600s)": 2,
+        "shown 35s ago (TTL 600s)": 2,
+        "shown 129s ago (TTL 600s)": 2,
+        "shown 170s ago (TTL 600s)": 2,
+        "shown 41s ago (TTL 600s)": 1,
+        "shown 281s ago (TTL 600s)": 1,
+        "shown 293s ago (TTL 600s)": 1,
+        "shown 306s ago (TTL 600s)": 1,
+        "shown 308s ago (TTL 600s)": 1,
+        "shown 340s ago (TTL 600s)": 1,
+        "shown 373s ago (TTL 600s)": 1,
+        "shown 430s ago (TTL 600s)": 1,
+        "shown 459s ago (TTL 600s)": 1
+      }
+    },
+    "h6": {
+      "rows": 410,
+      "events": {
+        "emitted": 84,
+        "no_emit": 229,
+        "user_prompt_prefetch": 17,
+        "global_dedupe_suppressed": 80
+      },
+      "gate_reasons_top20": {
+        "shown 72s ago (TTL 600s)": 5,
+        "shown 27s ago (TTL 600s)": 4,
+        "shown 80s ago (TTL 600s)": 4,
+        "tool Bash on cooldown": 4,
+        "shown 28s ago (TTL 600s)": 3,
+        "shown 33s ago (TTL 600s)": 3,
+        "shown 34s ago (TTL 600s)": 3,
+        "shown 149s ago (TTL 600s)": 3,
+        "shown 21s ago (TTL 600s)": 3,
+        "shown 22s ago (TTL 600s)": 3,
+        "shown 24s ago (TTL 600s)": 3,
+        "shown 341s ago (TTL 600s)": 3,
+        "tool Edit on cooldown": 3,
+        "shown 85s ago (TTL 600s)": 3,
+        "shown 232s ago (TTL 600s)": 3,
+        "shown 159s ago (TTL 600s)": 3,
+        "shown 35s ago (TTL 600s)": 3,
+        "shown 307s ago (TTL 600s)": 3,
+        "shown 47s ago (TTL 600s)": 2,
+        "shown 145s ago (TTL 600s)": 2
+      }
+    },
+    "h24": {
+      "rows": 500,
+      "events": {
+        "no_emit": 306,
+        "emitted": 96,
+        "user_prompt_prefetch": 18,
+        "global_dedupe_suppressed": 80
+      },
+      "gate_reasons_top20": {
+        "deployment advice during exploration phase": 10,
+        "shown 27s ago (TTL 600s)": 6,
+        "tool Bash on cooldown": 5,
+        "shown 28s ago (TTL 600s)": 5,
+        "shown 72s ago (TTL 600s)": 5,
+        "shown 51s ago (TTL 600s)": 4,
+        "shown 203s ago (TTL 600s)": 4,
+        "shown 80s ago (TTL 600s)": 4,
+        "shown 180s ago (TTL 600s)": 3,
+        "shown 224s ago (TTL 600s)": 3,
+        "shown 342s ago (TTL 600s)": 3,
+        "shown 154s ago (TTL 600s)": 3,
+        "shown 69s ago (TTL 600s)": 3,
+        "shown 293s ago (TTL 600s)": 3,
+        "shown 176s ago (TTL 600s)": 3,
+        "shown 33s ago (TTL 600s)": 3,
+        "shown 34s ago (TTL 600s)": 3,
+        "shown 149s ago (TTL 600s)": 3,
+        "shown 21s ago (TTL 600s)": 3,
+        "shown 22s ago (TTL 600s)": 3
+      }
+    },
+    "d7": {
+      "rows": 500,
+      "events": {
+        "no_emit": 306,
+        "emitted": 96,
+        "user_prompt_prefetch": 18,
+        "global_dedupe_suppressed": 80
+      },
+      "gate_reasons_top20": {
+        "deployment advice during exploration phase": 10,
+        "shown 27s ago (TTL 600s)": 6,
+        "tool Bash on cooldown": 5,
+        "shown 28s ago (TTL 600s)": 5,
+        "shown 72s ago (TTL 600s)": 5,
+        "shown 51s ago (TTL 600s)": 4,
+        "shown 203s ago (TTL 600s)": 4,
+        "shown 80s ago (TTL 600s)": 4,
+        "shown 180s ago (TTL 600s)": 3,
+        "shown 224s ago (TTL 600s)": 3,
+        "shown 342s ago (TTL 600s)": 3,
+        "shown 154s ago (TTL 600s)": 3,
+        "shown 69s ago (TTL 600s)": 3,
+        "shown 293s ago (TTL 600s)": 3,
+        "shown 176s ago (TTL 600s)": 3,
+        "shown 33s ago (TTL 600s)": 3,
+        "shown 34s ago (TTL 600s)": 3,
+        "shown 149s ago (TTL 600s)": 3,
+        "shown 21s ago (TTL 600s)": 3,
+        "shown 22s ago (TTL 600s)": 3
+      }
+    }
+  },
+  "global_dedupe_cooldown_values": {
+    "600.0": 3074
+  },
+  "codepath_check": {
+    "suppressed": true,
+    "reason": "shown 300s ago (TTL 756s, category=security)"
+  },
+  "useful_suppressed_examples": []
+}
