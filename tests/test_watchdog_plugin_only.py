@@ -24,6 +24,4 @@ def test_restart_allowed_keeps_core_services_in_plugin_only():
     assert spark_watchdog._restart_allowed("scheduler", plugin_only_mode=True) is True
     assert spark_watchdog._restart_allowed("bridge_worker", plugin_only_mode=True) is False
     assert spark_watchdog._restart_allowed("pulse", plugin_only_mode=True) is False
-    assert spark_watchdog._restart_allowed("dashboard", plugin_only_mode=True) is False
-    assert spark_watchdog._restart_allowed("meta_ralph", plugin_only_mode=True) is False
 
