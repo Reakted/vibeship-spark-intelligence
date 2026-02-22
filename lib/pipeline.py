@@ -654,7 +654,7 @@ def store_deep_learnings(
         learner = get_cognitive_learner()
         ralph = get_meta_ralph()
 
-        def _gate_and_store(insight_text: str, category, context: str, confidence: float, source: str = "pipeline") -> bool:
+        def _gate_and_store(insight_text: str, category: Any, context: str, confidence: float, source: str = "pipeline") -> bool:
             """Run insight through MetaRalph quality gate, then store if it passes."""
             debug["attempted"] = int(debug.get("attempted", 0)) + 1
             roast_result = ralph.roast(insight_text, source=source)
