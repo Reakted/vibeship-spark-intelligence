@@ -19,6 +19,13 @@ For term-based navigation, see `docs/GLOSSARY.md`.
 irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex
 ```
 
+Then run a ready check (from repo root):
+
+```powershell
+.\.venv\Scripts\python -m spark.cli up
+.\.venv\Scripts\python -m spark.cli health
+```
+
 ### Option 2: Quick Install
 
 ```bash

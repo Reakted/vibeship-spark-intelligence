@@ -15,6 +15,13 @@ If you are new: follow this page first. For the full map, see `docs/DOCS_INDEX.m
 irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex
 ```
 
+Then run a ready check (from repo root):
+
+```powershell
+.\.venv\Scripts\python -m spark.cli up
+.\.venv\Scripts\python -m spark.cli health
+```
+
 ### Option B: Installer (Recommended for full OpenClaw stack)
 
 - Windows: clone `spark-openclaw-installer` and run `install.ps1`

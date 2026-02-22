@@ -45,6 +45,13 @@ Windows one-command bootstrap (clone + venv + install + start):
 irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex
 ```
 
+Then verify runtime readiness (second command, from repo root):
+
+```powershell
+.\.venv\Scripts\python -m spark.cli up
+.\.venv\Scripts\python -m spark.cli health
+```
+
 If you already cloned the repo, run the local bootstrap:
 
 ```powershell
@@ -86,10 +93,10 @@ python -m spark.cli up
 
 ```bash
 # Check health
-spark health
+python -m spark.cli health
 
 # View what Spark has learned
-spark learnings
+python -m spark.cli learnings
 ```
 
 Windows: run `start_spark.bat` from the repo root.
