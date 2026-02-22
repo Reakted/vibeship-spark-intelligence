@@ -97,8 +97,84 @@ def _env_float(name: str, default: float, lo: float = 0.0, hi: float = 1.0) -> f
     return max(lo, min(hi, value))
 
 
+def _env_int(name: str, default: int, lo: int = 0, hi: int = 100000) -> int:
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except Exception:
+        value = int(default)
+    return max(lo, min(hi, value))
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
 CHIP_MERGE_MIN_CONFIDENCE = _env_float("SPARK_CHIP_MERGE_MIN_CONFIDENCE", 0.55)
 CHIP_MERGE_MIN_QUALITY = _env_float("SPARK_CHIP_MERGE_MIN_QUALITY", 0.55)
+BRIDGE_MIND_SYNC_ENABLED = _env_bool("SPARK_BRIDGE_MIND_SYNC_ENABLED", True)
+BRIDGE_MIND_SYNC_LIMIT = _env_int("SPARK_BRIDGE_MIND_SYNC_LIMIT", 8, 0, 200)
+BRIDGE_MIND_SYNC_MIN_READINESS = _env_float("SPARK_BRIDGE_MIND_SYNC_MIN_READINESS", 0.45, 0.0, 1.0)
+BRIDGE_MIND_SYNC_MIN_RELIABILITY = _env_float("SPARK_BRIDGE_MIND_SYNC_MIN_RELIABILITY", 0.35, 0.0, 1.0)
+BRIDGE_MIND_SYNC_MAX_AGE_S = _env_int("SPARK_BRIDGE_MIND_SYNC_MAX_AGE_S", 14 * 24 * 3600, 0, 365 * 24 * 3600)
+BRIDGE_MIND_SYNC_DRAIN_QUEUE = _env_bool("SPARK_BRIDGE_MIND_SYNC_DRAIN_QUEUE", True)
+BRIDGE_MIND_SYNC_QUEUE_BUDGET = _env_int("SPARK_BRIDGE_MIND_SYNC_QUEUE_BUDGET", 2, 0, 1000)
+
+
+def _reload_bridge_worker_config(cfg: Dict[str, Any]) -> None:
+    global BRIDGE_MIND_SYNC_ENABLED, BRIDGE_MIND_SYNC_LIMIT
+    global BRIDGE_MIND_SYNC_MIN_READINESS, BRIDGE_MIND_SYNC_MIN_RELIABILITY
+    global BRIDGE_MIND_SYNC_MAX_AGE_S, BRIDGE_MIND_SYNC_DRAIN_QUEUE, BRIDGE_MIND_SYNC_QUEUE_BUDGET
+
+    if not isinstance(cfg, dict):
+        return
+
+    if "mind_sync_enabled" in cfg:
+        BRIDGE_MIND_SYNC_ENABLED = _parse_bool(cfg.get("mind_sync_enabled"), BRIDGE_MIND_SYNC_ENABLED)
+    if "mind_sync_limit" in cfg:
+        BRIDGE_MIND_SYNC_LIMIT = max(0, min(200, int(cfg.get("mind_sync_limit") or BRIDGE_MIND_SYNC_LIMIT)))
+    if "mind_sync_min_readiness" in cfg:
+        BRIDGE_MIND_SYNC_MIN_READINESS = max(
+            0.0, min(1.0, float(cfg.get("mind_sync_min_readiness") or BRIDGE_MIND_SYNC_MIN_READINESS))
+        )
+    if "mind_sync_min_reliability" in cfg:
+        BRIDGE_MIND_SYNC_MIN_RELIABILITY = max(
+            0.0, min(1.0, float(cfg.get("mind_sync_min_reliability") or BRIDGE_MIND_SYNC_MIN_RELIABILITY))
+        )
+    if "mind_sync_max_age_s" in cfg:
+        BRIDGE_MIND_SYNC_MAX_AGE_S = max(
+            0,
+            min(365 * 24 * 3600, int(cfg.get("mind_sync_max_age_s") or BRIDGE_MIND_SYNC_MAX_AGE_S)),
+        )
+    if "mind_sync_drain_queue" in cfg:
+        BRIDGE_MIND_SYNC_DRAIN_QUEUE = _parse_bool(cfg.get("mind_sync_drain_queue"), BRIDGE_MIND_SYNC_DRAIN_QUEUE)
+    if "mind_sync_queue_budget" in cfg:
+        BRIDGE_MIND_SYNC_QUEUE_BUDGET = max(
+            0, min(1000, int(cfg.get("mind_sync_queue_budget") or BRIDGE_MIND_SYNC_QUEUE_BUDGET))
+        )
+
+
+try:
+    from lib.tuneables_reload import register_reload as _bridge_register_reload
+
+    _bridge_register_reload("bridge_worker", _reload_bridge_worker_config, label="bridge_worker.reload_from")
+except Exception:
+    pass
 
 
 # Shared executor to avoid per-step threadpool construction overhead.
@@ -257,6 +333,31 @@ def run_bridge_cycle(
                 cognitive.begin_batch()
             except Exception as e:
                 log_debug("bridge_worker", f"mid-cycle cognitive flush failed ({e})", None)
+
+        # --- Incremental Mind sync (bounded, high-signal subset) ---
+        if BRIDGE_MIND_SYNC_ENABLED:
+            def _sync_recent_to_mind() -> Dict[str, Any]:
+                from lib.mind_bridge import get_mind_bridge
+
+                bridge = get_mind_bridge()
+                return bridge.sync_recent_insights(
+                    limit=BRIDGE_MIND_SYNC_LIMIT,
+                    min_readiness=BRIDGE_MIND_SYNC_MIN_READINESS,
+                    min_reliability=BRIDGE_MIND_SYNC_MIN_RELIABILITY,
+                    max_age_s=BRIDGE_MIND_SYNC_MAX_AGE_S,
+                    drain_queue=BRIDGE_MIND_SYNC_DRAIN_QUEUE,
+                    queue_budget=BRIDGE_MIND_SYNC_QUEUE_BUDGET,
+                )
+
+            ok, mind_sync_stats, error = _run_step("mind_sync", _sync_recent_to_mind, timeout_s=20)
+            if ok:
+                stats["mind_sync"] = mind_sync_stats or {}
+            else:
+                stats["errors"].append("mind_sync")
+                stats["mind_sync"] = {"error": str(error or ""), "enabled": True}
+                log_debug("bridge_worker", f"mind sync failed ({error})", None)
+        else:
+            stats["mind_sync"] = {"enabled": False, "reason": "bridge_worker.mind_sync_enabled=false"}
 
         # --- Run the processing pipeline ---
         pipeline_metrics = None

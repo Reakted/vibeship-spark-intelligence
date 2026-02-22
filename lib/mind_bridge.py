@@ -15,6 +15,7 @@ import json
 import hashlib
 import os
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, List, Any
@@ -38,6 +39,8 @@ SYNC_STATE_FILE = Path.home() / ".spark" / "mind_sync_state.json"
 OFFLINE_QUEUE_FILE = Path.home() / ".spark" / "mind_offline_queue.jsonl"
 MIND_TOKEN_FILE = Path.home() / ".spark" / "mind_server.token"
 DEFAULT_USER_ID = "550e8400-e29b-41d4-a716-446655440000"
+MIND_SCOPE_MODE = str(os.environ.get("SPARK_MIND_SCOPE", "global") or "global").strip().lower()
+MIND_USER_ID_OVERRIDE = str(os.environ.get("SPARK_MIND_USER_ID", "") or "").strip()
 MAX_CONTENT_CHARS = int(os.environ.get("MIND_MAX_CONTENT_CHARS", "4000"))
 # Increased timeouts to reduce false "offline" status from transient slowness
 # Mind has cold-start latency (first requests can take 4-6s), so we need generous timeout
@@ -109,6 +112,59 @@ def _resolve_mind_token() -> Optional[str]:
     return _read_token_file(MIND_TOKEN_FILE)
 
 
+def _normalize_scope_mode(raw: Any) -> str:
+    mode = str(raw or "").strip().lower()
+    if mode in {"global", "project", "session"}:
+        return mode
+    return "global"
+
+
+def _infer_project_scope_key() -> str:
+    try:
+        from .memory_banks import infer_project_key
+
+        key = str(infer_project_key() or "").strip()
+        if key:
+            return key
+    except Exception:
+        pass
+    return str(Path.cwd()).strip()
+
+
+def _scoped_user_id(
+    *,
+    scope_mode: str,
+    scope_key: str = "",
+    user_id_override: str = "",
+) -> str:
+    explicit = (user_id_override or "").strip() or MIND_USER_ID_OVERRIDE
+    if explicit:
+        return explicit
+
+    mode = _normalize_scope_mode(scope_mode)
+    if mode == "project":
+        key = scope_key.strip() or _infer_project_scope_key() or "default-project"
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"spark:mind:project:{key}"))
+    if mode == "session":
+        key = scope_key.strip() or str(os.environ.get("SPARK_SESSION_ID", "") or "").strip()
+        if not key:
+            key = str(time.time_ns())
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"spark:mind:session:{key}"))
+    return DEFAULT_USER_ID
+
+
+def _parse_iso_ts(value: Any) -> Optional[float]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return float(datetime.fromisoformat(text).timestamp())
+    except Exception:
+        return None
+
+
 class MindBridge:
     """
     Bridge between Spark's cognitive learning and Mind's persistent memory.
@@ -117,11 +173,19 @@ class MindBridge:
     def __init__(
         self,
         mind_url: str = MIND_API_URL,
-        user_id: str = DEFAULT_USER_ID,
+        user_id: Optional[str] = None,
         mind_token: Optional[str] = None,
+        scope_mode: str = MIND_SCOPE_MODE,
+        scope_key: str = "",
     ):
         self.mind_url = mind_url
-        self.user_id = user_id
+        self.scope_mode = _normalize_scope_mode(scope_mode)
+        self.scope_key = str(scope_key or "").strip()
+        self.user_id = _scoped_user_id(
+            scope_mode=self.scope_mode,
+            scope_key=self.scope_key,
+            user_id_override=str(user_id or ""),
+        )
         self.mind_token = (mind_token or "").strip() or _resolve_mind_token()
         self.sync_state = self._load_sync_state()
         self._health_cached_ok: Optional[bool] = None
@@ -363,8 +427,12 @@ class MindBridge:
         print(f"[SPARK] Sync complete: {stats}")
         return stats
     
-    def process_offline_queue(self) -> int:
-        """Process queued items."""
+    def process_offline_queue(self, max_items: Optional[int] = None) -> int:
+        """Process queued items.
+
+        Args:
+            max_items: Optional cap for number of queued entries to process.
+        """
         if not OFFLINE_QUEUE_FILE.exists():
             return 0
         
@@ -372,44 +440,152 @@ class MindBridge:
             return 0
         
         synced = 0
-        remaining = []
-        
-        with open(OFFLINE_QUEUE_FILE, "r") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line.strip())
-                    response = requests.post(
-                        f"{self.mind_url}/v1/memories/",
-                        json=entry["memory_data"],
-                        headers=self._auth_headers(),
-                        timeout=MIND_POST_TIMEOUT_S
-                    )
-                    
-                    if response.status_code == 201:
-                        self._record_health_result(True)
-                        synced += 1
-                        if "synced_hashes" not in self.sync_state:
-                            self.sync_state["synced_hashes"] = []
-                        self.sync_state["synced_hashes"].append(entry["insight_hash"])
-                    else:
-                        self._record_health_result(False)
-                        remaining.append(entry)
-                except Exception:
+        remaining_lines: List[str] = []
+        try:
+            raw_lines = OFFLINE_QUEUE_FILE.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            raw_lines = []
+
+        max_count = None
+        if max_items is not None:
+            try:
+                max_count = max(0, int(max_items))
+            except Exception:
+                max_count = 0
+
+        for idx, raw_line in enumerate(raw_lines):
+            if max_count is not None and idx >= max_count:
+                remaining_lines.extend(raw_lines[idx:])
+                break
+            try:
+                entry = json.loads(raw_line.strip())
+                response = requests.post(
+                    f"{self.mind_url}/v1/memories/",
+                    json=entry["memory_data"],
+                    headers=self._auth_headers(),
+                    timeout=MIND_POST_TIMEOUT_S
+                )
+
+                if response.status_code == 201:
+                    self._record_health_result(True)
+                    synced += 1
+                    if "synced_hashes" not in self.sync_state:
+                        self.sync_state["synced_hashes"] = []
+                    self.sync_state["synced_hashes"].append(entry["insight_hash"])
+                else:
                     self._record_health_result(False)
-                    remaining.append(entry)
-        
-        if remaining:
-            with open(OFFLINE_QUEUE_FILE, "w") as f:
-                for entry in remaining:
-                    f.write(json.dumps(entry) + "\n")
+                    remaining_lines.append(raw_line)
+            except Exception:
+                self._record_health_result(False)
+                remaining_lines.append(raw_line)
+
+        if remaining_lines:
+            OFFLINE_QUEUE_FILE.write_text(
+                "\n".join(remaining_lines) + "\n",
+                encoding="utf-8",
+            )
         else:
             OFFLINE_QUEUE_FILE.unlink(missing_ok=True)
         
         if synced > 0:
             self._save_sync_state()
-            print(f"[SPARK] Processed queue: {synced} synced, {len(remaining)} remaining")
+            print(f"[SPARK] Processed queue: {synced} synced, {len(remaining_lines)} remaining")
         
         return synced
+
+    def _insight_timestamp(self, insight: CognitiveInsight) -> float:
+        ts = _parse_iso_ts(getattr(insight, "last_validated_at", None))
+        if ts is not None:
+            return ts
+        ts = _parse_iso_ts(getattr(insight, "created_at", None))
+        if ts is not None:
+            return ts
+        return 0.0
+
+    def _insight_readiness(self, insight: CognitiveInsight) -> float:
+        return _coerce_advisory_readiness(
+            advisory_quality=getattr(insight, "advisory_quality", None),
+            advisory_readiness=getattr(insight, "advisory_readiness", None),
+            fallback=getattr(insight, "reliability", 0.0),
+        )
+
+    def _select_recent_unsynced_insights(
+        self,
+        *,
+        limit: int,
+        min_readiness: float,
+        min_reliability: float,
+        max_age_s: int,
+    ) -> List[CognitiveInsight]:
+        cognitive = get_cognitive_learner()
+        now_ts = time.time()
+        rows: List[tuple[float, float, float, CognitiveInsight]] = []
+
+        for insight in cognitive.insights.values():
+            if self._is_synced(insight):
+                continue
+
+            reliability = max(0.0, min(1.0, float(getattr(insight, "reliability", 0.0) or 0.0)))
+            if reliability < min_reliability:
+                continue
+
+            readiness = self._insight_readiness(insight)
+            if readiness < min_readiness:
+                continue
+
+            ts = self._insight_timestamp(insight)
+            if max_age_s > 0 and ts > 0 and (now_ts - ts) > float(max_age_s):
+                continue
+
+            rows.append((readiness, reliability, ts, insight))
+
+        rows.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+        capped = max(0, int(limit or 0))
+        return [item[3] for item in rows[:capped]]
+
+    def sync_recent_insights(
+        self,
+        *,
+        limit: int = 8,
+        min_readiness: float = 0.45,
+        min_reliability: float = 0.35,
+        max_age_s: int = 14 * 24 * 3600,
+        drain_queue: bool = True,
+        queue_budget: int = 2,
+    ) -> Dict[str, int]:
+        """Sync a bounded high-signal subset of unsynced insights to Mind."""
+        stats: Dict[str, int] = {
+            "attempted": 0,
+            "synced": 0,
+            "duplicate": 0,
+            "queued": 0,
+            "offline": 0,
+            "error": 0,
+            "disabled": 0,
+            "queue_drained": 0,
+        }
+
+        if drain_queue and queue_budget > 0:
+            stats["queue_drained"] = int(self.process_offline_queue(max_items=queue_budget) or 0)
+
+        capped_limit = max(0, int(limit or 0))
+        if capped_limit <= 0:
+            return stats
+
+        selected = self._select_recent_unsynced_insights(
+            limit=capped_limit,
+            min_readiness=max(0.0, min(1.0, float(min_readiness))),
+            min_reliability=max(0.0, min(1.0, float(min_reliability))),
+            max_age_s=max(0, int(max_age_s or 0)),
+        )
+        stats["attempted"] = len(selected)
+
+        for insight in selected:
+            result = self.sync_insight(insight)
+            key = "synced" if result.status == SyncStatus.SUCCESS else result.status.value
+            stats[key] = int(stats.get(key, 0) + 1)
+
+        return stats
     
     def retrieve_relevant(self, query: str, limit: int = 5) -> List[Dict]:
         """Retrieve relevant memories from Mind."""
@@ -470,6 +646,8 @@ class MindBridge:
                 queue_size = sum(1 for _ in f)
         
         return {
+            "user_id": self.user_id,
+            "scope_mode": self.scope_mode,
             "synced_count": len(self.sync_state.get("synced_hashes", [])),
             "last_sync": self.sync_state.get("last_sync"),
             "offline_queue_size": queue_size,
@@ -498,6 +676,26 @@ def sync_insight_to_mind(insight: CognitiveInsight) -> SyncResult:
 def sync_all_to_mind() -> Dict[str, int]:
     """Sync all insights to Mind."""
     return get_mind_bridge().sync_all_insights()
+
+
+def sync_recent_to_mind(
+    *,
+    limit: int = 8,
+    min_readiness: float = 0.45,
+    min_reliability: float = 0.35,
+    max_age_s: int = 14 * 24 * 3600,
+    drain_queue: bool = True,
+    queue_budget: int = 2,
+) -> Dict[str, int]:
+    """Sync a bounded, high-signal subset of insights to Mind."""
+    return get_mind_bridge().sync_recent_insights(
+        limit=limit,
+        min_readiness=min_readiness,
+        min_reliability=min_reliability,
+        max_age_s=max_age_s,
+        drain_queue=drain_queue,
+        queue_budget=queue_budget,
+    )
 
 
 def retrieve_from_mind(query: str, limit: int = 5) -> List[Dict]:

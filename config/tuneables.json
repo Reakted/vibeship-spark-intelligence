@@ -139,6 +139,8 @@
     "mind_max_stale_s": 86400,
     "mind_stale_allow_if_empty": false,
     "mind_min_salience": 0.30,
+    "mind_reserve_slots": 1,
+    "mind_reserve_min_rank": 0.45,
     "replay_enabled": true,
     "replay_min_strict": 5,
     "replay_min_delta": 0.25,
@@ -437,7 +439,14 @@
     "max_total_boost": 0.42
   },
   "bridge_worker": {
-    "enabled": true
+    "enabled": true,
+    "mind_sync_enabled": true,
+    "mind_sync_limit": 8,
+    "mind_sync_min_readiness": 0.45,
+    "mind_sync_min_reliability": 0.35,
+    "mind_sync_max_age_s": 1209600,
+    "mind_sync_drain_queue": true,
+    "mind_sync_queue_budget": 2
   },
   "memory_capture": {
     "enabled": true,

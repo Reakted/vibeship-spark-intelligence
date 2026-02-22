@@ -192,6 +192,8 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "mind_max_stale_s": TuneableSpec("int", 86400, 0, 604800, "Max Mind staleness (s)"),
         "mind_stale_allow_if_empty": TuneableSpec("bool", False, None, None, "Allow stale Mind if empty"),
         "mind_min_salience": TuneableSpec("float", 0.55, 0.0, 1.0, "Min Mind memory salience"),
+        "mind_reserve_slots": TuneableSpec("int", 1, 0, 4, "Reserved top advice slots for Mind"),
+        "mind_reserve_min_rank": TuneableSpec("float", 0.45, 0.0, 1.0, "Min rank score for reserved Mind slots"),
         "replay_enabled": TuneableSpec("bool", True, None, None, "Enable replay advisory"),
         "replay_min_strict": TuneableSpec("int", 5, 1, 100, "Min strict samples for replay"),
         "replay_min_delta": TuneableSpec("float", 0.25, 0.0, 1.0, "Min improvement delta for replay"),
@@ -320,6 +322,13 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
     # ---- bridge_worker ----
     "bridge_worker": {
         "enabled": TuneableSpec("bool", True, None, None, "Enable bridge worker"),
+        "mind_sync_enabled": TuneableSpec("bool", True, None, None, "Enable incremental Mind sync each cycle"),
+        "mind_sync_limit": TuneableSpec("int", 8, 0, 200, "Max cognitive insights to sync to Mind per cycle"),
+        "mind_sync_min_readiness": TuneableSpec("float", 0.45, 0.0, 1.0, "Min advisory readiness for Mind sync"),
+        "mind_sync_min_reliability": TuneableSpec("float", 0.35, 0.0, 1.0, "Min reliability for Mind sync"),
+        "mind_sync_max_age_s": TuneableSpec("int", 1209600, 0, 31536000, "Max insight age for Mind sync (s)"),
+        "mind_sync_drain_queue": TuneableSpec("bool", True, None, None, "Drain bounded Mind offline queue each cycle"),
+        "mind_sync_queue_budget": TuneableSpec("int", 2, 0, 1000, "Max offline queue entries drained per cycle"),
     },
 
     # ---- memory_capture ----
