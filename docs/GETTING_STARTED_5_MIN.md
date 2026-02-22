@@ -6,6 +6,8 @@ If you are new: follow this page first. For the full map, see `docs/DOCS_INDEX.m
 
 - Python 3.10+
 - `pip`
+- Git
+- Windows one-command path: PowerShell
 
 ## 1) Install
 

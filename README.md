@@ -39,6 +39,12 @@ The goal is to keep context, patterns, and practical lessons in a form that your
 
 ## Install
 
+Prerequisites:
+- Python 3.10+
+- `pip`
+- Git
+- Windows one-liner path: PowerShell
+
 Windows one-command bootstrap (clone + venv + install + start):
 
 ```powershell

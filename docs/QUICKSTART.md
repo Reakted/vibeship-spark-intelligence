@@ -10,6 +10,8 @@ For term-based navigation, see `docs/GLOSSARY.md`.
 
 - Python 3.10+
 - pip
+- Git
+- Windows one-command path: PowerShell
 
 ## Installation
 
