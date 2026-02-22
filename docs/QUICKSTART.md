@@ -12,6 +12,7 @@ For term-based navigation, see `docs/GLOSSARY.md`.
 - pip
 - Git
 - Windows one-command path: PowerShell
+- Mac/Linux one-command path: `curl` + `bash`
 
 ## Installation
 
@@ -28,14 +29,27 @@ Then run a ready check (from repo root):
 .\.venv\Scripts\python -m spark.cli health
 ```
 
-### Option 2: Quick Install
+### Option 2: Mac/Linux One Command
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.sh | bash
+```
+
+Then run a ready check (from repo root):
+
+```bash
+./.venv/bin/python -m spark.cli up
+./.venv/bin/python -m spark.cli health
+```
+
+### Option 3: Quick Install
 
 ```bash
 cd /path/to/Spark
 ./scripts/install.sh
 ```
 
-### Option 3: Manual Install
+### Option 4: Manual Install
 
 ```bash
 # Install dependencies in a virtual environment (recommended)

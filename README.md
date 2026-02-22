@@ -44,6 +44,7 @@ Prerequisites:
 - `pip`
 - Git
 - Windows one-liner path: PowerShell
+- Mac/Linux one-liner path: `curl` + `bash`
 
 Windows one-command bootstrap (clone + venv + install + start):
 
@@ -68,6 +69,19 @@ If you are running from `cmd.exe` or another shell:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex"
+```
+
+Mac/Linux one-command bootstrap (clone + venv + install + start):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.sh | bash
+```
+
+Then verify runtime readiness (second command, from repo root):
+
+```bash
+./.venv/bin/python -m spark.cli up
+./.venv/bin/python -m spark.cli health
 ```
 
 Mac/Linux manual install:

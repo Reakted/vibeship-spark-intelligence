@@ -8,6 +8,7 @@ If you are new: follow this page first. For the full map, see `docs/DOCS_INDEX.m
 - `pip`
 - Git
 - Windows one-command path: PowerShell
+- Mac/Linux one-command path: `curl` + `bash`
 
 ## 1) Install
 
@@ -24,14 +25,27 @@ Then run a ready check (from repo root):
 .\.venv\Scripts\python -m spark.cli health
 ```
 
-### Option B: Installer (Recommended for full OpenClaw stack)
+### Option B: Mac/Linux One Command (Repo + venv + install + up)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.sh | bash
+```
+
+Then run a ready check (from repo root):
+
+```bash
+./.venv/bin/python -m spark.cli up
+./.venv/bin/python -m spark.cli health
+```
+
+### Option C: Installer (Recommended for full OpenClaw stack)
 
 - Windows: clone `spark-openclaw-installer` and run `install.ps1`
 - Mac/Linux: clone `spark-openclaw-installer` and run `install.sh`
 
 See `README.md` for the exact commands.
 
-### Option C: Manual (Repo)
+### Option D: Manual (Repo)
 
 ```bash
 cd /path/to/vibeship-spark-intelligence
