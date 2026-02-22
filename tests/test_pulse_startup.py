@@ -39,8 +39,6 @@ def test_start_services_uses_pulse_repo_as_cwd(monkeypatch, tmp_path):
     monkeypatch.setattr(service_control, "_wait_for_service_ready", lambda *a, **k: True)
 
     result = service_control.start_services(
-        include_dashboard=False,
-        include_meta_ralph=False,
         include_watchdog=False,
     )
 

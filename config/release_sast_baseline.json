@@ -16,7 +16,6 @@
     "lib",
     "hooks",
     "adapters",
-    "dashboard.py",
     "sparkd.py",
     "bridge_worker.py",
     "spark_watchdog.py",

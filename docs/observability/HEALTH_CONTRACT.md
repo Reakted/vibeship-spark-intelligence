@@ -22,7 +22,7 @@ Spark Intelligence exposes two different concepts:
     - `bridge_worker.validation_backlog`
     - `pipeline` (when available)
 
-## Dashboards
+## Observability
 
-See `DASHBOARD_PLAYBOOK.md` for URLs and SSE endpoints.
+See `docs/OBSIDIAN_OBSERVATORY_GUIDE.md` for Observatory setup. Spark Pulse serves web endpoints on port 8765.
 

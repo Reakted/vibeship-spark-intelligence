@@ -39,11 +39,7 @@ Get-Process python | Select-Object Id,@{N='MB';E={[math]::Round($_.WorkingSet64/
 ### 2.1 Verify Advisory Delivery State
 
 ```powershell
-# Spark Lab mission/status source
-$lab = Invoke-RestMethod http://127.0.0.1:8585/api/status
-$lab.advisory.delivery_badge
-
-# Pulse status projection
+# Pulse status
 $pulse = Invoke-RestMethod http://127.0.0.1:8765/api/status
 $pulse.advisory.delivery_badge
 
@@ -220,7 +216,6 @@ Verification loop after any config change:
 - Always use `-m uvicorn app:app`, never `python app.py`
 
 ### Advisory delivery badge is blocked or stale
-- Check Spark Lab advisory status: `Invoke-RestMethod http://127.0.0.1:8585/api/status | Select-Object -ExpandProperty advisory`
 - Check Pulse advisory status: `Invoke-RestMethod http://127.0.0.1:8765/api/advisory | Select-Object -ExpandProperty delivery_badge`
 - Check recent engine events: `Get-Content "$env:USERPROFILE\.spark\advisory_engine.jsonl" -Tail 20`
 - If no fresh events, trigger normal tool activity and recheck badge age/state.

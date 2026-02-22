@@ -17,7 +17,7 @@ For broader ops, see the `team` repo runbooks.
 2. Run quick gate:
    - `python tests/test_pipeline_health.py quick`
 3. Check logs:
-   - `C:\\Users\\<you>\\.spark\\logs\\` (see `DASHBOARD_PLAYBOOK.md`)
+   - `C:\\Users\\<you>\\.spark\\logs\\`
 4. If unsafe behavior suspected:
    - set `SPARK_EIDOS_ENFORCE_BLOCK=1`
    - restart services

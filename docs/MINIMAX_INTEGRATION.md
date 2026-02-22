@@ -253,7 +253,7 @@ evaluate_effect(advisory, match, use_minimax=True)
 {"effect": "positive", "confidence": 0.95, "reason": "..."}
 ```
 
-**Trigger:** Opt-in only. Pass `use_minimax=True` or enable checkbox in tracer dashboard.
+**Trigger:** Opt-in only. Pass `use_minimax=True` to enable MiniMax-powered effect evaluation.
 
 ### 3. Opportunity Scanner
 

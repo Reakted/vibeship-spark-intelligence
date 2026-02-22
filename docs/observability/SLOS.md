@@ -18,11 +18,11 @@ They are still useful because they define when the system is stable enough to tr
 ## SLO-3: queue safety
 
 - Indicator: queue depth and rotation
-- Target: queue within configured bounds (see `DASHBOARD_PLAYBOOK.md`)
+- Target: queue within configured bounds (see `config/tuneables.json`)
 - Alert: oldest-event age increases continuously for 10 minutes OR queue rotation fails
 
-## SLO-4: dashboards usable
+## SLO-4: observability usable
 
-- Indicator: Pulse + dashboards return 200 and streams do not crash loop
-- Target: dashboards reachable on localhost when enabled
+- Indicator: Pulse returns 200 and Observatory auto-sync completes
+- Target: Pulse reachable on localhost when enabled; Observatory regenerates within cooldown
 

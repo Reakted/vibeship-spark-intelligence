@@ -494,7 +494,7 @@ Moltbook adapter:
 ## 6) Known gaps / mismatches
 
 - Spark Pulse is the external vibeship-spark-pulse/app.py (set SPARK_PULSE_DIR to override location).
-- advisory delivery status is now surfaced in both Spark Lab dashboard and Pulse advisory/status APIs, but action routing still depends on the OpenClaw agent/plugin side consuming those signals.
+- advisory delivery status is surfaced in Pulse advisory/status APIs and Observatory stage pages, but action routing still depends on the OpenClaw agent/plugin side consuming those signals.
 - Mind host is fixed to localhost; port override supported via `SPARK_MIND_PORT` (see `lib/ports.py`).
 - build/ contains duplicated code artifacts; excluded from analysis.
 
