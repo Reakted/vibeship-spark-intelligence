@@ -33,7 +33,7 @@ We intentionally **do not auto-merge** settings.json to avoid clobbering custom 
 ## 4) Confirm
 
 Defaults (override via env; see `lib/ports.py`):
-- Dashboard: http://127.0.0.1:${SPARK_DASHBOARD_PORT:-8585}
+- Spark Pulse: http://127.0.0.1:${SPARK_PULSE_PORT:-8765}
 - sparkd health: http://127.0.0.1:${SPARKD_PORT:-8787}/health
 
 Hook smoke test (generates a minimal PreToolUse/PostToolUse/UserPromptSubmit set):

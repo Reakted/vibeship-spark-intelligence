@@ -73,7 +73,7 @@ Open `_observatory/flow.md` to see the main dashboard.
 
 ### System Health Table
 
-The top table shows 15 key metrics with status badges:
+The top table shows key metrics with status badges (including Meta-Ralph pass rate, advisory emit rate, and implicit feedback follow rate):
 
 | Badge | Meaning |
 |-------|---------|

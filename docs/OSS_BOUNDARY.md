@@ -42,6 +42,6 @@ Default (safe) launch posture:
 - DEPTH/Forge training and benchmark suites
 - Other high-risk social tooling not needed for coding intelligence loops
 - Archive/reporting folders, local runtime traces, and runtime artifact dumps are trimmed for OSS hygiene
-- Retained launch directories: `benchmarks/` (compat entrypoints + test fixtures), `trace_hud/` (runtime assets), and `.spark/` state are documented as out-of-band launch data.
+- Retained launch directories: `benchmarks/` (compat entrypoints + test fixtures) and `.spark/` state are documented as out-of-band launch data.
 
 These excluded surfaces are tracked in `docs/OPEN_CORE_FREEMIUM_MODEL.md` and are intentionally marked for premium/private packaging.

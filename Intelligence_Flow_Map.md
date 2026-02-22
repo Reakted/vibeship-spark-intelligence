@@ -104,9 +104,8 @@ flowchart LR
 
   %% ===== Ops =====
   subgraph Ops
-    dashboard["dashboard.py"]
-    meta_ralph_dashboard["meta_ralph_dashboard.py"]
     pulse_dashboard["vibeship-spark-pulse/app.py\n(service_control target)"]
+    observatory["lib/observatory/\n(Obsidian vault generator)"]
     watchdog["spark_watchdog.py"]
     service_ctl["lib/service_control"]
   end
@@ -192,10 +191,8 @@ flowchart LR
   eidos_integration --> control_plane
   trace_ctx --> eidos_integration
 
-  queue --> dashboard
-  bridge_cycle --> dashboard
-  trace_ctx --> dashboard
-  meta_ralph --> meta_ralph_dashboard
+  bridge_cycle --> observatory
+  meta_ralph --> observatory
   service_ctl --> pulse_dashboard
   service_ctl --> watchdog
 ```

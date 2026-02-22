@@ -40,10 +40,10 @@ Mind integration:
 - mind_bridge health checks are cached/backed-off to avoid repeated blocking calls while Mind is unavailable.
 - If Mind CLI is unstable, Spark can run the built-in Mind server (see start_mind.ps1; SPARK_FORCE_BUILTIN_MIND=1).
 
-Dashboards and ops:
-- dashboard.py (status + UI)
-- meta_ralph_dashboard.py (quality analyzer, port SPARK_META_RALPH_PORT, default 8586)
-- Spark Pulse runs via external vibeship-spark-pulse/app.py (port SPARK_PULSE_PORT, default 8765).
+Observability:
+- Spark Pulse (primary web dashboard) via external vibeship-spark-pulse/app.py (port SPARK_PULSE_PORT, default 8765).
+- Obsidian Observatory (file-based pipeline viewer) via lib/observatory/ — auto-syncs every 120s.
+- CLI scripts: scripts/spark_dashboard.py, scripts/eidos_dashboard.py
 - spark_watchdog.py + lib/service_control.py (monitor/restart services)
 
 ## 2) Primary workflows (end-to-end)
@@ -925,7 +925,7 @@ Moltbook adapter:
 - func_defaults:
   - post(token) = None line=23 ctx=def post(url: str, obj: dict, token: str = None):
 
-### dashboard.py
+### dashboard.py (REMOVED — consolidated to Pulse + Observatory)
 - constants:
   - PORT = DASHBOARD_PORT line=46 ctx=PORT = DASHBOARD_PORT
   - SPARK_DIR = 'Path.home() / ".spark"' line=47 ctx=SPARK_DIR = Path.home() / ".spark"

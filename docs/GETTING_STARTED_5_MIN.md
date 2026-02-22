@@ -55,11 +55,12 @@ HTTP:
 - sparkd status: `http://127.0.0.1:8787/status` (JSON)
 - Mind (if enabled): `http://127.0.0.1:8080/health`
 
-## 4) Open Dashboards
+## 4) Observability
 
-- Spark Pulse (primary): `http://localhost:8765`
+- Spark Pulse (web dashboard): `http://localhost:8765`
+- Obsidian Observatory: `python scripts/generate_observatory.py --force`
 
-See `DASHBOARD_PLAYBOOK.md` for all ports and endpoints.
+See `docs/OBSIDIAN_OBSERVATORY_GUIDE.md` for full observatory setup.
 
 ## 5) Connect Your Coding Agent
 

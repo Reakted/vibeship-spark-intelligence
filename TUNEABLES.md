@@ -850,9 +850,7 @@ System-wide configuration via environment variables.
 | `SPARK_DEBUG` | `false` | **Debug mode.** Enables verbose logging across all components. |
 | `SPARK_MIND_PORT` | `8080` | **Mind API port.** Port for Mind persistent memory service. |
 | `SPARKD_PORT` | `8787` | **sparkd port.** Port for ingest/health. |
-| `SPARK_DASHBOARD_PORT` | `8585` | **Spark Lab dashboard port.** |
 | `SPARK_PULSE_PORT` | `8765` | **Spark Pulse port.** |
-| `SPARK_META_RALPH_PORT` | `8586` | **Meta-Ralph dashboard port.** |
 | `SPARK_LOG_DIR` | `~/.spark/logs` | **Log directory.** Overrides log output directory. |
 | `SPARK_LOG_MAX_BYTES` | `10485760` | **Log rotation size.** Bytes before rotating. |
 | `SPARK_LOG_BACKUPS` | `5` | **Log rotation backups.** Number of rotated files to keep. |

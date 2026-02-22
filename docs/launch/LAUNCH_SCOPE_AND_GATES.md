@@ -19,7 +19,7 @@ Principle: Ship the learning loop + safety posture + reliability. Defer anything
 
 ### Operator surface area
 - Service runner: `start_spark.bat` (Windows) + `spark up/down/services` (CLI).
-- Dashboards: Spark Pulse + supporting dashboards (see `DASHBOARD_PLAYBOOK.md`).
+- Observability: Spark Pulse (web), Obsidian Observatory (file-based), CLI scripts.
 - Health endpoints: `sparkd /health` and Mind `/health` (when enabled).
 
 ### Reliability + integrity

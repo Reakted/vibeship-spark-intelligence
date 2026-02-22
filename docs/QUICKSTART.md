@@ -147,33 +147,29 @@ python3 -m spark.cli down
 # or: spark down
 ```
 
-### Dashboards
+### Observability
 
-Defaults (override via env; see `lib/ports.py`):
-- Spark Pulse (primary unified dashboard): http://localhost:${SPARK_PULSE_PORT:-8765}
+Spark observability is provided by three systems:
+
+- **Spark Pulse** (primary web dashboard): http://localhost:${SPARK_PULSE_PORT:-8765}
   - Tabs/surfaces include Mission, Learning, Rabbit, Acceptance, Ops, Chips, Tuneables, Tools, and Trace/Run drilldowns.
-- Spark Lab (auxiliary/legacy web views): http://localhost:${SPARK_DASHBOARD_PORT:-8585}
-- Dashboards Index (Spark Lab): http://localhost:${SPARK_DASHBOARD_PORT:-8585}/dashboards
-- Meta-Ralph Quality Analyzer: http://localhost:${SPARK_META_RALPH_PORT:-8586}
+- **Obsidian Observatory** (file-based pipeline viewer): `python scripts/generate_observatory.py --force`
+  - Full 12-stage pipeline visualization, explorer pages for every data store, auto-syncs every 120s.
+- **CLI scripts**: `scripts/spark_dashboard.py`, `scripts/eidos_dashboard.py`
 
 Port overrides:
 - `SPARKD_PORT`
-- `SPARK_DASHBOARD_PORT`
 - `SPARK_PULSE_PORT`
-- `SPARK_META_RALPH_PORT`
 - `SPARK_MIND_PORT`
 
-Tip: `spark up` starts Spark Lab + Spark Pulse + Meta-Ralph by default. Pulse (`8765`) is the primary operator surface; Spark Lab (`8585`) is legacy/auxiliary.
-Tip: Use `--no-pulse` or `--no-meta-ralph` only for debugging or reduced startup modes.
-Tip: `spark up --lite` skips all dashboards/pulse/watchdog to reduce background load.
-Tip: Pulse does not require Spark Lab (`8585`) by default; set `SPARK_DASHBOARD_FALLBACK=1` only if you want HTTP fallback behavior.
+Tip: `spark up` starts core services + Pulse by default. Use `--no-pulse` for debugging.
+Tip: `spark up --lite` skips Pulse and watchdog to reduce background load.
 
 ### Production Hardening Defaults
 
 - `sparkd` auth: when `SPARKD_TOKEN` is set, all mutating `POST` endpoints require `Authorization: Bearer <token>`.
 - Queue safety: queue rotation and processed-event consumption both use temp-file + atomic replace.
 - Validation loop: bridge cycle runs both prompt validation and outcome-linked validation each cycle.
-- Dashboard exposure: Meta-Ralph dashboard binds to `127.0.0.1` by default.
 - Service startup: if Spark Pulse app is unavailable, core services still start and pulse is reported unavailable.
 
 Test gates before push:

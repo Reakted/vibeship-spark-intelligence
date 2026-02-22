@@ -63,7 +63,7 @@ Canonical navigation hub. Start here.
 - `PRODUCTION_READINESS.md` — Loop gates, open items
 - `OPTIMIZATION_CHECKER.md` — Rollback map + optimization changelog
 - `SCHEDULER.md` — Scheduler tasks (mention poll, engagement, research, niche scan)
-- `DASHBOARD_PLAYBOOK.md` — Dashboard governance
+- `docs/OBSIDIAN_OBSERVATORY_GUIDE.md` — Observatory setup and usage
 - `docs/PIPELINE_AUDIT_AND_FIXES.md`
 - `docs/observability/HEALTH_CONTRACT.md`
 - `docs/observability/SLOS.md`

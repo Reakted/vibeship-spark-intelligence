@@ -138,33 +138,27 @@ python tests/test_cognitive_capture.py baseline
 python tests/test_learning_utilization.py quick
 ```
 
-### Operator Dashboards (Use Playbook)
-
-Use `DASHBOARD_PLAYBOOK.md` for full setup and usage (start commands, pages, drilldowns, and APIs).
+### Observability
 
 Quick start:
 1. `python -m spark.cli up`
-2. Primary dashboard: **`http://localhost:${SPARK_PULSE_PORT:-8765}`** (Spark Pulse)
-3. Legacy/aux dashboard (optional): `http://localhost:${SPARK_DASHBOARD_PORT:-8585}`
-4. **Meta-Ralph Quality Analyzer:** `http://localhost:${SPARK_META_RALPH_PORT:-8586}`
+2. **Spark Pulse** (primary web dashboard): `http://localhost:${SPARK_PULSE_PORT:-8765}`
+3. **Obsidian Observatory**: `python scripts/generate_observatory.py --force` (see `docs/OBSIDIAN_OBSERVATORY_GUIDE.md`)
+4. **CLI scripts**: `scripts/spark_dashboard.py`, `scripts/eidos_dashboard.py`
 
-`spark up` starts Spark Lab + Pulse + Meta-Ralph by default. Operate from Pulse first; use Spark Lab for legacy pages only.
-
-Key surfaces:
+Key Pulse surfaces:
 1. **`http://localhost:${SPARK_PULSE_PORT:-8765}`** - Spark Pulse unified operator dashboard (Mission, Learning, Rabbit, Acceptance, Ops, Trace/Run, Chips/Tune/Tools)
 2. `http://localhost:${SPARK_PULSE_PORT:-8765}/api/status` - status heartbeat
 3. `http://localhost:${SPARK_PULSE_PORT:-8765}/api/mission` - mission KPIs
 4. `http://localhost:${SPARK_PULSE_PORT:-8765}/api/acceptance` - acceptance/validation board data
 5. `http://localhost:${SPARK_PULSE_PORT:-8765}/api/ops` - ops aggregates
-6. `http://localhost:${SPARK_DASHBOARD_PORT:-8585}` - Spark Lab legacy pages (optional)
-7. **`http://localhost:${SPARK_META_RALPH_PORT:-8586}`** - Meta-Ralph Quality Analyzer (dedicated dashboard)
 
-**Meta-Ralph Dashboard Features:**
-- Real-time advice quality metrics (from roast_history.json)
-- Outcome tracking visualization (from outcome_tracking.json)
-- 5-dimension scoring breakdown (actionability, novelty, reasoning, specificity, outcome-linked)
-- Actionable recommendations based on weakness analysis
-- Verdict distribution charts (QUALITY/NEEDS_WORK/PRIMITIVE)
+**Meta-Ralph visibility in Observatory** (`_observatory/stages/05-meta-ralph.md`):
+- Verdict distribution (quality/needs_work/primitive/duplicate)
+- 6-dimension scoring averages with visual bars (actionability, novelty, reasoning, specificity, outcome-linked, ethics)
+- Outcome effectiveness tracking (acted-on, good/bad outcomes)
+- Auto-generated recommendations for weak dimensions
+- Individual verdict explorer with full score breakdowns
 
 ---
 
