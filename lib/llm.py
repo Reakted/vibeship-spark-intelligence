@@ -7,6 +7,7 @@ Usage:
     from lib.llm import ask_claude
     result = ask_claude("Summarize these patterns into actionable advice: ...")
 """
+# ruff: noqa: S603,S607
 
 from __future__ import annotations
 

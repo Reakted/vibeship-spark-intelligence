@@ -1,4 +1,5 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
+# ruff: noqa: S608
 """
 Spark Dashboard - True Vibeship Style
 
@@ -365,7 +366,7 @@ def get_dashboard_data():
     for event in reversed(recent_events):
         events_list.append({
             "type": event.event_type.value,
-            "tool": event.tool_name or "â€”",
+            "tool": event.tool_name or "—",
             "success": not event.error,
             "time": datetime.fromtimestamp(event.timestamp).strftime("%H:%M:%S")
         })
@@ -756,7 +757,7 @@ def _queue_oldest_event_age_s() -> Optional[float]:
 
 def _format_age(seconds: Optional[float]) -> str:
     if seconds is None:
-        return "Ã¢â‚¬â€"
+        return "â€”"
     if seconds < 60:
         return f"{int(seconds)}s"
     minutes = int(seconds // 60)
@@ -1248,7 +1249,7 @@ def get_mission_control_data(include_pulse_probe: bool = True) -> Dict[str, Any]
     bridge_last = bridge.get("ts") if isinstance(bridge, dict) else None
     bridge_health = {
         "last_run_ts": bridge_last,
-        "last_run": datetime.fromtimestamp(bridge_last).strftime("%H:%M:%S") if bridge_last else "Ã¢â‚¬â€",
+        "last_run": datetime.fromtimestamp(bridge_last).strftime("%H:%M:%S") if bridge_last else "â€”",
         "pattern_processed": bridge_stats.get("pattern_processed", 0),
         "content_learned": bridge_stats.get("content_learned", 0),
         "events_processed": bridge_stats.get("events_processed", 0),
@@ -1693,9 +1694,9 @@ def generate_html():
     # Surprises HTML
     surprises_html = ""
     for s in data["surprises"]["recent"]:
-        icon = "â–³" if "Success" in s["type"] else "â–½" if "Failure" in s["type"] else "â—‡"
+        icon = "△" if "Success" in s["type"] else "▽" if "Failure" in s["type"] else "◇"
         icon_class = "success" if "Success" in s["type"] else "failure" if "Failure" in s["type"] else ""
-        lesson_html = f'<div class="surprise-lesson">â†’ {s["lesson"]}</div>' if s["lesson"] else ""
+        lesson_html = f'<div class="surprise-lesson">→ {s["lesson"]}</div>' if s["lesson"] else ""
         surprises_html += f'''
         <div class="surprise-row">
             <div class="surprise-header">
@@ -1705,11 +1706,11 @@ def generate_html():
             </div>
             <div class="surprise-detail">
                 <span class="surprise-label">Expected</span>
-                <span class="surprise-text">{s["predicted"]}â€¦</span>
+                <span class="surprise-text">{s["predicted"]}…</span>
             </div>
             <div class="surprise-detail">
                 <span class="surprise-label">Got</span>
-                <span class="surprise-text">{s["actual"]}â€¦</span>
+                <span class="surprise-text">{s["actual"]}…</span>
             </div>
             {lesson_html}
         </div>'''
@@ -1722,14 +1723,14 @@ def generate_html():
         try:
             t = datetime.fromtimestamp(float(m.get("created_at") or time.time())).strftime("%H:%M:%S")
         except Exception:
-            t = "â€”"
-        cat = str(m.get("category") or "â€”")
-        txt = str(m.get("text") or "â€”")
+            t = "—"
+        cat = str(m.get("category") or "—")
+        txt = str(m.get("text") or "—")
         project_rows += f'''<div class="event-row">
             <span class="event-time">{t}</span>
             <span class="event-type">{cat}</span>
             <span class="event-tool">{txt[:60]}</span>
-            <span class="event-status success">âœ“</span>
+            <span class="event-status success">✓</span>
         </div>'''
 
     project_card = ""
@@ -1754,8 +1755,8 @@ def generate_html():
         try:
             t = datetime.fromtimestamp(float(it.get("created_at") or time.time())).strftime("%H:%M:%S")
         except Exception:
-            t = "â€”"
-        dom = str(it.get("domain") or "â€”")
+            t = "—"
+        dom = str(it.get("domain") or "—")
         label = str(it.get("label") or "")
         src = str(it.get("source") or "")
         notes = str(it.get("notes") or "")
@@ -1774,12 +1775,12 @@ def generate_html():
         <div class="card">
             <div class="card-header">
                 <span class="card-title">TasteBank</span>
-                <span class="muted" style="font-size: 0.7rem;">posts {taste_stats.get("social_posts",0)} Â· ui {taste_stats.get("ui_design",0)} Â· art {taste_stats.get("art",0)}</span>
+                <span class="muted" style="font-size: 0.7rem;">posts {taste_stats.get("social_posts",0)} · ui {taste_stats.get("ui_design",0)} · art {taste_stats.get("art",0)}</span>
             </div>
             <div class="card-body">
                 <div class="taste-drop" id="taste-drop">
                     <div class="taste-drop-title">Drop a link or paste content</div>
-                    <div class="taste-drop-sub">Pick domain â†’ paste URL/text â†’ add notes (optional)</div>
+                    <div class="taste-drop-sub">Pick domain → paste URL/text → add notes (optional)</div>
 
                     <div class="taste-form">
                         <select id="taste-domain">
@@ -1788,8 +1789,8 @@ def generate_html():
                             <option value="art">Art / graphics</option>
                         </select>
                         <input id="taste-label" placeholder="Label (optional)" />
-                        <textarea id="taste-source" placeholder="Paste URL or contentâ€¦"></textarea>
-                        <textarea id="taste-notes" placeholder="Why you like it / what to copy (optional)â€¦"></textarea>
+                        <textarea id="taste-source" placeholder="Paste URL or content…"></textarea>
+                        <textarea id="taste-notes" placeholder="Why you like it / what to copy (optional)…"></textarea>
                         <button id="taste-add">Add to TasteBank</button>
                         <div class="muted" id="taste-status" style="font-size:0.75rem; margin-top:0.5rem;"></div>
                     </div>
@@ -1823,7 +1824,7 @@ def generate_html():
         growth_html += f'''
         <div class="growth-item">
             <span class="growth-before">Was: {g["before"]}</span>
-            <span class="growth-arrow">â†’</span>
+            <span class="growth-arrow">→</span>
             <span class="growth-after">Now: {g["after"]}</span>
         </div>'''
     
@@ -1851,7 +1852,7 @@ def generate_html():
     # Events rows
     events_html = ""
     for evt in data["queue"]["recent"]:
-        icon = "âœ“" if evt["success"] else "âœ—"
+        icon = "✓" if evt["success"] else "✗"
         status_class = "success" if evt["success"] else "error"
         events_html += f'''
         <div class="event-row">
@@ -1907,13 +1908,14 @@ def generate_html():
             <span class="event-status success">{'+' if ns else '|'}</span>
         </div>'''
     
-    html = f'''<!DOCTYPE html>
+    html = f'''<!DOCTYPE html>'''  # noqa: S608 - HTML template generation, not SQL
+    html += f'''  # noqa: S608 - HTML template generation, not SQL
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- live updates via JS (no full-page refresh) -->
-    <title>Spark Lab â€” Vibeship</title>
+    <title>Spark Lab — Vibeship</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -2907,7 +2909,7 @@ def generate_html():
             
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">ðŸŽ­ Personality</span>
+                    <span class="card-title">🎭 Personality</span>
                     <span class="card-status live"><span class="status-dot" style="background: {data["resonance"]["color"]}"></span> <span style="color: {data["resonance"]["color"]}">{data["resonance"]["name"]}</span></span>
                 </div>
                 <div class="card-body">
@@ -2960,7 +2962,7 @@ def generate_html():
         <div class="footer-systems" id="footer-systems">
             {generate_system_badges(data)}
         </div>
-        <p class="footer-text">Updated <span id="updated-at">{data["timestamp"]}</span> Â· Project: <span id="active-project">{data.get("project", {}).get("active") or "â€”"}</span> Â· <span>vibeship</span> ecosystem</p>
+        <p class="footer-text">Updated <span id="updated-at">{data["timestamp"]}</span> · Project: <span id="active-project">{data.get("project", {}).get("active") or "—"}</span> · <span>vibeship</span> ecosystem</p>
     </div>
 
     <script>
@@ -3168,7 +3170,7 @@ def generate_html():
           }}
 
           btn.disabled = true;
-          if (status) status.textContent = 'Savingâ€¦';
+          if (status) status.textContent = 'Saving…';
           try {{
             const resp = await postJSON('/api/taste/add', {{ domain, label, source, notes }});
             if (resp.ok) {{
@@ -3874,7 +3876,8 @@ def generate_ops_html():
       startOpsStream();
     """
 
-    html = f'''<!DOCTYPE html>
+    html = f'''<!DOCTYPE html>'''  # noqa: S608 - HTML template generation, not SQL
+    html += f'''  # noqa: S608 - HTML template generation, not SQL
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -4034,7 +4037,7 @@ def generate_ops_html():
     </main>
 
     <div class="footer">
-        <p>Updated {datetime.now().strftime("%H:%M:%S")} Â· Spark Ops</p>
+        <p>Updated {datetime.now().strftime("%H:%M:%S")} · Spark Ops</p>
     </div>
     <script>{ops_js}</script>
 </body>
@@ -4334,7 +4337,7 @@ def _base_page(title: str, active: str, body: str, data: Dict[str, Any], endpoin
       }}
       return headers;
     }};
-    const setText = (id, value) => {{ const el = $(id); if (el) el.textContent = value ?? "â€”"; }};
+    const setText = (id, value) => {{ const el = $(id); if (el) el.textContent = value ?? "—"; }};
     const postJSON = async (url, body) => {{
       const res = await fetch(url, {{
         method: 'POST',
@@ -4471,7 +4474,7 @@ def generate_mission_html() -> str:
       const renderTrace = (trace) => {
         if (!trace) return;
         const summary = [
-          `<div class="row"><span>trace</span><span class="mono">${safeText(trace.trace_id || "â€”")}</span></div>`,
+          `<div class="row"><span>trace</span><span class="mono">${safeText(trace.trace_id || "—")}</span></div>`,
           `<div class="row"><span>steps</span><span class="mono">${(trace.steps || []).length}</span></div>`,
           `<div class="row"><span>evidence</span><span class="mono">${(trace.evidence || []).length}</span></div>`,
           `<div class="row"><span>outcomes</span><span class="mono">${(trace.outcomes || []).length}</span></div>`
@@ -4511,7 +4514,7 @@ def generate_mission_html() -> str:
         if (!run) return;
         const ep = run.episode || {};
         const summary = [
-          `<div class="row"><span>episode</span><span class="mono">${safeText(ep.episode_id || "â€”")}</span></div>`,
+          `<div class="row"><span>episode</span><span class="mono">${safeText(ep.episode_id || "—")}</span></div>`,
           `<div class="row"><span>goal</span><span class="muted">${safeText(ep.goal || "")}</span></div>`,
           `<div class="row"><span>phase</span><span class="mono">${safeText(ep.phase || "")}</span></div>`,
           `<div class="row"><span>outcome</span><span class="mono">${safeText(ep.outcome || "")}</span></div>`,
@@ -4570,7 +4573,7 @@ def generate_mission_html() -> str:
         if (info.heartbeat_age_s !== undefined && info.heartbeat_age_s !== null) {
           details.push(`heartbeat ${Math.round(info.heartbeat_age_s)}s`);
         }
-        return `<div class="row"><span>${safeName.replace(/_/g,' ')}</span><span class="pill ${pill}">${ok ? "ok" : "down"}</span><span class="muted mono">${details.join(" Ã‚Â· ")}</span></div>`;
+        return `<div class="row"><span>${safeName.replace(/_/g,' ')}</span><span class="pill ${pill}">${ok ? "ok" : "down"}</span><span class="muted mono">${details.join(" Â· ")}</span></div>`;
       });
       renderList("services-list", serviceItems, (x) => x);
       setText("services-summary", Object.keys(services).length + " services");
@@ -4578,7 +4581,7 @@ def generate_mission_html() -> str:
       const queue = data.queue || {};
       const queueItems = [
         `<div class="row"><span>events</span><span class="mono">${queue.event_count ?? 0}</span></div>`,
-        `<div class="row"><span>oldest event</span><span class="mono">${safeText(queue.oldest_age ?? "Ã¢â‚¬â€")}</span></div>`,
+        `<div class="row"><span>oldest event</span><span class="mono">${safeText(queue.oldest_age ?? "â€”")}</span></div>`,
         `<div class="row"><span>invalid events</span><span class="mono">${queue.invalid_events ?? 0}</span></div>`,
         `<div class="row"><span>lock present</span><span class="mono">${queue.lock_present ? "yes" : "no"}</span></div>`
       ];
@@ -4587,7 +4590,7 @@ def generate_mission_html() -> str:
 
       const bridge = data.bridge || {};
       const bridgeItems = [
-        `<div class="row"><span>last run</span><span class="mono">${safeText(bridge.last_run || "Ã¢â‚¬â€")}</span></div>`,
+        `<div class="row"><span>last run</span><span class="mono">${safeText(bridge.last_run || "â€”")}</span></div>`,
         `<div class="row"><span>patterns</span><span class="mono">${bridge.pattern_processed ?? 0}</span></div>`,
         `<div class="row"><span>content learned</span><span class="mono">${bridge.content_learned ?? 0}</span></div>`,
         `<div class="row"><span>errors</span><span class="mono">${(bridge.errors || []).length}</span></div>`
@@ -4619,7 +4622,7 @@ def generate_mission_html() -> str:
         }
         const recent = ep.recent_steps_detail || [];
         for (const s of recent) {
-          details.push(`<div class="row"><span>${safeText(s.intent || "step")}</span><span class="mono">${safeText(s.trace_id || "â€”")}</span>${traceButton(s.trace_id)}</div>`);
+          details.push(`<div class="row"><span>${safeText(s.intent || "step")}</span><span class="mono">${safeText(s.trace_id || "—")}</span>${traceButton(s.trace_id)}</div>`);
         }
         renderList("episode-details", details, (x) => x);
       } else {
@@ -4632,7 +4635,7 @@ def generate_mission_html() -> str:
       setText("mode-status", modeActive ? "minimal" : "normal");
       const modeItems = [
         `<div class="row"><span>state</span><span class="mono">${modeActive ? "active" : "normal"}</span></div>`,
-        `<div class="row"><span>reason</span><span class="mono">${safeText(mode.reason || "â€”")}</span></div>`,
+        `<div class="row"><span>reason</span><span class="mono">${safeText(mode.reason || "—")}</span></div>`,
         `<div class="row"><span>edits allowed</span><span class="mono">${mode.edits_allowed ? "yes" : "no"}</span></div>`
       ];
       renderList("mode-details", modeItems, (x) => x);

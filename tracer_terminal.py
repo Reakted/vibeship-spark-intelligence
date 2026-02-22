@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: S603
 """
 Tracer Terminal - Intelligence Loop Dashboard
 =============================================

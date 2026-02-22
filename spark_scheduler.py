@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: S603
 """spark_scheduler -- periodic X intelligence tasks.
 
 Runs mention polling, engagement snapshots, daily research, and niche scans

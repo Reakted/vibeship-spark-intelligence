@@ -818,6 +818,28 @@ HTML_TEMPLATE = """
                 .replaceAll("'", '&#39;');
         }
 
+        function sanitizeHtmlFragment(html) {
+            const tpl = document.createElement('template');
+            tpl.innerHTML = String(html || '');
+            tpl.content.querySelectorAll('script,style,iframe,object,embed,link[rel="import"]').forEach((node) => node.remove());
+            tpl.content.querySelectorAll('*').forEach((node) => {
+                Array.from(node.attributes || []).forEach((attr) => {
+                    const name = String(attr.name || '').toLowerCase();
+                    const value = String(attr.value || '');
+                    if (name.startsWith('on')) node.removeAttribute(attr.name);
+                    if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\\s*javascript:/i.test(value)) {
+                        node.removeAttribute(attr.name);
+                    }
+                });
+            });
+            return tpl.innerHTML;
+        }
+
+        function setSafeHTML(el, html) {
+            if (!el) return;
+            el.innerHTML = sanitizeHtmlFragment(html);
+        }
+
         async function loadData() {
             try {
                 const resp = await fetch('/api/data');
@@ -891,7 +913,7 @@ HTML_TEMPLATE = """
                         </div>
                     `;
                 }
-                document.getElementById('source-bars').innerHTML = sourceHtml || '<p style="color:#888">No data yet</p>';
+                setSafeHTML(document.getElementById('source-bars'), sourceHtml || '<p style="color:#888">No data yet</p>');
 
                 // Recommendations
                 let recsHtml = '';
@@ -915,7 +937,7 @@ HTML_TEMPLATE = """
                         </div>
                     `;
                 }
-                document.getElementById('recommendations').innerHTML = recsHtml || '<p style="color:#4ade80">No issues detected!</p>';
+                setSafeHTML(document.getElementById('recommendations'), recsHtml || '<p style="color:#4ade80">No issues detected!</p>');
 
                 // Recent roasts table
                 let tbody = '';
@@ -923,7 +945,6 @@ HTML_TEMPLATE = """
                     const verdictClass = roast.verdict || 'unknown';
                     const scores = roast.scores;
                     const traceId = String(roast.trace_id || '');
-                    const safeTraceId = esc(traceId);
                     const safeVerdict = esc(verdictClass);
                     const totalScore = Number(roast.total_score || 0);
                     const act = Number(scores.act || 0);
@@ -956,7 +977,7 @@ HTML_TEMPLATE = """
                         </tr>
                     `;
                 }
-                document.getElementById('roasts-tbody').innerHTML = tbody || '<tr><td colspan="7">No roasts yet</td></tr>';
+                setSafeHTML(document.getElementById('roasts-tbody'), tbody || '<tr><td colspan="7">No roasts yet</td></tr>');
 
             } catch (err) {
                 console.error('Load error:', err);

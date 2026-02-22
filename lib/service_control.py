@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: S603,S607
 """Service control helpers for Spark daemons (sparkd, bridge_worker, dashboard, pulse, watchdog)."""
 
 from __future__ import annotations

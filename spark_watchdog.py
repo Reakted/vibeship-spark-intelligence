@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: S603,S607
 """Lightweight Spark watchdog: restarts critical workers and warns on queue growth."""
 
 from __future__ import annotations

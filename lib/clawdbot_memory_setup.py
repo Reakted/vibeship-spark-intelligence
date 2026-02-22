@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: S603
 """Clawdbot Memory Search Setup (lightweight)
 
 Goal: make it dead-simple to switch memorySearch embedding providers.

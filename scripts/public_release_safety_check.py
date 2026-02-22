@@ -369,6 +369,11 @@ def _sast_refresh_requested() -> bool:
     return _parse_env_bool("SPARK_RELEASE_REFRESH_SAST_BASELINE") is True
 
 
+def _sast_baseline_allowed() -> bool:
+    """Baseline allowlist is opt-in; default gate is strict/no-baseline."""
+    return _parse_env_bool("SPARK_RELEASE_ALLOW_SAST_BASELINE") is True
+
+
 def _norm_rel_path(path_str: str) -> str:
     try:
         return Path(path_str).resolve().relative_to(REPO_ROOT).as_posix()
@@ -459,6 +464,20 @@ def _run_sast_ruff_gate() -> list[str]:
     if _sast_refresh_requested():
         _write_sast_baseline(issues)
         print(f"info: refreshed SAST baseline at {SAST_BASELINE_PATH.relative_to(REPO_ROOT).as_posix()}")
+        return findings
+
+    if not _sast_baseline_allowed():
+        if issues:
+            findings.append(f"sast_ruff: {len(issues)} finding(s) detected")
+            for issue in issues[:SAST_ISSUE_DISPLAY_LIMIT]:
+                path = _norm_rel_path(str(issue.get("filename") or ""))
+                loc = issue.get("location") or {}
+                row = 0
+                if isinstance(loc, dict):
+                    row = int((loc.get("row") or 0))
+                code = str(issue.get("code") or "UNKNOWN")
+                msg = str(issue.get("message") or "").strip()
+                findings.append(f"sast_ruff_detail: {path}:{row}:{code}: {msg}")
         return findings
 
     baseline = _load_sast_baseline()

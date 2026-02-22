@@ -1,5 +1,5 @@
 {
-  "generated_at_epoch": 1771719675,
+  "generated_at_epoch": 1771720128,
   "source": "scripts/public_release_safety_check.py",
   "rules": [
     "S603",
@@ -28,17 +28,5 @@
     "mind_server.py",
     "cli.py"
   ],
-  "ruff_fingerprints": [
-    "S603|lib/clawdbot_memory_setup.py|`subprocess` call: check for execution of untrusted input",
-    "S603|lib/llm.py|`subprocess` call: check for execution of untrusted input",
-    "S603|lib/service_control.py|`subprocess` call: check for execution of untrusted input",
-    "S603|spark_pulse.py|`subprocess` call: check for execution of untrusted input",
-    "S603|spark_scheduler.py|`subprocess` call: check for execution of untrusted input",
-    "S603|spark_watchdog.py|`subprocess` call: check for execution of untrusted input",
-    "S603|tracer_terminal.py|`subprocess` call: check for execution of untrusted input",
-    "S607|lib/llm.py|Starting a process with a partial executable path",
-    "S607|lib/service_control.py|Starting a process with a partial executable path",
-    "S607|spark_watchdog.py|Starting a process with a partial executable path",
-    "S608|dashboard.py|Possible SQL injection vector through string-based query construction"
-  ]
+  "ruff_fingerprints": []
 }
