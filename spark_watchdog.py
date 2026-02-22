@@ -29,7 +29,7 @@ LOG_DIR = Path.home() / ".spark" / "logs"
 STATE_FILE = Path.home() / ".spark" / "watchdog_state.json"
 PID_FILE = Path.home() / ".spark" / "pids" / "watchdog.pid"
 PLUGIN_ONLY_SENTINEL = Path.home() / ".spark" / "plugin_only_mode"
-PLUGIN_ONLY_SKIP_RESTARTS = {"bridge_worker", "dashboard", "meta_ralph", "pulse"}
+PLUGIN_ONLY_SKIP_RESTARTS = {"bridge_worker", "pulse"}
 
 # OpenClaw integration: keep the OpenClaw tailer alive whenever OpenClaw Gateway is running.
 # (Does not require core ownership; safe to run in plugin-only mode.)
@@ -449,11 +449,7 @@ def _restart_allowed(service: str, plugin_only_mode: bool) -> bool:
 def _env_disabled(service: str) -> bool:
     """Allow operators to disable watchdog management for specific services."""
     v = None
-    if service == "meta_ralph":
-        v = os.environ.get("SPARK_NO_META_RALPH")
-    elif service == "dashboard":
-        v = os.environ.get("SPARK_NO_DASHBOARD")
-    elif service == "pulse":
+    if service == "pulse":
         v = os.environ.get("SPARK_NO_PULSE")
     elif service == "sparkd":
         v = os.environ.get("SPARK_NO_SPARKD")
@@ -554,24 +550,6 @@ def main() -> None:
                     _record_restart(state, "sparkd")
                     failures["sparkd"] = 0
 
-        # dashboard
-        manage_dashboard = _restart_allowed("dashboard", plugin_only_mode) and not _env_disabled("dashboard")
-        dash_ok = _http_ok(DASHBOARD_STATUS_URL)
-        dash_fail = _bump_fail("dashboard", dash_ok or not manage_dashboard)
-        if manage_dashboard and (not dash_ok):
-            dash_pids = _find_pids_by_any_keywords(
-                [["dashboard.py"], ["-m dashboard"]],
-                snapshot,
-            )
-            if dash_pids and dash_fail < args.fail_threshold:
-                _log(f"dashboard unhealthy (fail {dash_fail}/{args.fail_threshold}) but process exists")
-            elif not args.no_restart and _can_restart(state, "dashboard"):
-                if dash_pids:
-                    _terminate_pids(dash_pids)
-                if _start_process("dashboard", [sys.executable, "-m", "dashboard"]):
-                    _record_restart(state, "dashboard")
-                    failures["dashboard"] = 0
-
         # spark pulse -- unified startup via service_control
         manage_pulse = _restart_allowed("pulse", plugin_only_mode) and not _env_disabled("pulse")
         pulse_ok = _http_ok(PULSE_DOCS_URL, timeout=2.0) and _http_ok(PULSE_UI_URL, timeout=2.0)
@@ -609,31 +587,6 @@ def main() -> None:
                 if pulse_cmd and _start_process("pulse", pulse_cmd, cwd=SPARK_PULSE_DIR):
                     _record_restart(state, "pulse")
                     failures["pulse"] = 0
-
-        # meta-ralph dashboard
-        manage_meta = _restart_allowed("meta_ralph", plugin_only_mode) and not _env_disabled("meta_ralph")
-        meta_ok = _http_ok(META_RALPH_HEALTH_URL)
-        meta_fail = _bump_fail("meta_ralph", meta_ok or not manage_meta)
-        if manage_meta and (not meta_ok):
-            meta_pids = _find_pids_by_keywords(["meta_ralph_dashboard.py"], snapshot)
-            if meta_pids and meta_fail < args.fail_threshold:
-                _log(f"meta_ralph unhealthy (fail {meta_fail}/{args.fail_threshold}) but process exists")
-            elif not args.no_restart and _can_restart(state, "meta_ralph"):
-                if meta_pids:
-                    _terminate_pids(meta_pids)
-                if _start_process("meta_ralph", [sys.executable, str(SPARK_DIR / "meta_ralph_dashboard.py")]):
-                    _record_restart(state, "meta_ralph")
-                    failures["meta_ralph"] = 0
-        else:
-            # Keep the surface single-instance even when healthy (multiple concurrent dashboards cause
-            # confusing state and can thrash CPU/memory).
-            meta_pids = _find_pids_by_keywords(["meta_ralph_dashboard.py"], snapshot)
-            if len(meta_pids) > 1 and not args.no_restart:
-                keep = meta_pids[0]
-                extras = [p for p in meta_pids[1:] if p != keep]
-                if extras:
-                    _terminate_pids(extras)
-                    _log(f"meta_ralph multiple instances detected; terminated extras: {extras}")
 
         # bridge_worker
         manage_bridge = _restart_allowed("bridge_worker", plugin_only_mode) and not _env_disabled("bridge_worker")

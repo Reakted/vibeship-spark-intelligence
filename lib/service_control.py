@@ -383,12 +383,8 @@ def _start_process(name: str, args: list[str], cwd: Optional[Path] = None) -> Op
 def _is_service_ready(name: str, bridge_stale_s: int = 90) -> bool:
     if name == "sparkd":
         return _http_ok(SPARKD_HEALTH_URL)
-    if name == "dashboard":
-        return _http_ok(DASHBOARD_STATUS_URL)
     if name == "pulse":
         return _pulse_ok()
-    if name == "meta_ralph":
-        return _http_ok(META_RALPH_HEALTH_URL)
     if name == "bridge_worker":
         hb_age = _bridge_heartbeat_age()
         return hb_age is not None and hb_age <= bridge_stale_s
@@ -475,8 +471,6 @@ def _service_cmds(
             "--interval",
             str(bridge_interval),
         ],
-        "dashboard": [sys.executable, "-m", "dashboard"],
-        "meta_ralph": [sys.executable, str(ROOT_DIR / "meta_ralph_dashboard.py")],
         "scheduler": [sys.executable, str(ROOT_DIR / "spark_scheduler.py")],
         "watchdog": [
             sys.executable,
@@ -615,9 +609,7 @@ def start_services(
     bridge_interval: int = 30,
     bridge_query: Optional[str] = None,
     watchdog_interval: int = 60,
-    include_dashboard: bool = True,
     include_pulse: bool = True,
-    include_meta_ralph: bool = True,
     include_watchdog: bool = True,
     bridge_stale_s: int = 90,
 ) -> dict[str, str]:
@@ -630,13 +622,9 @@ def start_services(
     statuses = service_status(bridge_stale_s=bridge_stale_s)
     results: dict[str, str] = {}
 
-    order = ["sparkd", "bridge_worker", "scheduler", "dashboard", "pulse", "meta_ralph", "watchdog"]
-    if not include_dashboard:
-        order.remove("dashboard")
+    order = ["sparkd", "bridge_worker", "scheduler", "pulse", "watchdog"]
     if not include_pulse:
         order.remove("pulse")
-    if not include_meta_ralph:
-        order.remove("meta_ralph")
     if not include_watchdog:
         order.remove("watchdog")
 
@@ -671,9 +659,7 @@ def ensure_services(
     bridge_interval: int = 30,
     bridge_query: Optional[str] = None,
     watchdog_interval: int = 60,
-    include_dashboard: bool = True,
     include_pulse: bool = True,
-    include_meta_ralph: bool = True,
     include_watchdog: bool = True,
     bridge_stale_s: int = 90,
 ) -> dict[str, str]:
@@ -681,9 +667,7 @@ def ensure_services(
         bridge_interval=bridge_interval,
         bridge_query=bridge_query,
         watchdog_interval=watchdog_interval,
-        include_dashboard=include_dashboard,
         include_pulse=include_pulse,
-        include_meta_ralph=include_meta_ralph,
         include_watchdog=include_watchdog,
         bridge_stale_s=bridge_stale_s,
     )
