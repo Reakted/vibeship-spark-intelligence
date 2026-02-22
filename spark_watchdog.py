@@ -16,6 +16,7 @@ from typing import Optional
 from urllib import request
 
 from lib.ports import (
+    MIND_HEALTH_URL,
     PULSE_DOCS_URL,
     PULSE_UI_URL,
     SPARKD_HEALTH_URL,
@@ -455,6 +456,8 @@ def _env_disabled(service: str) -> bool:
         v = os.environ.get("SPARK_NO_BRIDGE_WORKER")
     elif service == "scheduler":
         v = os.environ.get("SPARK_NO_SCHEDULER")
+    elif service == "mind":
+        v = os.environ.get("SPARK_NO_MIND")
     elif service == "openclaw_tailer":
         v = os.environ.get("SPARK_NO_OPENCLAW_TAILER")
     if v is None:
@@ -526,6 +529,24 @@ def main() -> None:
             else:
                 failures[name] = int(failures.get(name, 0)) + 1
             return failures.get(name, 0)
+
+        # mind
+        manage_mind = _restart_allowed("mind", plugin_only_mode) and not _env_disabled("mind")
+        mind_ok = _http_ok(MIND_HEALTH_URL, timeout=3.0)
+        mind_fail = _bump_fail("mind", mind_ok or not manage_mind)
+        if manage_mind and (not mind_ok):
+            mind_pids = _find_pids_by_any_keywords(
+                [["mind_server.py"], ["lite_tier"], ["mind.serve"]],
+                snapshot,
+            )
+            if mind_pids and mind_fail < args.fail_threshold:
+                _log(f"mind unhealthy (fail {mind_fail}/{args.fail_threshold}) but process exists")
+            elif not args.no_restart and _can_restart(state, "mind"):
+                if mind_pids:
+                    _terminate_pids(mind_pids)
+                if _start_process("mind", [sys.executable, str(SPARK_DIR / "mind_server.py")]):
+                    _record_restart(state, "mind")
+                    failures["mind"] = 0
 
         # sparkd
         manage_sparkd = _restart_allowed("sparkd", plugin_only_mode) and not _env_disabled("sparkd")

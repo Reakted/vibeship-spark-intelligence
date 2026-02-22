@@ -16,6 +16,7 @@ def test_start_services_uses_pulse_repo_as_cwd(monkeypatch, tmp_path):
         service_control,
         "service_status",
         lambda bridge_stale_s=90: {
+            "mind": {"running": True},
             "sparkd": {"running": True},
             "bridge_worker": {"running": True},
             "pulse": {"running": False},

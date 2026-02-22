@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ruff: noqa: S603,S607
-"""Service control helpers for Spark daemons (sparkd, bridge_worker, pulse, watchdog)."""
+"""Service control helpers for Spark daemons (mind, sparkd, bridge_worker, pulse, watchdog)."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from urllib import request
 from lib.diagnostics import _rotate_log_file, _LOG_MAX_BYTES, _LOG_BACKUPS
 
 from lib.ports import (
+    MIND_HEALTH_URL,
     PULSE_DOCS_URL,
     PULSE_UI_URL,
     PULSE_URL,
@@ -377,6 +378,8 @@ def _start_process(name: str, args: list[str], cwd: Optional[Path] = None) -> Op
 
 
 def _is_service_ready(name: str, bridge_stale_s: int = 90) -> bool:
+    if name == "mind":
+        return _http_ok(MIND_HEALTH_URL)
     if name == "sparkd":
         return _http_ok(SPARKD_HEALTH_URL)
     if name == "pulse":
@@ -457,6 +460,7 @@ def _service_cmds(
     bridge_query: Optional[str] = None,
     watchdog_interval: int = 60,
     include_pulse: bool = True,
+    include_mind: bool = True,
 ) -> dict[str, Optional[list[str]]]:
     cmds = {
         "sparkd": [sys.executable, "-m", "sparkd"],
@@ -476,6 +480,8 @@ def _service_cmds(
             str(watchdog_interval),
         ],
     }
+    if include_mind:
+        cmds["mind"] = [sys.executable, str(ROOT_DIR / "mind_server.py")]
     if include_pulse:
         try:
             cmds["pulse"] = _get_pulse_command()
@@ -487,12 +493,14 @@ def _service_cmds(
 
 
 def service_status(bridge_stale_s: int = 90, include_pulse_probe: bool = True) -> dict[str, dict]:
+    mind_ok = _http_ok(MIND_HEALTH_URL)
     sparkd_ok = _http_ok(SPARKD_HEALTH_URL)
     pulse_ok = _pulse_ok() if include_pulse_probe else False
     hb_age = _bridge_heartbeat_age()
 
     sched_hb_age = _scheduler_heartbeat_age()
 
+    mind_pid = _read_pid("mind")
     sparkd_pid = _read_pid("sparkd")
     pulse_pid = _read_pid("pulse")
     bridge_pid = _read_pid("bridge_worker")
@@ -500,12 +508,19 @@ def service_status(bridge_stale_s: int = 90, include_pulse_probe: bool = True) -
     watchdog_pid = _read_pid("watchdog")
 
     snapshot = _process_snapshot()
+    mind_keys = [["mind_server.py"], ["lite_tier"], ["mind.serve"]]
     sparkd_keys = [["-m sparkd"], ["sparkd.py"]]
     pulse_keys = _pulse_process_patterns()
     bridge_keys = [["-m bridge_worker"], ["bridge_worker.py"]]
     scheduler_keys = [["spark_scheduler.py"]]
     watchdog_keys = [["-m spark_watchdog"], ["spark_watchdog.py"], ["scripts/watchdog.py"]]
 
+    mind_running = (
+        mind_ok
+        or _pid_matches(mind_pid, mind_keys, snapshot)
+        or _any_process_matches(mind_keys, snapshot)
+        or _pid_alive_fallback(mind_pid, snapshot)
+    )
     sparkd_running = (
         sparkd_ok
         or _pid_matches(sparkd_pid, sparkd_keys, snapshot)
@@ -539,6 +554,11 @@ def service_status(bridge_stale_s: int = 90, include_pulse_probe: bool = True) -
     )
 
     return {
+        "mind": {
+            "running": mind_running,
+            "healthy": mind_ok,
+            "pid": mind_pid,
+        },
         "sparkd": {
             "running": sparkd_running,
             "healthy": sparkd_ok,
@@ -577,6 +597,7 @@ def start_services(
     bridge_interval: int = 30,
     bridge_query: Optional[str] = None,
     watchdog_interval: int = 60,
+    include_mind: bool = True,
     include_pulse: bool = True,
     include_watchdog: bool = True,
     bridge_stale_s: int = 90,
@@ -585,12 +606,15 @@ def start_services(
         bridge_interval=bridge_interval,
         bridge_query=bridge_query,
         watchdog_interval=watchdog_interval,
+        include_mind=include_mind,
         include_pulse=include_pulse,
     )
     statuses = service_status(bridge_stale_s=bridge_stale_s)
     results: dict[str, str] = {}
 
-    order = ["sparkd", "bridge_worker", "scheduler", "pulse", "watchdog"]
+    order = ["mind", "sparkd", "bridge_worker", "scheduler", "pulse", "watchdog"]
+    if not include_mind:
+        order.remove("mind")
     if not include_pulse:
         order.remove("pulse")
     if not include_watchdog:
@@ -627,6 +651,7 @@ def ensure_services(
     bridge_interval: int = 30,
     bridge_query: Optional[str] = None,
     watchdog_interval: int = 60,
+    include_mind: bool = True,
     include_pulse: bool = True,
     include_watchdog: bool = True,
     bridge_stale_s: int = 90,
@@ -635,6 +660,7 @@ def ensure_services(
         bridge_interval=bridge_interval,
         bridge_query=bridge_query,
         watchdog_interval=watchdog_interval,
+        include_mind=include_mind,
         include_pulse=include_pulse,
         include_watchdog=include_watchdog,
         bridge_stale_s=bridge_stale_s,
@@ -643,9 +669,10 @@ def ensure_services(
 
 def stop_services() -> dict[str, str]:
     results: dict[str, str] = {}
-    for name in ["watchdog", "pulse", "scheduler", "bridge_worker", "sparkd"]:
+    for name in ["watchdog", "pulse", "scheduler", "bridge_worker", "sparkd", "mind"]:
         pid = _read_pid(name)
         patterns = {
+            "mind": [["mind_server.py"], ["lite_tier"], ["mind.serve"]],
             "sparkd": [["-m sparkd"], ["sparkd.py"]],
             "bridge_worker": [["-m bridge_worker"], ["bridge_worker.py"]],
             "scheduler": [["spark_scheduler.py"]],
@@ -714,6 +741,11 @@ def format_status_lines(status: dict[str, dict], bridge_stale_s: int = 90) -> li
     scheduler = status.get("scheduler", {})
     watchdog = status.get("watchdog", {})
 
+    mind = status.get("mind", {})
+    lines.append(
+        f"[spark] mind: {'RUNNING' if mind.get('running') else 'STOPPED'}"
+        + (" (healthy)" if mind.get("healthy") else "")
+    )
     lines.append(
         f"[spark] sparkd: {'RUNNING' if sparkd.get('running') else 'STOPPED'}"
         + (" (healthy)" if sparkd.get("healthy") else "")

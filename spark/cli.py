@@ -501,6 +501,7 @@ def cmd_up(args):
         bridge_interval=args.bridge_interval,
         bridge_query=args.bridge_query,
         watchdog_interval=args.watchdog_interval,
+        include_mind=(not args.no_mind) and (not lite),
         include_pulse=(not args.no_pulse) and (not lite),
         include_watchdog=include_watchdog and (not lite),
         bridge_stale_s=args.bridge_stale_s,
@@ -2602,6 +2603,7 @@ Examples:
         p.add_argument("--watchdog-interval", type=int, default=60, help="watchdog interval (seconds)")
         p.add_argument("--bridge-stale-s", type=int, default=90, help="bridge_worker stale threshold (seconds)")
         p.add_argument("--lite", action="store_true", help="start only core services (no dashboards/pulse/watchdog)")
+        p.add_argument("--no-mind", action="store_true", help="do not start mind server")
         p.add_argument("--no-watchdog", action="store_true", help="do not start watchdog")
         p.add_argument("--no-pulse", action="store_true", help="do not start spark pulse")
         p.add_argument("--sync-context", action="store_true", help="run sync-context after start")
