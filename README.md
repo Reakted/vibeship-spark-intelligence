@@ -40,19 +40,19 @@ The goal is to keep context, patterns, and practical lessons in a form that your
 ## Install
 
 Prerequisites:
-- Python 3.10+
+- Python 3.10+ (Windows one-liner auto-installs latest Python 3 via `winget` when missing)
 - `pip`
 - Git
 - Windows one-liner path: PowerShell
 - Mac/Linux one-liner path: `curl` + `bash`
 
-Windows one-command bootstrap (clone + venv + install + start):
+Windows one-command bootstrap (clone + venv + install + start + health):
 
 ```powershell
 irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex
 ```
 
-Then verify runtime readiness (second command, from repo root):
+Optional re-check (from repo root):
 
 ```powershell
 .\.venv\Scripts\python -m spark.cli up

@@ -14,13 +14,13 @@ Tracks:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
-import hashlib
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from .diagnostics import log_debug
 
@@ -30,6 +30,10 @@ MAX_RECENT_TOOLS = 20
 MAX_SHOWN_ADVICE = 100
 STATE_TTL_SECONDS = 7200  # 2 hours - expire stale sessions
 INTENT_MAX_LEN = 500
+SHOWN_ADVICE_TTL_S = max(5, min(86400, int(os.getenv("SPARK_ADVISORY_SHOWN_TTL_S", "600") or 600)))
+
+_COOLDOWN_SCALE_MIN = 0.1
+_COOLDOWN_SCALE_MAX = 10.0
 
 
 # ============= Task Phase Detection =============
@@ -127,8 +131,8 @@ class SessionState:
     consecutive_failures: int = 0
     last_failure_tool: str = ""
 
-    # Suppression: tool_name → until_timestamp
-    suppressed_tools: Dict[str, float] = field(default_factory=dict)
+    # Suppression: tool_name → until_timestamp (legacy float) or structured dict.
+    suppressed_tools: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -144,6 +148,39 @@ class SessionState:
         if isinstance(raw_shown, list):
             import time as _time
             filtered["shown_advice_ids"] = {str(aid): _time.time() for aid in raw_shown}
+        raw_suppressed = filtered.get("suppressed_tools")
+        if isinstance(raw_suppressed, dict):
+            normalized: Dict[str, Any] = {}
+            for tool_name, raw_entry in raw_suppressed.items():
+                key = str(tool_name or "").strip()
+                if not key:
+                    continue
+                if isinstance(raw_entry, dict):
+                    try:
+                        started_at = float(raw_entry.get("started_at", 0.0) or 0.0)
+                    except Exception:
+                        started_at = 0.0
+                    try:
+                        duration_s = float(raw_entry.get("duration_s", 0.0) or 0.0)
+                    except Exception:
+                        duration_s = 0.0
+                    try:
+                        until = float(raw_entry.get("until", 0.0) or 0.0)
+                    except Exception:
+                        until = 0.0
+                    if until <= 0.0 and duration_s > 0.0 and started_at > 0.0:
+                        until = started_at + duration_s
+                    normalized[key] = {
+                        "started_at": started_at,
+                        "duration_s": duration_s,
+                        "until": until,
+                    }
+                    continue
+                try:
+                    normalized[key] = float(raw_entry or 0.0)
+                except Exception:
+                    continue
+            filtered["suppressed_tools"] = normalized
         return cls(**filtered)
 
 
@@ -258,7 +295,86 @@ def record_user_intent(state: SessionState, intent: str) -> None:
         state.intent_updated_at = time.time()
 
 
-SHOWN_ADVICE_TTL_S = 600  # Re-eligible after 10 minutes
+def _clamp_shown_ttl(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = 600
+    return max(5, min(86400, parsed))
+
+
+def _clamp_cooldown_scale(value: Any) -> float:
+    try:
+        parsed = float(value)
+    except Exception:
+        parsed = 1.0
+    return max(_COOLDOWN_SCALE_MIN, min(_COOLDOWN_SCALE_MAX, parsed))
+
+
+def apply_state_gate_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Apply advisory_gate tuneables consumed by advisory_state."""
+    global SHOWN_ADVICE_TTL_S
+
+    applied: List[str] = []
+    warnings: List[str] = []
+    if not isinstance(cfg, dict):
+        return {"applied": applied, "warnings": warnings}
+
+    # Backward-compat alias:
+    # advice_repeat_cooldown_s maps to shown_advice_ttl_s when explicit TTL
+    # tuneable is absent.
+    ttl_raw = None
+    ttl_applied_key = ""
+    if "shown_advice_ttl_s" in cfg:
+        ttl_raw = cfg.get("shown_advice_ttl_s")
+        ttl_applied_key = "shown_advice_ttl_s"
+    elif "advice_repeat_cooldown_s" in cfg:
+        ttl_raw = cfg.get("advice_repeat_cooldown_s")
+        ttl_applied_key = "shown_advice_ttl_s"
+
+    if ttl_raw is not None:
+        try:
+            SHOWN_ADVICE_TTL_S = _clamp_shown_ttl(ttl_raw)
+            applied.append(ttl_applied_key)
+        except Exception:
+            warnings.append("invalid_shown_advice_ttl_s")
+
+    return {"applied": applied, "warnings": warnings}
+
+
+def get_shown_advice_ttl_s() -> int:
+    return int(SHOWN_ADVICE_TTL_S)
+
+
+def _load_state_gate_config(path: Optional[Path] = None) -> Dict[str, Any]:
+    tuneables = path or (Path.home() / ".spark" / "tuneables.json")
+    if not tuneables.exists():
+        return {}
+    try:
+        data = json.loads(tuneables.read_text(encoding="utf-8-sig"))
+    except Exception:
+        try:
+            data = json.loads(tuneables.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    cfg = data.get("advisory_gate") or {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+_BOOT_STATE_GATE_CFG = _load_state_gate_config()
+if _BOOT_STATE_GATE_CFG:
+    apply_state_gate_config(_BOOT_STATE_GATE_CFG)
+
+try:
+    from .tuneables_reload import register_reload as _state_register
+
+    _state_register(
+        "advisory_gate",
+        apply_state_gate_config,
+        label="advisory_state.apply_gate_config",
+    )
+except ImportError:
+    pass
 
 
 def _advice_shown_key(advice_id: str, *, tool_name: str = "", task_phase: str = "") -> str:
@@ -303,15 +419,68 @@ def mark_advice_shown(
 
 def suppress_tool_advice(state: SessionState, tool_name: str, duration_s: float = 300) -> None:
     """Suppress advisory for a specific tool for duration_s seconds."""
-    state.suppressed_tools[tool_name] = time.time() + duration_s
+    now = time.time()
+    duration = max(0.0, float(duration_s or 0.0))
+    state.suppressed_tools[tool_name] = {
+        "started_at": now,
+        "duration_s": duration,
+        "until": now + duration,
+    }
 
 
-def is_tool_suppressed(state: SessionState, tool_name: str) -> bool:
+def is_tool_suppressed(state: SessionState, tool_name: str, *, cooldown_scale: float = 1.0) -> bool:
     """Check if advisory is suppressed for this tool."""
-    until = state.suppressed_tools.get(tool_name, 0)
-    if time.time() < until:
+    if not state:
+        return False
+
+    now = time.time()
+    entry = state.suppressed_tools.get(tool_name)
+    if entry is None:
+        return False
+
+    if isinstance(entry, dict):
+        try:
+            started_at = float(entry.get("started_at", 0.0) or 0.0)
+        except Exception:
+            started_at = 0.0
+        try:
+            duration_s = float(entry.get("duration_s", 0.0) or 0.0)
+        except Exception:
+            duration_s = 0.0
+        try:
+            until = float(entry.get("until", 0.0) or 0.0)
+        except Exception:
+            until = 0.0
+
+        if started_at <= 0.0:
+            started_at = max(0.0, until - max(duration_s, 0.0))
+        if duration_s <= 0.0 and until > started_at:
+            duration_s = max(0.0, until - started_at)
+
+        if duration_s > 0.0 and started_at > 0.0:
+            scale = _clamp_cooldown_scale(cooldown_scale)
+            effective_until = started_at + (duration_s * scale)
+            if now < effective_until:
+                return True
+            # Keep entry until max scaled window ends so higher-scale categories
+            # can still honor cooldown for the same tool.
+            max_until = started_at + (duration_s * _COOLDOWN_SCALE_MAX)
+            if now >= max_until:
+                state.suppressed_tools.pop(tool_name, None)
+            return False
+
+        if now < until:
+            return True
+        state.suppressed_tools.pop(tool_name, None)
+        return False
+
+    try:
+        until = float(entry or 0.0)
+    except Exception:
+        until = 0.0
+    if now < until:
         return True
-    # Expired - clean up
+    # Expired - clean up legacy format.
     state.suppressed_tools.pop(tool_name, None)
     return False
 

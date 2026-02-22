@@ -8,7 +8,7 @@ For term-based navigation, see `docs/GLOSSARY.md`.
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.10+ (Windows one-command bootstrap auto-installs latest Python 3 via `winget` when missing)
 - pip
 - Git
 - Windows one-command path: PowerShell
@@ -16,13 +16,13 @@ For term-based navigation, see `docs/GLOSSARY.md`.
 
 ## Installation
 
-### Option 1: Windows One Command
+### Option 1: Windows One Command (includes startup + health check)
 
 ```powershell
 irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex
 ```
 
-Then run a ready check (from repo root):
+Optional re-check (from repo root):
 
 ```powershell
 .\.venv\Scripts\python -m spark.cli up

@@ -17,17 +17,15 @@ from dataclasses import dataclass
 
 import lib.advisory_gate as gate
 from lib.advisory_gate import (
-    AuthorityLevel,
     AUTHORITY_THRESHOLDS,
-    GateDecision,
-    GateResult,
-    evaluate,
+    AuthorityLevel,
     _assign_authority,
     _check_obvious_suppression,
-    _is_negative_advisory,
-    _is_caution,
-    _is_primitive_noise,
     _has_actionable_content,
+    _is_caution,
+    _is_negative_advisory,
+    _is_primitive_noise,
+    evaluate,
 )
 
 
@@ -253,6 +251,63 @@ class TestGateFilters:
             state, "Edit",
         )
         assert len(result.emitted) == 0
+
+    def test_category_multiplier_extends_shown_ttl(self):
+        original = gate.get_gate_config()
+        try:
+            gate.apply_gate_config(
+                {
+                    "shown_advice_ttl_s": 60,
+                    "category_cooldown_multipliers": {"security": 2.0},
+                }
+            )
+            state = _make_state(shown_advice_ids={"adv_test_001": time.time() - 90})
+            result = evaluate(
+                [
+                    _MockAdvice(
+                        advice_id="adv_test_001",
+                        insight_key="security:csrf",
+                        source="security",
+                        text="Validate auth headers server-side.",
+                        confidence=0.75,
+                        context_match=0.70,
+                    )
+                ],
+                state,
+                "Edit",
+            )
+            assert len(result.emitted) == 0
+            assert any("TTL 120s" in d.reason for d in result.suppressed)
+        finally:
+            gate.apply_gate_config(original)
+
+    def test_category_multiplier_extends_tool_cooldown(self):
+        original = gate.get_gate_config()
+        try:
+            gate.apply_gate_config({"category_cooldown_multipliers": {"context": 2.0}})
+            now = time.time()
+            state = _make_state(
+                suppressed_tools={
+                    "Edit": {"started_at": now - 12, "duration_s": 10, "until": now - 2}
+                }
+            )
+            result = evaluate(
+                [
+                    _MockAdvice(
+                        advice_id="adv_test_002",
+                        insight_key="context:sql",
+                        text="Use parameterized queries for database safety.",
+                        confidence=0.85,
+                        context_match=0.85,
+                    )
+                ],
+                state,
+                "Edit",
+            )
+            assert len(result.emitted) == 0
+            assert any("tool Edit on cooldown" in d.reason for d in result.suppressed)
+        finally:
+            gate.apply_gate_config(original)
 
 
 # ═══════════════════════════════════════════════════════════════

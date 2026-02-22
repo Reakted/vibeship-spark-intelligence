@@ -22,8 +22,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .diagnostics import log_debug
-
 # ============= Authority Levels =============
 
 class AuthorityLevel:
@@ -66,9 +64,9 @@ TOOL_COOLDOWN_S = 10
 # Don't repeat the same advice within N seconds
 ADVICE_REPEAT_COOLDOWN_S = 300  # 5 minutes
 
-# State-sourced shown-advice cooldown mirror (keeps suppression behavior aligned
-# between engine state and gate-layer checks).
-SHOWN_ADVICE_TTL_S = 600
+# Per-category cooldown scales. Keys are normalized lowercase category names.
+# Values are multipliers applied to shown/tool cooldown windows.
+CATEGORY_COOLDOWN_MULTIPLIERS: Dict[str, float] = {}
 
 # Whether WHISPER-level advice should be emitted at all.
 # Default: off (whispers are high-noise in real operations).
@@ -129,11 +127,55 @@ def _clamp_float(value: Any, default: float, min_value: float, max_value: float)
     return max(min_value, min(max_value, parsed))
 
 
+def _normalize_category_name(category: Any) -> str:
+    return str(category or "").strip().lower()
+
+
+def _parse_category_cooldowns(raw: Any) -> Tuple[Dict[str, float], List[str]]:
+    parsed: Dict[str, float] = {}
+    warnings: List[str] = []
+    if not isinstance(raw, dict):
+        return parsed, ["invalid_category_cooldown_multipliers"]
+    for key, value in raw.items():
+        category = _normalize_category_name(key)
+        if not category:
+            continue
+        try:
+            parsed[category] = max(0.1, min(10.0, float(value)))
+        except Exception:
+            warnings.append(f"invalid_category_cooldown_multiplier:{category}")
+    return parsed, warnings
+
+
+def _cooldown_scale_for_category(category: str) -> float:
+    cat = _normalize_category_name(category)
+    if cat and cat in CATEGORY_COOLDOWN_MULTIPLIERS:
+        return float(CATEGORY_COOLDOWN_MULTIPLIERS[cat])
+    for fallback in ("default", "*"):
+        if fallback in CATEGORY_COOLDOWN_MULTIPLIERS:
+            return float(CATEGORY_COOLDOWN_MULTIPLIERS[fallback])
+    return 1.0
+
+
+def _shown_ttl_for_category(category: str) -> Tuple[int, float]:
+    scale = _cooldown_scale_for_category(category)
+    base_ttl = int(ADVICE_REPEAT_COOLDOWN_S)
+    try:
+        from .advisory_state import get_shown_advice_ttl_s
+
+        base_ttl = int(get_shown_advice_ttl_s())
+    except Exception:
+        pass
+    ttl = max(5, int(round(base_ttl * scale)))
+    return ttl, scale
+
+
 def apply_gate_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     """Apply advisory gate runtime tuneables."""
     global MAX_EMIT_PER_CALL
     global TOOL_COOLDOWN_S
     global ADVICE_REPEAT_COOLDOWN_S
+    global CATEGORY_COOLDOWN_MULTIPLIERS
     global EMIT_WHISPERS
 
     applied: List[str] = []
@@ -163,6 +205,12 @@ def apply_gate_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
             applied.append("advice_repeat_cooldown_s")
         except Exception:
             warnings.append("invalid_advice_repeat_cooldown_s")
+
+    if "category_cooldown_multipliers" in cfg:
+        parsed, parse_warnings = _parse_category_cooldowns(cfg.get("category_cooldown_multipliers"))
+        CATEGORY_COOLDOWN_MULTIPLIERS = parsed
+        applied.append("category_cooldown_multipliers")
+        warnings.extend(parse_warnings)
 
     if "emit_whispers" in cfg:
         raw_emit = cfg.get("emit_whispers")
@@ -218,14 +266,43 @@ def apply_gate_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     AUTHORITY_THRESHOLDS[AuthorityLevel.NOTE] = note_threshold
     AUTHORITY_THRESHOLDS[AuthorityLevel.WHISPER] = whisper_threshold
 
+    # Keep advisory_state TTL in sync with gate tuneables.
+    # Explicit shown_advice_ttl_s wins; otherwise repeat cooldown acts as alias.
+    state_cfg: Dict[str, Any] = {}
+    if "shown_advice_ttl_s" in cfg:
+        state_cfg["shown_advice_ttl_s"] = cfg.get("shown_advice_ttl_s")
+    elif "advice_repeat_cooldown_s" in cfg:
+        state_cfg["advice_repeat_cooldown_s"] = cfg.get("advice_repeat_cooldown_s")
+    if state_cfg:
+        try:
+            from .advisory_state import apply_state_gate_config
+
+            state_result = apply_state_gate_config(state_cfg)
+            applied.extend(
+                key for key in list(state_result.get("applied") or [])
+                if key not in applied
+            )
+            warnings.extend(list(state_result.get("warnings") or []))
+        except Exception:
+            warnings.append("state_gate_config_sync_failed")
+
     return {"applied": applied, "warnings": warnings}
 
 
 def get_gate_config() -> Dict[str, Any]:
+    shown_ttl = int(ADVICE_REPEAT_COOLDOWN_S)
+    try:
+        from .advisory_state import get_shown_advice_ttl_s
+
+        shown_ttl = int(get_shown_advice_ttl_s())
+    except Exception:
+        pass
     return {
         "max_emit_per_call": int(MAX_EMIT_PER_CALL),
         "tool_cooldown_s": int(TOOL_COOLDOWN_S),
         "advice_repeat_cooldown_s": int(ADVICE_REPEAT_COOLDOWN_S),
+        "shown_advice_ttl_s": int(shown_ttl),
+        "category_cooldown_multipliers": dict(CATEGORY_COOLDOWN_MULTIPLIERS),
         "emit_whispers": bool(EMIT_WHISPERS),
         "warning_threshold": float(AUTHORITY_THRESHOLDS.get(AuthorityLevel.WARNING, 0.8)),
         "note_threshold": float(AUTHORITY_THRESHOLDS.get(AuthorityLevel.NOTE, 0.5)),
@@ -347,8 +424,6 @@ def evaluate(
     Returns:
         GateResult with decisions on what to emit
     """
-    from .advisory_state import is_tool_suppressed, had_recent_read
-
     decisions = []
     phase = state.task_phase if state else "implementation"
 
@@ -416,7 +491,7 @@ def _evaluate_single(
     agreement_meta: Optional[Dict[str, Any]] = None,
 ) -> GateDecision:
     """Evaluate a single advice item through all gate filters."""
-    from .advisory_state import is_tool_suppressed, had_recent_read
+    from .advisory_state import is_tool_suppressed
 
     advice_id = getattr(advice, "advice_id", "") or ""
     text = getattr(advice, "text", "") or ""
@@ -430,30 +505,36 @@ def _evaluate_single(
     # so the 0.15 floor reflects that quality is pre-validated (0.30 * 0.50 quality default).
     base_score = 0.45 * min(1.0, context_match) + 0.25 * min(1.0, confidence) + 0.15
 
+    # Infer category early: it drives category-aware cooldown windows.
+    category = _infer_category(insight_key, source)
+    shown_ttl_s, cooldown_scale = _shown_ttl_for_category(category)
+
     # ---- Filter 1: Already shown recently? (TTL-based) ----
-    from .advisory_state import SHOWN_ADVICE_TTL_S
     shown_ids = state.shown_advice_ids if state else {}
     shown_scope_key = _tool_phase_shown_key(advice_id, tool_name, phase)
     if isinstance(shown_ids, dict) and advice_id in shown_ids:
         shown_at = float(shown_ids.get(advice_id, 0.0) or 0.0)
-        if shown_at > 0 and (time.time() - shown_at) < SHOWN_ADVICE_TTL_S:
+        if shown_at > 0 and (time.time() - shown_at) < shown_ttl_s:
             return GateDecision(
                 advice_id=advice_id,
                 authority=AuthorityLevel.SILENT,
                 emit=False,
-                reason=f"shown {int(time.time() - shown_at)}s ago (TTL {SHOWN_ADVICE_TTL_S}s)",
+                reason=(
+                    f"shown {int(time.time() - shown_at)}s ago "
+                    f"(TTL {shown_ttl_s}s, category={category})"
+                ),
                 adjusted_score=0.0,
                 original_score=base_score,
             )
     if shown_scope_key and isinstance(shown_ids, dict) and shown_scope_key in shown_ids:
         shown_at = float(shown_ids.get(shown_scope_key, 0.0) or 0.0)
-        if shown_at > 0 and (time.time() - shown_at) < SHOWN_ADVICE_TTL_S:
+        if shown_at > 0 and (time.time() - shown_at) < shown_ttl_s:
             return GateDecision(
                 advice_id=advice_id,
                 authority=AuthorityLevel.SILENT,
                 emit=False,
                 reason=f"shown for {str(tool_name or '?').strip()}/{str(phase or '?')} "
-                f"recently ({int(time.time() - shown_at)}s ago)",
+                f"recently ({int(time.time() - shown_at)}s ago, TTL {shown_ttl_s}s, category={category})",
                 adjusted_score=0.0,
                 original_score=base_score,
             )
@@ -469,12 +550,17 @@ def _evaluate_single(
         )
 
     # ---- Filter 2: Tool suppressed? ----
-    if state and is_tool_suppressed(state, tool_name):
+    if state and is_tool_suppressed(state, tool_name, cooldown_scale=cooldown_scale):
+        cooldown_note = (
+            f" (category={category}, scale={cooldown_scale:.2f})"
+            if abs(cooldown_scale - 1.0) > 1e-9
+            else ""
+        )
         return GateDecision(
             advice_id=advice_id,
             authority=AuthorityLevel.SILENT,
             emit=False,
-            reason=f"tool {tool_name} on cooldown",
+            reason=f"tool {tool_name} on cooldown{cooldown_note}",
             adjusted_score=0.0,
             original_score=base_score,
         )
@@ -495,8 +581,6 @@ def _evaluate_single(
 
     # ---- Score Adjustment: Phase relevance ----
     phase_boosts = PHASE_RELEVANCE.get(phase, {})
-    # Infer category from insight_key or source
-    category = _infer_category(insight_key, source)
     phase_multiplier = phase_boosts.get(category, 1.0)
     adjusted_score = base_score * phase_multiplier
 
