@@ -1,3 +1,9 @@
+"""Opportunity inbox — user-facing opportunity management.
+
+MIGRATION NOTE (2026-02-22): Being migrated to spark-learning-systems
+(system 27-opportunity-scanner). Use lib.opportunity_scanner_adapter.
+"""
+
 from __future__ import annotations
 
 import json

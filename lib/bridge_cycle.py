@@ -29,7 +29,7 @@ from lib.chip_merger import merge_chip_insights
 from lib.context_sync import sync_context
 from lib.advisory_quarantine import record_quarantine_item
 from lib.diagnostics import log_debug
-from lib.opportunity_scanner import scan_runtime_opportunities
+from lib.opportunity_scanner_adapter import scan_runtime_opportunities
 from lib.runtime_hygiene import cleanup_runtime_artifacts
 
 

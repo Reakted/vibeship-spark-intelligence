@@ -1,5 +1,10 @@
 """Opportunity Scanner for Spark self-evolution.
 
+MIGRATION NOTE (2026-02-22): This module is being migrated to
+spark-learning-systems (system 27-opportunity-scanner). Use
+lib.opportunity_scanner_adapter for imports — it provides a seamless
+fallback to this local module until the external package is ready.
+
 Default behavior is self-Socratic:
 1) Runtime self-scan identifies Spark improvement opportunities from active work.
 2) User-facing Socratic questions are optional and disabled by default.

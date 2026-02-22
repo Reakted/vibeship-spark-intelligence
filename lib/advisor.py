@@ -3558,7 +3558,7 @@ class SparkAdvisor:
     ) -> List[Advice]:
         """Generate Socratic opportunity prompts for user-facing guidance."""
         try:
-            from .opportunity_scanner import generate_user_opportunities
+            from .opportunity_scanner_adapter import generate_user_opportunities
         except Exception:
             return []
 

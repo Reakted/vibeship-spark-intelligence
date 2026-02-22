@@ -18,7 +18,7 @@ from lib.tastebank import infer_domain as taste_infer_domain, retrieve as taste_
 from lib.diagnostics import log_debug
 from lib.exposure_tracker import record_exposures, infer_latest_session_id, infer_latest_trace_id
 from lib.project_profile import load_profile, get_suggested_questions
-from lib.opportunity_scanner import get_recent_self_opportunities
+from lib.opportunity_scanner_adapter import get_recent_self_opportunities
 from lib.outcome_checkin import list_checkins
 
 # Paths
