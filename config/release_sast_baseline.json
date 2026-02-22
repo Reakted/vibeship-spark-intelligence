@@ -1,5 +1,5 @@
 {
-  "generated_at_epoch": 1771716943,
+  "generated_at_epoch": 1771719675,
   "source": "scripts/public_release_safety_check.py",
   "rules": [
     "S603",
@@ -39,10 +39,6 @@
     "S607|lib/llm.py|Starting a process with a partial executable path",
     "S607|lib/service_control.py|Starting a process with a partial executable path",
     "S607|spark_watchdog.py|Starting a process with a partial executable path",
-    "S608|dashboard.py|Possible SQL injection vector through string-based query construction",
-    "S608|lib/depth_forge_scorer.py|Possible SQL injection vector through string-based query construction",
-    "S608|lib/memory_store.py|Possible SQL injection vector through string-based query construction",
-    "S608|lib/observatory/explorer.py|Possible SQL injection vector through string-based query construction",
-    "S608|lib/run_log.py|Possible SQL injection vector through string-based query construction"
+    "S608|dashboard.py|Possible SQL injection vector through string-based query construction"
   ]
 }

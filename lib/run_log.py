@@ -36,11 +36,14 @@ def _count_evidence_for_steps(step_ids: List[str]) -> int:
     ev_store = get_evidence_store()
     try:
         with sqlite3.connect(ev_store.db_path) as conn:
-            q = "SELECT COUNT(*) FROM evidence WHERE step_id IN ({})".format(
-                ",".join("?" for _ in step_ids)
-            )
-            row = conn.execute(q, step_ids).fetchone()
-            return int(row[0] or 0)
+            total = 0
+            for step_id in step_ids:
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM evidence WHERE step_id = ?",
+                    [step_id],
+                ).fetchone()
+                total += int((row[0] if row else 0) or 0)
+            return total
     except Exception:
         return 0
 

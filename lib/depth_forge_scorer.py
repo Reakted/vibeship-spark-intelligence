@@ -461,11 +461,17 @@ class DepthTendencyStore:
             session_ids = [r["session_id"] for r in session_rows]
             if not session_ids:
                 return {}
-            ph = ",".join("?" for _ in session_ids)
+            conn.execute("DROP TABLE IF EXISTS _session_filter")
+            conn.execute("CREATE TEMP TABLE _session_filter (session_id TEXT PRIMARY KEY)")
+            conn.executemany(
+                "INSERT INTO _session_filter(session_id) VALUES (?)",
+                [(sid,) for sid in session_ids],
+            )
             rows = conn.execute(
-                f"SELECT dimension, AVG(score_a) AS avg_a, AVG(score_b) AS avg_b, AVG(delta) AS avg_delta "
-                f"FROM scorer_tendencies WHERE session_id IN ({ph}) GROUP BY dimension",
-                session_ids,
+                "SELECT dimension, AVG(score_a) AS avg_a, AVG(score_b) AS avg_b, AVG(delta) AS avg_delta "
+                "FROM scorer_tendencies "
+                "WHERE session_id IN (SELECT session_id FROM _session_filter) "
+                "GROUP BY dimension",
             ).fetchall()
         summary: Dict[str, Dict[str, float]] = {}
         for r in rows:

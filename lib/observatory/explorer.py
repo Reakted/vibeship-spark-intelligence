@@ -312,12 +312,17 @@ def _export_episodes(explore_dir: Path, limit: int) -> int:
         # Prefetch steps for these episodes
         if episodes:
             eids = [e["episode_id"] for e in episodes]
-            placeholders = ",".join("?" * len(eids))
-            cur.execute(f"""
+            cur.execute("DROP TABLE IF EXISTS _episode_filter")
+            cur.execute("CREATE TEMP TABLE _episode_filter (episode_id TEXT PRIMARY KEY)")
+            cur.executemany(
+                "INSERT INTO _episode_filter(episode_id) VALUES (?)",
+                [(eid,) for eid in eids],
+            )
+            cur.execute("""
                 SELECT * FROM steps
-                WHERE episode_id IN ({placeholders})
+                WHERE episode_id IN (SELECT episode_id FROM _episode_filter)
                 ORDER BY created_at ASC
-            """, eids)
+            """)
             all_steps = [dict(r) for r in cur.fetchall()]
         else:
             all_steps = []

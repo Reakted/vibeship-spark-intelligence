@@ -910,10 +910,18 @@ def _fetch_vectors(conn: sqlite3.Connection, ids: Iterable[str]) -> Dict[str, Li
     id_list = [i for i in ids if i]
     if not id_list:
         return {}
-    placeholders = ",".join("?" for _ in id_list)
+    conn.execute("DROP TABLE IF EXISTS _tmp_memory_ids")
+    conn.execute("CREATE TEMP TABLE _tmp_memory_ids (memory_id TEXT PRIMARY KEY)")
+    conn.executemany(
+        "INSERT OR IGNORE INTO _tmp_memory_ids(memory_id) VALUES (?)",
+        [(memory_id,) for memory_id in id_list],
+    )
     rows = conn.execute(
-        f"SELECT memory_id, vector FROM memories_vec WHERE memory_id IN ({placeholders})",
-        id_list,
+        """
+        SELECT v.memory_id, v.vector
+        FROM memories_vec v
+        JOIN _tmp_memory_ids t ON t.memory_id = v.memory_id
+        """,
     ).fetchall()
     out: Dict[str, List[float]] = {}
     for r in rows:
@@ -969,15 +977,24 @@ def purge_telemetry_memories(
         if not to_delete or dry_run:
             return {"removed": len(to_delete), "preview": preview, "dry_run": dry_run}
 
+        conn.execute("DROP TABLE IF EXISTS _tmp_memory_ids")
+        conn.execute("CREATE TEMP TABLE _tmp_memory_ids (memory_id TEXT PRIMARY KEY)")
         for chunk in _chunked(to_delete, 200):
-            placeholders = ",".join("?" for _ in chunk)
-            conn.execute(f"DELETE FROM memories WHERE memory_id IN ({placeholders})", chunk)
+            conn.execute("DELETE FROM _tmp_memory_ids")
+            conn.executemany(
+                "INSERT OR IGNORE INTO _tmp_memory_ids(memory_id) VALUES (?)",
+                [(memory_id,) for memory_id in chunk],
+            )
+            conn.execute("DELETE FROM memories WHERE memory_id IN (SELECT memory_id FROM _tmp_memory_ids)")
             if _ensure_fts(conn):
-                conn.execute(f"DELETE FROM memories_fts WHERE memory_id IN ({placeholders})", chunk)
-            conn.execute(f"DELETE FROM memories_vec WHERE memory_id IN ({placeholders})", chunk)
+                conn.execute("DELETE FROM memories_fts WHERE memory_id IN (SELECT memory_id FROM _tmp_memory_ids)")
+            conn.execute("DELETE FROM memories_vec WHERE memory_id IN (SELECT memory_id FROM _tmp_memory_ids)")
             conn.execute(
-                f"DELETE FROM memory_edges WHERE source_id IN ({placeholders}) OR target_id IN ({placeholders})",
-                chunk + chunk,
+                """
+                DELETE FROM memory_edges
+                WHERE source_id IN (SELECT memory_id FROM _tmp_memory_ids)
+                   OR target_id IN (SELECT memory_id FROM _tmp_memory_ids)
+                """,
             )
         conn.commit()
         return {"removed": len(to_delete), "preview": preview, "dry_run": dry_run}
@@ -1015,24 +1032,32 @@ def retrieve(
             fts_query = _build_fts_query(q)
             if not fts_query:
                 return []
-            params: List[Any] = [fts_query]
-            where = "memories_fts MATCH ?"
             if project_key:
-                where += " AND (m.scope = 'global' OR m.project_key = ?)"
-                params.append(project_key)
-            params.append(max(10, int(candidate_limit)))
-            rows = conn.execute(
-                f"""
-                SELECT m.memory_id, m.content, m.scope, m.project_key, m.category, m.meta,
-                       bm25(memories_fts) AS bm25
-                FROM memories_fts
-                JOIN memories m ON m.memory_id = memories_fts.memory_id
-                WHERE {where}
-                ORDER BY bm25
-                LIMIT ?;
-                """,
-                params,
-            ).fetchall()
+                rows = conn.execute(
+                    """
+                    SELECT m.memory_id, m.content, m.scope, m.project_key, m.category, m.meta,
+                           bm25(memories_fts) AS bm25
+                    FROM memories_fts
+                    JOIN memories m ON m.memory_id = memories_fts.memory_id
+                    WHERE memories_fts MATCH ? AND (m.scope = 'global' OR m.project_key = ?)
+                    ORDER BY bm25
+                    LIMIT ?;
+                    """,
+                    [fts_query, project_key, max(10, int(candidate_limit))],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT m.memory_id, m.content, m.scope, m.project_key, m.category, m.meta,
+                           bm25(memories_fts) AS bm25
+                    FROM memories_fts
+                    JOIN memories m ON m.memory_id = memories_fts.memory_id
+                    WHERE memories_fts MATCH ?
+                    ORDER BY bm25
+                    LIMIT ?;
+                    """,
+                    [fts_query, max(10, int(candidate_limit))],
+                ).fetchall()
 
             for r in rows:
                 content = r["content"] or ""
@@ -1211,16 +1236,20 @@ def retrieve(
         if not seed_ids:
             return items[:want]
 
-        placeholders = ",".join("?" for _ in seed_ids)
+        conn.execute("DROP TABLE IF EXISTS _tmp_seed_ids")
+        conn.execute("CREATE TEMP TABLE _tmp_seed_ids (memory_id TEXT PRIMARY KEY)")
+        conn.executemany(
+            "INSERT OR IGNORE INTO _tmp_seed_ids(memory_id) VALUES (?)",
+            [(memory_id,) for memory_id in seed_ids],
+        )
         edge_rows = conn.execute(
-            f"""
+            """
             SELECT source_id, target_id, weight, reason
             FROM memory_edges
-            WHERE source_id IN ({placeholders})
+            WHERE source_id IN (SELECT memory_id FROM _tmp_seed_ids)
             ORDER BY weight DESC
             LIMIT 25;
             """,
-            seed_ids,
         ).fetchall()
 
         edge_targets = []
@@ -1235,14 +1264,18 @@ def retrieve(
         if not target_ids:
             return items[:want]
 
-        placeholders = ",".join("?" for _ in target_ids)
+        conn.execute("DROP TABLE IF EXISTS _tmp_target_ids")
+        conn.execute("CREATE TEMP TABLE _tmp_target_ids (memory_id TEXT PRIMARY KEY)")
+        conn.executemany(
+            "INSERT OR IGNORE INTO _tmp_target_ids(memory_id) VALUES (?)",
+            [(memory_id,) for memory_id in target_ids],
+        )
         rows = conn.execute(
-            f"""
+            """
             SELECT memory_id, content, scope, project_key, category, meta
             FROM memories
-            WHERE memory_id IN ({placeholders});
+            WHERE memory_id IN (SELECT memory_id FROM _tmp_target_ids);
             """,
-            target_ids,
         ).fetchall()
         row_map = {r["memory_id"]: r for r in rows}
 

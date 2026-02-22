@@ -11,6 +11,7 @@ import time
 import sqlite3
 import os
 import secrets
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -97,16 +98,26 @@ DASHBOARD_ALLOWED_ORIGINS = {
     f"http://localhost:{PORT}",
     f"http://[::1]:{PORT}",
 }
-DASHBOARD_CSP = (
-    "default-src 'self'; "
-    "base-uri 'self'; "
-    "img-src 'self' data:; "
-    "script-src 'self' 'unsafe-inline'; "
-    "style-src 'self' 'unsafe-inline'; "
-    "connect-src 'self'; "
-    "object-src 'none'; "
-    "frame-ancestors 'none';"
-)
+_SCRIPT_TAG_RE = re.compile(r"<script\b(?![^>]*\bnonce=)", re.IGNORECASE)
+
+
+def _build_dashboard_csp(nonce: str) -> str:
+    return (
+        "default-src 'self'; "
+        "base-uri 'self'; "
+        "img-src 'self' data:; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "frame-ancestors 'none';"
+    )
+
+
+def _inject_script_nonce(html: str, nonce: str) -> str:
+    if not nonce:
+        return html
+    return _SCRIPT_TAG_RE.sub(f'<script nonce="{nonce}"', html)
 
 
 def _normalize_origin(raw: Optional[str]) -> Optional[str]:
@@ -4997,9 +5008,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_html(self, html: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        body = _inject_script_nonce(html, getattr(self, "_csp_nonce", ""))
+        encoded = body.encode("utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
     def send_response(self, code, message=None):  # type: ignore[override]
         super().send_response(code, message)
-        self.send_header("Content-Security-Policy", DASHBOARD_CSP)
+        nonce = secrets.token_urlsafe(16)
+        self._csp_nonce = nonce
+        self.send_header("Content-Security-Policy", _build_dashboard_csp(nonce))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("X-Frame-Options", "DENY")
@@ -5035,35 +5057,17 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         query = parse_qs(parsed.query)
 
         if path in ('/', '/index.html', '/mission'):
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_mission_html().encode())
+            self._send_html(generate_mission_html())
         elif path in ('/learning', '/learning.html'):
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_learning_html().encode())
+            self._send_html(generate_learning_html())
         elif path in ('/rabbit', '/rabbit.html'):
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_rabbit_html().encode())
+            self._send_html(generate_rabbit_html())
         elif path in ('/acceptance', '/acceptance.html'):
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_acceptance_html().encode())
+            self._send_html(generate_acceptance_html())
         elif path == '/ops' or path == '/ops.html':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_ops_html().encode())
+            self._send_html(generate_ops_html())
         elif path == '/dashboards' or path == '/dashboards.html':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_dashboards_html().encode())
+            self._send_html(generate_dashboards_html())
         elif path == '/api/status':
             self.send_response(200)
             self.send_header('Content-type', 'application/json')

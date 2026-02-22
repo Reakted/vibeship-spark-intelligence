@@ -23,6 +23,8 @@ import time
 import asyncio
 import threading
 import os
+import re
+import secrets
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -45,16 +47,26 @@ TRACER_ALLOWED_ORIGINS = {
     f"http://localhost:{PORT}",
     f"http://[::1]:{PORT}",
 }
-TRACER_CSP = (
-    "default-src 'self'; "
-    "base-uri 'self'; "
-    "img-src 'self' data:; "
-    "script-src 'self' 'unsafe-inline'; "
-    "style-src 'self' 'unsafe-inline'; "
-    "connect-src 'self'; "
-    "object-src 'none'; "
-    "frame-ancestors 'none';"
-)
+_SCRIPT_TAG_RE = re.compile(r"<script\b(?![^>]*\bnonce=)", re.IGNORECASE)
+
+
+def _build_tracer_csp(nonce: str) -> str:
+    return (
+        "default-src 'self'; "
+        "base-uri 'self'; "
+        "img-src 'self' data:; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "frame-ancestors 'none';"
+    )
+
+
+def _inject_script_nonce(html: str, nonce: str) -> str:
+    if not nonce:
+        return html
+    return _SCRIPT_TAG_RE.sub(f'<script nonce="{nonce}"', html)
 SPARK_DIR = Path.home() / ".spark"
 TRACER_STORE_DIR = SPARK_DIR / "tracer"
 AUTO_SCORER_LATEST = TRACER_STORE_DIR / "advisory_auto_score_latest.json"
@@ -1872,9 +1884,20 @@ def get_session_timeline(session_id: str) -> Dict[str, Any]:
 
 class TracerHandler(SimpleHTTPRequestHandler):
     """HTTP handler for tracer dashboard."""
+    def _send_html(self, html: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        body = _inject_script_nonce(html, getattr(self, "_csp_nonce", ""))
+        encoded = body.encode("utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
     def send_response(self, code, message=None):  # type: ignore[override]
         super().send_response(code, message)
-        self.send_header("Content-Security-Policy", TRACER_CSP)
+        nonce = secrets.token_urlsafe(16)
+        self._csp_nonce = nonce
+        self.send_header("Content-Security-Policy", _build_tracer_csp(nonce))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.send_header("X-Frame-Options", "DENY")
@@ -1914,40 +1937,22 @@ class TracerHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
 
         elif path == '/' or path == '/index.html':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_html().encode('utf-8'))
+            self._send_html(generate_html())
 
         elif path == '/scorer' or path == '/scorer.html':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_scorer_html().encode('utf-8'))
+            self._send_html(generate_scorer_html())
 
         elif path == '/mission' or path == '/mission.html':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_mission_html().encode('utf-8'))
+            self._send_html(generate_mission_html())
 
         elif path == '/ops' or path == '/ops.html':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_ops_html().encode('utf-8'))
+            self._send_html(generate_ops_html())
 
         elif path == '/learning' or path == '/learning.html':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_learning_html().encode('utf-8'))
+            self._send_html(generate_learning_html())
 
         elif path == '/meta-ralph' or path == '/meta-ralph.html':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(generate_meta_ralph_html().encode('utf-8'))
+            self._send_html(generate_meta_ralph_html())
         
         elif path == '/api/data':
             self.send_response(200)

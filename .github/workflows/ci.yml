@@ -34,7 +34,14 @@ jobs:
         run: |
           python -m ruff check . --select E9,F63,F7,F82 --output-format=github
 
+      - name: Dependency CVE Audit (Blocking)
+        run: |
+          python -m pip_audit --progress-spinner off --format columns .
+
       - name: Public release safety check
+        env:
+          SPARK_RELEASE_REQUIRE_DEP_AUDIT: "1"
+          SPARK_RELEASE_REQUIRE_SAST: "1"
         run: |
           python scripts/public_release_safety_check.py
 

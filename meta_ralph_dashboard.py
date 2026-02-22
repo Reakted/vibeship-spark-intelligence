@@ -21,6 +21,8 @@ Open: http://localhost:<meta-ralph-port>
 import os
 import json
 import time
+import re
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
@@ -47,16 +49,26 @@ from lib.diagnostics import setup_component_logging
 PORT = META_RALPH_PORT
 
 # Security headers for browser surfaces
-META_RALPH_CSP = (
-    "default-src 'self'; "
-    "base-uri 'self'; "
-    "img-src 'self' data:; "
-    "script-src 'self' 'unsafe-inline'; "
-    "style-src 'self' 'unsafe-inline'; "
-    "connect-src 'self'; "
-    "object-src 'none'; "
-    "frame-ancestors 'none';"
-)
+_SCRIPT_TAG_RE = re.compile(r"<script\b(?![^>]*\bnonce=)", re.IGNORECASE)
+
+
+def _build_meta_ralph_csp(nonce: str) -> str:
+    return (
+        "default-src 'self'; "
+        "base-uri 'self'; "
+        "img-src 'self' data:; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "frame-ancestors 'none';"
+    )
+
+
+def _inject_script_nonce(html: str, nonce: str) -> str:
+    if not nonce:
+        return html
+    return _SCRIPT_TAG_RE.sub(f'<script nonce="{nonce}"', html)
 
 
 def load_json(path: Path) -> Dict:
@@ -965,13 +977,24 @@ HTML_TEMPLATE = """
 class DashboardHandler(SimpleHTTPRequestHandler):
     """HTTP handler for the dashboard."""
 
+    def _send_html(self, html: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        body = _inject_script_nonce(html, getattr(self, "_csp_nonce", ""))
+        encoded = body.encode("utf-8")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
     def log_message(self, format, *args):
         """Suppress default logging."""
         pass
 
     def send_response(self, code, message=None):  # type: ignore[override]
         super().send_response(code, message)
-        self.send_header("Content-Security-Policy", META_RALPH_CSP)
+        nonce = secrets.token_urlsafe(16)
+        self._csp_nonce = nonce
+        self.send_header("Content-Security-Policy", _build_meta_ralph_csp(nonce))
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
@@ -980,14 +1003,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
 
         if parsed.path == "/" or parsed.path == "/index.html":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
             html = HTML_TEMPLATE.replace(
                 "__SPARK_DASHBOARD_URL__",
                 f"http://localhost:{DASHBOARD_PORT}",
             )
-            self.wfile.write(html.encode())
+            self._send_html(html)
 
         elif parsed.path == "/api/data":
             self.send_response(200)

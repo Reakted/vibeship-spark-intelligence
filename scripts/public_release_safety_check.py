@@ -276,9 +276,7 @@ def _dependency_audit_is_strict() -> bool:
     configured = _parse_env_bool("SPARK_RELEASE_REQUIRE_DEP_AUDIT")
     if configured is not None:
         return configured
-    ci = os.environ.get("CI", "").strip().lower()
-    gha = os.environ.get("GITHUB_ACTIONS", "").strip().lower()
-    return ci in BOOL_TRUE_VALUES or gha in BOOL_TRUE_VALUES
+    return True
 
 
 def _run_dependency_audit() -> list[str]:
@@ -364,9 +362,7 @@ def _sast_scan_is_strict() -> bool:
     configured = _parse_env_bool("SPARK_RELEASE_REQUIRE_SAST")
     if configured is not None:
         return configured
-    ci = os.environ.get("CI", "").strip().lower()
-    gha = os.environ.get("GITHUB_ACTIONS", "").strip().lower()
-    return ci in BOOL_TRUE_VALUES or gha in BOOL_TRUE_VALUES
+    return True
 
 
 def _sast_refresh_requested() -> bool:
