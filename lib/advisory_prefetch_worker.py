@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List
 
 from . import advisory_packet_store as packet_store
@@ -81,7 +82,7 @@ def get_prefetch_config() -> Dict[str, Any]:
     }
 
 
-def _worker_state_file():
+def _worker_state_file() -> Path:
     return packet_store.PACKET_DIR / "prefetch_worker_state.json"
 
 
