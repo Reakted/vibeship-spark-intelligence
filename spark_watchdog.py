@@ -16,8 +16,6 @@ from typing import Optional
 from urllib import request
 
 from lib.ports import (
-    DASHBOARD_STATUS_URL,
-    META_RALPH_HEALTH_URL,
     PULSE_DOCS_URL,
     PULSE_UI_URL,
     SPARKD_HEALTH_URL,

@@ -66,7 +66,7 @@ spark = "spark.cli:main"
 spark-sync = "lib.context_sync:main"
 
 [tool.setuptools]
-py-modules = ["sparkd", "bridge_worker", "dashboard", "spark_watchdog"]
+py-modules = ["sparkd", "bridge_worker", "spark_watchdog"]
 
 [tool.setuptools.packages.find]
 where = ["."]

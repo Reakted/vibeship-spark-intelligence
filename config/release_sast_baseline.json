@@ -22,9 +22,6 @@
     "spark_watchdog.py",
     "spark_scheduler.py",
     "spark_pulse.py",
-    "tracer_dashboard.py",
-    "tracer_terminal.py",
-    "meta_ralph_dashboard.py",
     "mind_server.py",
     "cli.py"
   ],

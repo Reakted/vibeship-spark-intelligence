@@ -74,7 +74,7 @@ spark learnings
 
 Windows: run `start_spark.bat` from the repo root.
 
-Lightweight mode (core only, no dashboards): `spark up --lite`
+Lightweight mode (core only, no Pulse/watchdog): `spark up --lite`
 
 ## Connect Your Agent
 
