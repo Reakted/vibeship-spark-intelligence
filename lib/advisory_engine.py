@@ -2738,7 +2738,7 @@ def _record_implicit_feedback(
             tracker.record_advice(
                 tool_name=tool_name,
                 advice_texts=[str(x or "").strip() for x in (recent.get("advice_texts") or []) if str(x or "").strip()],
-                advice_sources=matching_ids[:5],
+                advice_sources=(recent.get("sources") or [])[:5],
                 trace_id=trace_id,
             )
         except Exception:

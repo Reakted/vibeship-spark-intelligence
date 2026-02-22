@@ -4800,12 +4800,35 @@ class SparkAdvisor:
             except Exception:
                 pass
 
+        # Source-level effectiveness from implicit + explicit feedback loop
+        try:
+            from .feedback_effectiveness_cache import get_feedback_cache
+            _fb_eff = get_feedback_cache().get_source_effectiveness(a.source)
+            if _fb_eff >= 0:
+                trust = max(trust, _fb_eff)
+        except Exception:
+            pass
+
         # Default trust when no data: 0.5 (neutral, not penalizing)
         if trust < 0.1:
             trust = 0.50
 
         # --- Additive blend ---
         score = (0.45 * relevance) + (0.30 * quality) + (0.25 * trust)
+
+        # --- Category boost (demonstrated utility from feedback data) ---
+        try:
+            cat = self._advice_category(a)
+            cat_boost = self._category_boost_from_effectiveness(cat)
+            # Blend with feedback-based category signal
+            from .feedback_effectiveness_cache import get_feedback_cache
+            fb_cat_boost = get_feedback_cache().get_category_boost(cat)
+            # Average existing + feedback-based when both available
+            if fb_cat_boost != 1.0:
+                cat_boost = (cat_boost + fb_cat_boost) / 2.0
+            score *= max(0.9, min(1.2, cat_boost))
+        except Exception:
+            pass
 
         # --- Noise penalties (multiplicative, crush garbage to near-zero) ---
         if self._is_low_signal_struggle_text(a.text):
