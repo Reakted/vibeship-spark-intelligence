@@ -1,0 +1,1422 @@
+{
+  "timestamp": "20260222_141731",
+  "case_count": 50,
+  "useful_count": 23,
+  "noise_count": 27,
+  "variations": [
+    {
+      "name": "a_baseline",
+      "description": "Current formula: 0.45*rel + 0.30*qual + 0.25*trust, trust_default=0.50",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.3611111111111111,
+      "score_gap": 0.3936475040257648,
+      "mean_useful_score": 0.728695652173913,
+      "mean_noise_score": 0.33504814814814815,
+      "useful_above_gate": 23,
+      "noise_above_gate": 13,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7845,
+          "mean_noise": 0.3135,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7373,
+          "mean_noise": 0.4015,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.676,
+          "mean_noise": 0.113,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6307,
+          "mean_noise": 0.3334,
+          "useful_above_gate": 3,
+          "noise_above_gate": 3,
+          "precision": 0.5
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7652,
+          "mean_noise": 0.3333,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6954,
+          "mean_noise": 0.1932,
+          "useful_above_gate": 7,
+          "noise_above_gate": 1,
+          "precision": 0.875
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6307,
+          "mean_noise": 0.3468,
+          "useful_above_gate": 3,
+          "noise_above_gate": 4,
+          "precision": 0.4286
+        }
+      },
+      "composite": 0.638889
+    },
+    {
+      "name": "b_feedback_loop",
+      "description": "+ feedback loop: trust boosted by source effectiveness from feedback data",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.39473684210526316,
+      "score_gap": 0.37534962962962964,
+      "mean_useful_score": 0.745158,
+      "mean_noise_score": 0.36980837037037034,
+      "useful_above_gate": 23,
+      "noise_above_gate": 15,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.8084,
+          "mean_noise": 0.3642,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7373,
+          "mean_noise": 0.4015,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.7015,
+          "mean_noise": 0.4313,
+          "useful_above_gate": 3,
+          "noise_above_gate": 5,
+          "precision": 0.375
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.6853,
+          "mean_noise": 0.113,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7801,
+          "mean_noise": 0.3756,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.7015,
+          "mean_noise": 0.4229,
+          "useful_above_gate": 3,
+          "noise_above_gate": 6,
+          "precision": 0.3333
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.702,
+          "mean_noise": 0.1932,
+          "useful_above_gate": 7,
+          "noise_above_gate": 1,
+          "precision": 0.875
+        }
+      },
+      "composite": 0.605263
+    },
+    {
+      "name": "c_feedback_catboost",
+      "description": "+ feedback + category boost: multiplicative 0.9-1.2 from feedback",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.39473684210526316,
+      "score_gap": 0.37534962962962964,
+      "mean_useful_score": 0.745158,
+      "mean_noise_score": 0.36980837037037034,
+      "useful_above_gate": 23,
+      "noise_above_gate": 15,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.8084,
+          "mean_noise": 0.3642,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7373,
+          "mean_noise": 0.4015,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.7015,
+          "mean_noise": 0.4313,
+          "useful_above_gate": 3,
+          "noise_above_gate": 5,
+          "precision": 0.375
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.6853,
+          "mean_noise": 0.113,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7801,
+          "mean_noise": 0.3756,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.7015,
+          "mean_noise": 0.4229,
+          "useful_above_gate": 3,
+          "noise_above_gate": 6,
+          "precision": 0.3333
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.702,
+          "mean_noise": 0.1932,
+          "useful_above_gate": 7,
+          "noise_above_gate": 1,
+          "precision": 0.875
+        }
+      },
+      "composite": 0.605263
+    },
+    {
+      "name": "d_bank_quality_50",
+      "description": "Memory banks quality raised 0.40 -> 0.50",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.3611111111111111,
+      "score_gap": 0.38981175523349443,
+      "mean_useful_score": 0.731304347826087,
+      "mean_noise_score": 0.34149259259259257,
+      "useful_above_gate": 23,
+      "noise_above_gate": 13,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7845,
+          "mean_noise": 0.3135,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7373,
+          "mean_noise": 0.4015,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.676,
+          "mean_noise": 0.113,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6507,
+          "mean_noise": 0.3583,
+          "useful_above_gate": 3,
+          "noise_above_gate": 3,
+          "precision": 0.5
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7652,
+          "mean_noise": 0.3333,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6954,
+          "mean_noise": 0.1932,
+          "useful_above_gate": 7,
+          "noise_above_gate": 1,
+          "precision": 0.875
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6507,
+          "mean_noise": 0.3662,
+          "useful_above_gate": 3,
+          "noise_above_gate": 4,
+          "precision": 0.4286
+        }
+      },
+      "composite": 0.638889
+    },
+    {
+      "name": "e_bank_removed",
+      "description": "Memory banks quality set to 0 (effectively removed)",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.30303030303030304,
+      "score_gap": 0.4084397745571658,
+      "mean_useful_score": 0.7250434782608695,
+      "mean_noise_score": 0.31660370370370366,
+      "useful_above_gate": 23,
+      "noise_above_gate": 10,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7845,
+          "mean_noise": 0.3135,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7373,
+          "mean_noise": 0.4015,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.676,
+          "mean_noise": 0.113,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6027,
+          "mean_noise": 0.2623,
+          "useful_above_gate": 3,
+          "noise_above_gate": 0,
+          "precision": 1.0
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7652,
+          "mean_noise": 0.3333,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6954,
+          "mean_noise": 0.1932,
+          "useful_above_gate": 7,
+          "noise_above_gate": 1,
+          "precision": 0.875
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6027,
+          "mean_noise": 0.2915,
+          "useful_above_gate": 3,
+          "noise_above_gate": 1,
+          "precision": 0.75
+        }
+      },
+      "composite": 0.69697
+    },
+    {
+      "name": "f_bank_quality_30",
+      "description": "Memory banks quality lowered 0.40 -> 0.30",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.3235294117647059,
+      "score_gap": 0.3978407407407407,
+      "mean_useful_score": 0.727,
+      "mean_noise_score": 0.32915925925925926,
+      "useful_above_gate": 23,
+      "noise_above_gate": 11,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7845,
+          "mean_noise": 0.3135,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7373,
+          "mean_noise": 0.4015,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.676,
+          "mean_noise": 0.113,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6177,
+          "mean_noise": 0.3107,
+          "useful_above_gate": 3,
+          "noise_above_gate": 1,
+          "precision": 0.75
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7652,
+          "mean_noise": 0.3333,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6954,
+          "mean_noise": 0.1932,
+          "useful_above_gate": 7,
+          "noise_above_gate": 1,
+          "precision": 0.875
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6177,
+          "mean_noise": 0.3292,
+          "useful_above_gate": 3,
+          "noise_above_gate": 2,
+          "precision": 0.6
+        }
+      },
+      "composite": 0.676471
+    },
+    {
+      "name": "g_trust_default_70",
+      "description": "Default trust raised 0.50 -> 0.70 (less penalty for new items)",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.3611111111111111,
+      "score_gap": 0.3936475040257648,
+      "mean_useful_score": 0.728695652173913,
+      "mean_noise_score": 0.33504814814814815,
+      "useful_above_gate": 23,
+      "noise_above_gate": 13,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7845,
+          "mean_noise": 0.3135,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7373,
+          "mean_noise": 0.4015,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.676,
+          "mean_noise": 0.113,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6307,
+          "mean_noise": 0.3334,
+          "useful_above_gate": 3,
+          "noise_above_gate": 3,
+          "precision": 0.5
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7652,
+          "mean_noise": 0.3333,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6954,
+          "mean_noise": 0.1932,
+          "useful_above_gate": 7,
+          "noise_above_gate": 1,
+          "precision": 0.875
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6307,
+          "mean_noise": 0.3468,
+          "useful_above_gate": 3,
+          "noise_above_gate": 4,
+          "precision": 0.4286
+        }
+      },
+      "composite": 0.638889
+    },
+    {
+      "name": "h_relevance_heavy",
+      "description": "Relevance-heavy: 0.55*rel + 0.25*qual + 0.20*trust",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.25806451612903225,
+      "score_gap": 0.4128984702093398,
+      "mean_useful_score": 0.7211521739130435,
+      "mean_noise_score": 0.30825370370370375,
+      "useful_above_gate": 23,
+      "noise_above_gate": 8,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7629,
+          "mean_noise": 0.4695,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.762,
+          "mean_noise": 0.2845,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7339,
+          "mean_noise": 0.36,
+          "useful_above_gate": 5,
+          "noise_above_gate": 0,
+          "precision": 1.0
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.675,
+          "mean_noise": 0.0987,
+          "useful_above_gate": 5,
+          "noise_above_gate": 0,
+          "precision": 1.0
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6392,
+          "mean_noise": 0.3227,
+          "useful_above_gate": 3,
+          "noise_above_gate": 2,
+          "precision": 0.6
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7629,
+          "mean_noise": 0.4695,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7501,
+          "mean_noise": 0.3038,
+          "useful_above_gate": 8,
+          "noise_above_gate": 2,
+          "precision": 0.8
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6934,
+          "mean_noise": 0.1705,
+          "useful_above_gate": 7,
+          "noise_above_gate": 0,
+          "precision": 1.0
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6392,
+          "mean_noise": 0.3288,
+          "useful_above_gate": 3,
+          "noise_above_gate": 2,
+          "precision": 0.6
+        }
+      },
+      "composite": 0.741935
+    },
+    {
+      "name": "i_quality_heavy",
+      "description": "Quality-heavy: 0.35*rel + 0.40*qual + 0.25*trust",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.39473684210526316,
+      "score_gap": 0.3642315619967795,
+      "mean_useful_score": 0.7289130434782609,
+      "mean_noise_score": 0.36468148148148144,
+      "useful_above_gate": 23,
+      "noise_above_gate": 15,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7904,
+          "mean_noise": 0.5735,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.8085,
+          "mean_noise": 0.3507,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7299,
+          "mean_noise": 0.4495,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.658,
+          "mean_noise": 0.1212,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6103,
+          "mean_noise": 0.3389,
+          "useful_above_gate": 3,
+          "noise_above_gate": 3,
+          "precision": 0.5
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7904,
+          "mean_noise": 0.5735,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7774,
+          "mean_noise": 0.371,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6804,
+          "mean_noise": 0.2133,
+          "useful_above_gate": 7,
+          "noise_above_gate": 3,
+          "precision": 0.7
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6103,
+          "mean_noise": 0.3622,
+          "useful_above_gate": 3,
+          "noise_above_gate": 4,
+          "precision": 0.4286
+        }
+      },
+      "composite": 0.605263
+    },
+    {
+      "name": "j_lower_gate",
+      "description": "Gate threshold lowered 0.42 -> 0.38",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.41025641025641024,
+      "score_gap": 0.3936475040257648,
+      "mean_useful_score": 0.728695652173913,
+      "mean_noise_score": 0.33504814814814815,
+      "useful_above_gate": 23,
+      "noise_above_gate": 16,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7845,
+          "mean_noise": 0.3135,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7373,
+          "mean_noise": 0.4015,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.676,
+          "mean_noise": 0.113,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6307,
+          "mean_noise": 0.3334,
+          "useful_above_gate": 3,
+          "noise_above_gate": 4,
+          "precision": 0.4286
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7652,
+          "mean_noise": 0.3333,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6954,
+          "mean_noise": 0.1932,
+          "useful_above_gate": 7,
+          "noise_above_gate": 3,
+          "precision": 0.7
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6307,
+          "mean_noise": 0.3468,
+          "useful_above_gate": 3,
+          "noise_above_gate": 5,
+          "precision": 0.375
+        }
+      },
+      "composite": 0.589744
+    },
+    {
+      "name": "k_higher_gate",
+      "description": "Gate threshold raised 0.42 -> 0.48",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.23333333333333334,
+      "score_gap": 0.3936475040257648,
+      "mean_useful_score": 0.728695652173913,
+      "mean_noise_score": 0.33504814814814815,
+      "useful_above_gate": 23,
+      "noise_above_gate": 7,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7845,
+          "mean_noise": 0.3135,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7373,
+          "mean_noise": 0.4015,
+          "useful_above_gate": 5,
+          "noise_above_gate": 0,
+          "precision": 1.0
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.676,
+          "mean_noise": 0.113,
+          "useful_above_gate": 5,
+          "noise_above_gate": 0,
+          "precision": 1.0
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6307,
+          "mean_noise": 0.3334,
+          "useful_above_gate": 3,
+          "noise_above_gate": 1,
+          "precision": 0.75
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7758,
+          "mean_noise": 0.5145,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7652,
+          "mean_noise": 0.3333,
+          "useful_above_gate": 8,
+          "noise_above_gate": 2,
+          "precision": 0.8
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6954,
+          "mean_noise": 0.1932,
+          "useful_above_gate": 7,
+          "noise_above_gate": 0,
+          "precision": 1.0
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6307,
+          "mean_noise": 0.3468,
+          "useful_above_gate": 3,
+          "noise_above_gate": 1,
+          "precision": 0.75
+        }
+      },
+      "composite": 0.766667
+    },
+    {
+      "name": "l_combined_feedback_relevance",
+      "description": "COMBINED: feedback loop + category boost + relevance-heavy (0.55/0.25/0.20)",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.3235294117647059,
+      "score_gap": 0.3982601481481482,
+      "mean_useful_score": 0.734322,
+      "mean_noise_score": 0.33606185185185183,
+      "useful_above_gate": 23,
+      "noise_above_gate": 11,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7629,
+          "mean_noise": 0.4695,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7812,
+          "mean_noise": 0.3251,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7339,
+          "mean_noise": 0.36,
+          "useful_above_gate": 5,
+          "noise_above_gate": 0,
+          "precision": 1.0
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.6824,
+          "mean_noise": 0.0987,
+          "useful_above_gate": 5,
+          "noise_above_gate": 0,
+          "precision": 1.0
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6958,
+          "mean_noise": 0.401,
+          "useful_above_gate": 3,
+          "noise_above_gate": 5,
+          "precision": 0.375
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7629,
+          "mean_noise": 0.4695,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7621,
+          "mean_noise": 0.3376,
+          "useful_above_gate": 8,
+          "noise_above_gate": 2,
+          "precision": 0.8
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6987,
+          "mean_noise": 0.1705,
+          "useful_above_gate": 7,
+          "noise_above_gate": 0,
+          "precision": 1.0
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6958,
+          "mean_noise": 0.3897,
+          "useful_above_gate": 3,
+          "noise_above_gate": 5,
+          "precision": 0.375
+        }
+      },
+      "composite": 0.676471
+    },
+    {
+      "name": "m_combined_feedback_quality",
+      "description": "COMBINED: feedback loop + category boost + quality-heavy (0.35/0.40/0.25)",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.425,
+      "score_gap": 0.3459336876006441,
+      "mean_useful_score": 0.7453753913043478,
+      "mean_noise_score": 0.39944170370370374,
+      "useful_above_gate": 23,
+      "noise_above_gate": 17,
+      "per_source": {
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.8324,
+          "mean_noise": 0.4014,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7904,
+          "mean_noise": 0.5735,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7299,
+          "mean_noise": 0.4495,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.6812,
+          "mean_noise": 0.4367,
+          "useful_above_gate": 3,
+          "noise_above_gate": 5,
+          "precision": 0.375
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.6673,
+          "mean_noise": 0.1212,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        }
+      },
+      "per_tool": {
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7924,
+          "mean_noise": 0.4133,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7904,
+          "mean_noise": 0.5735,
+          "useful_above_gate": 5,
+          "noise_above_gate": 5,
+          "precision": 0.5
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.6812,
+          "mean_noise": 0.4383,
+          "useful_above_gate": 3,
+          "noise_above_gate": 6,
+          "precision": 0.3333
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.687,
+          "mean_noise": 0.2133,
+          "useful_above_gate": 7,
+          "noise_above_gate": 3,
+          "precision": 0.7
+        }
+      },
+      "composite": 0.575
+    },
+    {
+      "name": "n_combined_best_candidate",
+      "description": "COMBINED: feedback + relevance-heavy + bank=0.30 + gate=0.38",
+      "precision_at_1": 1.0,
+      "precision_at_2": 1.0,
+      "precision_at_4": 1.0,
+      "precision_at_8": 1.0,
+      "recall": 1.0,
+      "noise_rate": 0.3783783783783784,
+      "score_gap": 0.4017545120772946,
+      "mean_useful_score": 0.732908956521739,
+      "mean_noise_score": 0.3311544444444444,
+      "useful_above_gate": 23,
+      "noise_above_gate": 14,
+      "per_source": {
+        "replay": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7629,
+          "mean_noise": 0.4695,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "eidos": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7812,
+          "mean_noise": 0.3251,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "chip": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7339,
+          "mean_noise": 0.36,
+          "useful_above_gate": 5,
+          "noise_above_gate": 2,
+          "precision": 0.7143
+        },
+        "cognitive": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.6824,
+          "mean_noise": 0.0987,
+          "useful_above_gate": 5,
+          "noise_above_gate": 1,
+          "precision": 0.8333
+        },
+        "bank": {
+          "useful_count": 3,
+          "noise_count": 7,
+          "mean_useful": 0.685,
+          "mean_noise": 0.3821,
+          "useful_above_gate": 3,
+          "noise_above_gate": 5,
+          "precision": 0.375
+        }
+      },
+      "per_tool": {
+        "Write": {
+          "useful_count": 5,
+          "noise_count": 5,
+          "mean_useful": 0.7629,
+          "mean_noise": 0.4695,
+          "useful_above_gate": 5,
+          "noise_above_gate": 4,
+          "precision": 0.5556
+        },
+        "Bash": {
+          "useful_count": 8,
+          "noise_count": 6,
+          "mean_useful": 0.7621,
+          "mean_noise": 0.3376,
+          "useful_above_gate": 8,
+          "noise_above_gate": 3,
+          "precision": 0.7273
+        },
+        "Edit": {
+          "useful_count": 7,
+          "noise_count": 7,
+          "mean_useful": 0.6987,
+          "mean_noise": 0.1705,
+          "useful_above_gate": 7,
+          "noise_above_gate": 1,
+          "precision": 0.875
+        },
+        "Read": {
+          "useful_count": 3,
+          "noise_count": 9,
+          "mean_useful": 0.685,
+          "mean_noise": 0.3749,
+          "useful_above_gate": 3,
+          "noise_above_gate": 6,
+          "precision": 0.3333
+        }
+      },
+      "composite": 0.621622
+    }
+  ]
+}
