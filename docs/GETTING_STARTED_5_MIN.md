@@ -9,20 +9,34 @@ If you are new: follow this page first. For the full map, see `docs/DOCS_INDEX.m
 
 ## 1) Install
 
-### Option A: Installer (Recommended)
+### Option A: Windows One Command (Repo + venv + install + up)
+
+```powershell
+irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex
+```
+
+### Option B: Installer (Recommended for full OpenClaw stack)
 
 - Windows: clone `spark-openclaw-installer` and run `install.ps1`
 - Mac/Linux: clone `spark-openclaw-installer` and run `install.sh`
 
 See `README.md` for the exact commands.
 
-### Option B: Manual (Repo)
+### Option C: Manual (Repo)
 
 ```bash
 cd /path/to/vibeship-spark-intelligence
 python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+# Mac/Linux:
+source .venv/bin/activate
 python -m pip install -e .[services]
+```
+
+```powershell
+# Windows (no activate needed):
+cd C:\path\to\vibeship-spark-intelligence
+py -3 -m venv .venv
+.\.venv\Scripts\python -m pip install -e ".[services]"
 ```
 
 If you see `externally-managed-environment`, use the virtualenv block above and
@@ -34,6 +48,11 @@ re-run installation inside it.
 
 ```bat
 start_spark.bat
+```
+
+```powershell
+# Equivalent without PATH assumptions:
+.\.venv\Scripts\python -m spark.cli up
 ```
 
 ### Mac/Linux (repo)

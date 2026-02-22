@@ -39,6 +39,26 @@ The goal is to keep context, patterns, and practical lessons in a form that your
 
 ## Install
 
+Windows one-command bootstrap (clone + venv + install + start):
+
+```powershell
+irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex
+```
+
+If you already cloned the repo, run the local bootstrap:
+
+```powershell
+.\install.ps1
+```
+
+If you are running from `cmd.exe` or another shell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex"
+```
+
+Mac/Linux manual install:
+
 ```bash
 git clone https://github.com/vibeforge1111/vibeship-spark-intelligence
 cd vibeship-spark-intelligence
@@ -59,7 +79,7 @@ Or run directly with editable install:
 
 ```bash
 python -m pip install vibeship-spark-intelligence[services]
-spark up
+python -m spark.cli up
 ```
 
 ## Quick Start

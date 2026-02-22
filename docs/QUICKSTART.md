@@ -13,19 +13,25 @@ For term-based navigation, see `docs/GLOSSARY.md`.
 
 ## Installation
 
-### Option 1: Quick Install
+### Option 1: Windows One Command
+
+```powershell
+irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex
+```
+
+### Option 2: Quick Install
 
 ```bash
 cd /path/to/Spark
 ./scripts/install.sh
 ```
 
-### Option 2: Manual Install
+### Option 3: Manual Install
 
 ```bash
 # Install dependencies in a virtual environment (recommended)
 python3 -m venv .venv
-source .venv/bin/activate  # use .venv\\Scripts\\activate on Windows
+source .venv/bin/activate
 python -m pip install -e .[services]
 
 # Optional: Enable embeddings (fastembed)
@@ -33,6 +39,13 @@ python -m pip install -e .[embeddings]
 
 # Test it works
 python -m spark.cli health
+```
+
+```powershell
+# Windows manual install without activation policy issues:
+py -3 -m venv .venv
+.\.venv\Scripts\python -m pip install -e ".[services]"
+.\.venv\Scripts\python -m spark.cli health
 ```
 
 If pip reports `externally-managed-environment`, you are likely running on a
