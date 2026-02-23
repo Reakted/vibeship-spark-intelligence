@@ -168,14 +168,20 @@ class AutoTuner:
     # How far from the "ideal" boost a source must be before we adjust
     TOLERANCE = 0.05
 
-    # Boost floor and ceiling
+    # Boost floor and ceiling (defaults; overridden by tuneable min_boost/max_boost)
     BOOST_MIN = 0.2
-    BOOST_MAX = 2.0
+    BOOST_MAX = 3.0
 
     def __init__(self, tuneables_path: Path = TUNEABLES_PATH):
         self.tuneables_path = tuneables_path
         self._tuneables = _read_json(tuneables_path)
         self._config = self._tuneables.get("auto_tuner", {})
+        # Read tuneable bounds if present
+        try:
+            self.BOOST_MIN = max(0.0, float(self._config.get("min_boost", self.BOOST_MIN)))
+            self.BOOST_MAX = max(self.BOOST_MIN + 0.1, float(self._config.get("max_boost", self.BOOST_MAX)))
+        except (TypeError, ValueError):
+            pass
 
     @property
     def enabled(self) -> bool:

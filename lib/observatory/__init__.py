@@ -24,8 +24,18 @@ def generate_observatory(*, force: bool = False, verbose: bool = False) -> dict:
     from .readers import read_all_stages
     from .flow_dashboard import generate_flow_dashboard
     from .stage_pages import generate_all_stage_pages
+    from .advisory_reverse_engineering import generate_advisory_reverse_engineering
+    from .tuneables_deep_dive import generate_tuneables_deep_dive
+    from .system_flow_comprehensive import generate_system_flow_comprehensive
+    from .system_flow_operator_playbook import generate_system_flow_operator_playbook
     from .canvas_generator import generate_canvas
     from .explorer import generate_explorer
+    from .readability_pack import (
+        collect_metrics_snapshot,
+        generate_readability_pack,
+        load_previous_snapshot,
+        save_snapshot,
+    )
 
     t0 = time.time()
     cfg = load_config()
@@ -48,8 +58,37 @@ def generate_observatory(*, force: bool = False, verbose: bool = False) -> dict:
     flow_content = generate_flow_dashboard(data)
     flow_path.write_text(flow_content, encoding="utf-8")
 
+    # Generate reverse-engineered advisory path page
+    reverse_path = obs_dir / "advisory_reverse_engineering.md"
+    reverse_content = generate_advisory_reverse_engineering(data)
+    reverse_path.write_text(reverse_content, encoding="utf-8")
+
+    # Generate tuneables deep dive page
+    tuneables_dive_path = obs_dir / "tuneables_deep_dive.md"
+    tuneables_dive_content = generate_tuneables_deep_dive(data)
+    tuneables_dive_path.write_text(tuneables_dive_content, encoding="utf-8")
+
+    # Generate comprehensive full-system reverse-engineering page
+    comprehensive_path = obs_dir / "system_flow_comprehensive.md"
+    comprehensive_content = generate_system_flow_comprehensive(data)
+    comprehensive_path.write_text(comprehensive_content, encoding="utf-8")
+
+    # Generate operator playbook page
+    playbook_path = obs_dir / "system_flow_operator_playbook.md"
+    playbook_content = generate_system_flow_operator_playbook(data)
+    playbook_path.write_text(playbook_content, encoding="utf-8")
+
+    # Generate readability/navigation pages
+    previous_snapshot = load_previous_snapshot(obs_dir)
+    current_snapshot = collect_metrics_snapshot(data)
+    for filename, content in generate_readability_pack(
+        data, current_snapshot=current_snapshot, previous_snapshot=previous_snapshot
+    ):
+        (obs_dir / filename).write_text(content, encoding="utf-8")
+    save_snapshot(obs_dir, current_snapshot)
+
     # Generate stage pages
-    files_written = 1  # flow.md
+    files_written = 10  # flow + reverse + tuneables_dive + comprehensive + playbook + 5 readability pages
     for filename, content in generate_all_stage_pages(data):
         (stages_dir / filename).write_text(content, encoding="utf-8")
         files_written += 1

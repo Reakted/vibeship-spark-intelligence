@@ -124,8 +124,13 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "prefetch_inline_enabled": TuneableSpec("bool", True, None, None, "Enable inline prefetch"),
         "prefetch_inline_max_jobs": TuneableSpec("int", 1, 0, 10, "Max inline prefetch jobs"),
         "delivery_stale_s": TuneableSpec("float", 600, 60, 86400, "Delivery staleness threshold (s)"),
-        "advisory_text_repeat_cooldown_s": TuneableSpec("float", 300, 30, 86400, "Text repeat cooldown (s)"),
-        "global_dedupe_cooldown_s": TuneableSpec("float", 600, 0, 86400, "Cross-session global dedupe cooldown (s)"),
+        "advisory_text_repeat_cooldown_s": TuneableSpec("float", 300, 30, 86400,
+            "Text repeat cooldown (s). Prevents identical text from re-emitting. "
+            "See also: advisory_gate.advice_repeat_cooldown_s (same advice_id), "
+            "advisory_gate.shown_advice_ttl_s (shown-state marker)"),
+        "global_dedupe_cooldown_s": TuneableSpec("float", 600, 0, 86400,
+            "Cross-session global dedupe cooldown (s). Prevents same insight across sessions. "
+            "Distinct from text_repeat (exact text) and advice_repeat (same ID)"),
         "actionability_enforce": TuneableSpec("bool", True, None, None, "Enforce actionability scoring"),
         "force_programmatic_synth": TuneableSpec("bool", False, None, None, "Force programmatic synthesis"),
         "selective_ai_synth_enabled": TuneableSpec("bool", True, None, None, "Enable selective AI synthesis"),
@@ -138,8 +143,14 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
     "advisory_gate": {
         "max_emit_per_call": TuneableSpec("int", 2, 1, 10, "Max advice items emitted per tool call"),
         "tool_cooldown_s": TuneableSpec("int", 15, 1, 3600, "Same-tool suppression cooldown (s)"),
-        "advice_repeat_cooldown_s": TuneableSpec("int", 300, 5, 86400, "Repeated advice cooldown (s)"),
-        "shown_advice_ttl_s": TuneableSpec("int", 600, 5, 86400, "Shown-advice suppression TTL (s)"),
+        "advice_repeat_cooldown_s": TuneableSpec("int", 300, 5, 86400,
+            "Repeated advice cooldown (s). Prevents same advice_id from re-emitting. "
+            "See also: advisory_engine.advisory_text_repeat_cooldown_s (exact text), "
+            "shown_advice_ttl_s (shown-state marker with source TTL scaling)"),
+        "shown_advice_ttl_s": TuneableSpec("int", 600, 5, 86400,
+            "Shown-advice suppression TTL (s). Base TTL for shown-state markers; "
+            "scaled per-source via source_ttl_multipliers and per-category via "
+            "category_cooldown_multipliers. Primary suppression mechanism (~69% of all suppressions)"),
         "category_cooldown_multipliers": TuneableSpec(
             "dict",
             {},
@@ -147,6 +158,12 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
             None,
             "Per-category cooldown multipliers (e.g., {\"security\": 2.0, \"mind\": 0.5})",
         ),
+        "source_ttl_multipliers": TuneableSpec("dict", {}, None, None,
+            "Per-source shown TTL scale factors. Low-value sources (baseline=0.5x) "
+            "get shorter TTL; high-quality sources (cognitive=1.0x) keep full TTL"),
+        "tool_cooldown_multipliers": TuneableSpec("dict", {}, None, None,
+            "Per-tool cooldown scale factors. Exploration tools (Read=0.5x) get shorter "
+            "cooldown; mutation tools (Edit=1.2x) keep longer cooldown"),
         "warning_threshold": TuneableSpec("float", 0.68, 0.2, 0.99, "Score threshold for WARNING authority"),
         "note_threshold": TuneableSpec("float", 0.38, 0.1, 0.95, "Score threshold for NOTE authority"),
         "whisper_threshold": TuneableSpec("float", 0.27, 0.01, 0.9, "Score threshold for WHISPER authority"),
@@ -268,6 +285,10 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "run_interval_s": TuneableSpec("int", 43200, 3600, 604800, "Run interval (s, default 12h)"),
         "max_change_per_run": TuneableSpec("float", 0.15, 0.01, 0.5, "Max boost change per run"),
         "source_boosts": TuneableSpec("dict", {}, None, None, "Per-source boost multipliers"),
+        "min_boost": TuneableSpec("float", 0.2, 0.0, 5.0,
+            "Floor for source boost — prevents auto-tuner from dampening proven sources below this value"),
+        "max_boost": TuneableSpec("float", 3.0, 0.5, 10.0,
+            "Ceiling for source boost — prevents runaway amplification of any single source"),
         "source_effectiveness": TuneableSpec("dict", {}, None, None, "Computed effectiveness rates"),
         "tuning_log": TuneableSpec("list", [], None, None, "Recent tuning events (max 50)"),
         "max_changes_per_cycle": TuneableSpec("int", 4, 1, 20, "Max source adjustments per cycle"),

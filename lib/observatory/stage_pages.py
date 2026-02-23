@@ -9,6 +9,10 @@ from .linker import (
 )
 
 
+def _slug(text: str) -> str:
+    return "-".join(str(text or "").strip().lower().replace("/", " ").replace("_", " ").split())
+
+
 def generate_all_stage_pages(data: dict[int, dict[str, Any]]) -> Iterator[tuple[str, str]]:
     """Yield (filename, content) for each stage page."""
     generators = {
@@ -48,7 +52,20 @@ def generate_all_stage_pages(data: dict[int, dict[str, Any]]) -> Iterator[tuple[
 
 def _header(num: int, name: str, purpose: str, upstream: list[int], downstream: list[int]) -> str:
     """Generate consistent page header with breadcrumbs."""
-    lines = [f"# Stage {num}: {name}\n"]
+    stage_tag = f"stage-{num:02d}"
+    lines = [
+        "---",
+        f"title: Stage {num} - {name}",
+        "tags:",
+        "  - observatory",
+        "  - stage",
+        f"  - {stage_tag}",
+        f"  - {_slug(name)}",
+        f"stage: {num}",
+        "---",
+        "",
+        f"# Stage {num}: {name}\n",
+    ]
     lines.append(f"> Part of the {flow_link()}")
 
     up_links = " | ".join(stage_link_from_stage(u) for u in upstream) if upstream else "External events"
@@ -455,6 +472,7 @@ def _gen_advisory(d: dict, all_data: dict) -> str:
         s += "\n"
 
     s += "## Deep Dive\n\n"
+    s += "- [[../advisory_reverse_engineering|Advisory Reverse Engineering]] - full path map + suppression diagnostics\n"
     s += "- [[../explore/decisions/_index|Advisory Decision Ledger]] — emit/suppress/block decisions\n"
     s += "- [[../explore/feedback/_index|Implicit Feedback Loop]] — per-tool follow rates\n"
     s += "- [[../explore/advisory/_index|Advisory Effectiveness]] — source breakdown + recent advice\n"
@@ -628,6 +646,10 @@ def _gen_tuneables(d: dict, all_data: dict) -> str:
     s += f"- `eidos` — {stage_link_from_stage(7)}\n"
     s += f"- `observatory` — Observatory auto-sync\n"
     s += "\n"
+
+    s += "\n## Deep Dive\n\n"
+    s += "For comprehensive analysis including config drift, hot-reload coverage, cooldown redundancy, "
+    s += "auto-tuner activity, and recommendations, see [[Tuneables Deep Dive]].\n\n"
 
     s += _source_files("lib/tuneables_schema.py + lib/tuneables_reload.py", [
         "tuneables.json",

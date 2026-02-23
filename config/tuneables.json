@@ -297,6 +297,8 @@
     "last_run": "2026-02-20T10:25:16+00:00",
     "run_interval_s": 43200,
     "max_change_per_run": 0.15,
+    "min_boost": 0.2,
+    "max_boost": 3.0,
     "source_boosts": {
       "cognitive": 1.65,
       "semantic": 0.35,

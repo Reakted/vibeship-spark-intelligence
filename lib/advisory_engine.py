@@ -603,6 +603,13 @@ _BOOT_ENGINE_CFG = _load_engine_config()
 if _BOOT_ENGINE_CFG:
     apply_engine_config(_BOOT_ENGINE_CFG)
 
+# Register for hot-reload so tuneables.json changes apply without restart
+try:
+    from .tuneables_reload import register_reload as _engine_register
+    _engine_register("advisory_engine", apply_engine_config, label="advisory_engine.apply_config")
+except Exception:
+    pass
+
 
 def _project_key() -> str:
     try:
