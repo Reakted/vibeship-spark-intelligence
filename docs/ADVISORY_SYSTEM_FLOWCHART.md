@@ -47,7 +47,7 @@
 ║                         ▼                                                   ║
 ║   ┌─────────────────────────────────────────────────────────┐               ║
 ║   │ 2. PACKET LOOKUP (Fast Path)                            │               ║
-║   │    advisory_packet_store.py (3,736 lines)               │               ║
+║   │    advisory_packet_store.py (~3,286 lines)              │               ║
 ║   │                                                         │               ║
 ║   │    Exact match: session + tool + intent + plane         │               ║
 ║   │    Relaxed match: weighted scoring across dimensions    │               ║
@@ -96,8 +96,8 @@
 ║                 │   │    └─────────────────────┘             │        │    ║
 ║                 │   │                                        │        │    ║
 ║                 │   │    3-Factor Ranking:                    │        │    ║
-║                 │   │    score = 0.45*relevance               │        │    ║
-║                 │   │          + 0.30*quality                 │        │    ║
+║                 │   │    score = 0.50*relevance               │        │    ║
+║                 │   │          + 0.25*quality                 │        │    ║
 ║                 │   │          + 0.25*trust                   │        │    ║
 ║                 │   │                                        │        │    ║
 ║                 │   │    Returns top 8 items ◄───────────────┘        │    ║
@@ -113,17 +113,17 @@
 ║   │    For each advice item, assigns authority:              │               ║
 ║   │    ≥ 0.95  →  BLOCK   (EIDOS blocks action)            │               ║
 ║   │    ≥ 0.80  →  WARNING  [SPARK ADVISORY]                │               ║
-║   │    ≥ 0.42  →  NOTE     [SPARK]          ◄── most common│               ║
-║   │    ≥ 0.30  →  WHISPER  (spark: ...)                    │               ║
-║   │    < 0.30  →  SILENT   (suppressed)                    │               ║
+║   │    ≥ 0.48  →  NOTE     [SPARK]          ◄── most common│               ║
+║   │    ≥ 0.27  →  WHISPER  (spark: ...)                    │               ║
+║   │    < 0.27  →  SILENT   (suppressed)                    │               ║
 ║   │                                                         │               ║
 ║   │    Filters:                                             │               ║
-║   │    ✗ Already shown (600s cooldown)                      │               ║
-║   │    ✗ Tool cooldown (10s)                                │               ║
-║   │    ✗ Budget cap (max 2 per call)                        │               ║
+║   │    ✗ Already shown (TTL per-source: 210-420s)          │               ║
+║   │    ✗ Tool cooldown (per-tool: 7-18s)                   │               ║
+║   │    ✗ Budget cap (dynamic: 2-4 per call)                │               ║
 ║   │    ✗ Obvious from context                               │               ║
 ║   │                                                         │               ║
-║   │    Output: 0-2 items that pass all filters              │               ║
+║   │    Output: 0-4 items that pass all filters              │               ║
 ║   └─────────────────────┬───────────────────────────────────┘               ║
 ║                         │                                                   ║
 ║              ┌──────────┴──────────┐                                        ║
@@ -351,13 +351,13 @@
 ```
 ESSENTIAL (hot path):
   advisory_engine.py ............  2,874  ██████████████
-  advisory_packet_store.py ......  3,736  ██████████████████
+  advisory_packet_store.py ......  3,286  ████████████████
   advisor.py ....................  5,816  █████████████████████████████
   advisory_gate.py ..............    757  ███
   advisory_emitter.py ...........    307  █
   advisory_state.py .............    427  ██
                                  ──────
-                          TOTAL: 13,917 lines (68%)
+                          TOTAL: 13,467 lines (~66%)
 
 SUPPORTING (used by essential):
   advisory_synthesizer.py .......    954  ████
@@ -370,6 +370,13 @@ SUPPORTING (used by essential):
   exposure_tracker.py ...........    290  █
                                  ──────
                           TOTAL:  3,581 lines (18%)
+
+EXTRACTED FROM PACKET STORE (Phase 5 split):
+  advisory_packet_llm_reranker.py   249  █
+  advisory_packet_feedback.py ...   262  █
+  feedback_effectiveness_cache.py   ~200 █
+                                 ──────
+                          TOTAL:   ~711 lines (3%)
 
 WRITE-ONLY (open feedback loop):
   advice_feedback.py ............    386  ██
@@ -389,11 +396,11 @@ SEPARATE SYSTEM (not advisory):
                                  ──────
                           TOTAL:  1,791 lines (9%)
 
-DEAD CODE:
-  curiosity_engine.py ...........    407  ██
+DEPRECATED:
+  curiosity_engine.py ...........    407  ██  (deprecated Phase 4)
                                  ──────
                           TOTAL:    407 lines (2%)
 
 ═══════════════════════════════════════
-GRAND TOTAL:                    20,596 lines across 20 files
+GRAND TOTAL:                   ~21,757 lines across 23 files
 ```

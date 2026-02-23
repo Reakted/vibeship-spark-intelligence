@@ -8,6 +8,20 @@ from typing import Any
 from .linker import stage_link, fmt_ts, fmt_ago, fmt_num, fmt_size, health_badge
 
 
+def _frontmatter() -> str:
+    lines = [
+        "---",
+        "title: Intelligence Flow Dashboard",
+        "tags:",
+        "  - observatory",
+        "  - dashboard",
+        "  - flow",
+        "---",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def _health_status(data: dict[int, dict]) -> list[tuple[str, str, str]]:
     """Compute health rows from stage data."""
     rows = []
@@ -163,6 +177,7 @@ def generate_flow_dashboard(data: dict[int, dict[str, Any]]) -> str:
     sections = []
 
     # Header
+    sections.append(_frontmatter())
     sections.append(f"# Spark Intelligence Observatory\n")
     sections.append(f"> Last generated: {now}")
     p = data.get(3, {})
@@ -202,6 +217,15 @@ def generate_flow_dashboard(data: dict[int, dict[str, Any]]) -> str:
 
     # Quick links to existing pages
     sections.append("## Quick Links\n")
+    sections.append("- [[start_here|Start Here]] - guided 90-second orientation and reading path")
+    sections.append("- [[topic_finder|Topic Finder]] - question-to-page index for fast navigation")
+    sections.append("- [[glossary|Glossary]] - key terms across advisory, memory, EIDOS, and retrieval")
+    sections.append("- [[troubleshooting_by_symptom|Troubleshooting by Symptom]] - diagnose issues by observed behavior")
+    sections.append("- [[changes_since_last_regen|Changes Since Last Regen]] - track metric deltas after each regeneration")
+    sections.append("- [[advisory_reverse_engineering|Advisory Reverse Engineering]] - full path map, suppressor diagnostics, and tuning plan")
+    sections.append("- [[tuneables_deep_dive|Tuneables Deep Dive]] - config drift, hot-reload coverage, cooldown analysis, auto-tuner activity, recommendations")
+    sections.append("- [[system_flow_comprehensive|System Flow Comprehensive]] - full human-readable reverse engineering with live examples, strengths, and gaps")
+    sections.append("- [[system_flow_operator_playbook|System Flow Operator Playbook]] - threshold checks, run commands, immediate actions, and durable fixes")
     sections.append("- [[explore/_index|Explore Individual Items]] — browse cognitive insights, distillations, episodes, verdicts")
     sections.append("- [[../watchtower|Advisory Watchtower]] — existing advisory deep-dive")
     sections.append("- [[../packets/index|Advisory Packet Catalog]] — existing packet view")
