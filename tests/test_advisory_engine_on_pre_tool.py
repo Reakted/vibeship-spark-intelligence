@@ -166,10 +166,18 @@ def test_duplicate_repeat_state_function():
     assert "repeat" in result
 
 
-# ── Dead code verification ────────────────────────────────────────────
+# ── Dead code removal verification ────────────────────────────────────
 
-def test_low_auth_recently_emitted_exists():
-    """Verify _low_auth_recently_emitted exists (dead code to be removed in Batch 1)."""
-    from lib.advisory_engine import _low_auth_recently_emitted
-    # Should exist and be callable
-    assert callable(_low_auth_recently_emitted)
+def test_low_auth_recently_emitted_removed():
+    """Verify _low_auth_recently_emitted was removed (dead code, Batch 1)."""
+    import lib.advisory_engine as ae
+    assert not hasattr(ae, "_low_auth_recently_emitted"), \
+        "_low_auth_recently_emitted should have been removed in Batch 1"
+
+
+# ── Rejection telemetry ────────────────────────────────────────────────
+
+def test_record_rejection_exists():
+    """Verify the rejection telemetry counter function exists."""
+    from lib.advisory_engine import _record_rejection
+    assert callable(_record_rejection)

@@ -29,7 +29,7 @@ def _patch_state_and_store(monkeypatch, tmp_path):
     monkeypatch.setattr(engine, "ACTIONABILITY_ENFORCE", True)
 
 
-def _allow_all_gate(advice_items, state, tool_name, tool_input=None):
+def _allow_all_gate(advice_items, state, tool_name, tool_input=None, **kwargs):
     emitted = []
     decisions = []
     for idx, item in enumerate(advice_items[:2]):
@@ -53,7 +53,7 @@ def _allow_all_gate(advice_items, state, tool_name, tool_input=None):
     )
 
 
-def _suppress_all_gate(advice_items, state, tool_name, tool_input=None):
+def _suppress_all_gate(advice_items, state, tool_name, tool_input=None, **kwargs):
     decisions = []
     for idx, item in enumerate(advice_items[:1]):
         aid = getattr(item, "advice_id", f"aid_{idx}")
@@ -76,7 +76,7 @@ def _suppress_all_gate(advice_items, state, tool_name, tool_input=None):
     )
 
 
-def _allow_warning_gate(advice_items, state, tool_name, tool_input=None):
+def _allow_warning_gate(advice_items, state, tool_name, tool_input=None, **kwargs):
     decisions = []
     emitted = []
     for idx, item in enumerate(advice_items[:1]):

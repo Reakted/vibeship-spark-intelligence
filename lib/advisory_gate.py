@@ -495,6 +495,7 @@ def evaluate(
     state,  # SessionState
     tool_name: str,
     tool_input: Optional[dict] = None,
+    recent_global_emissions: Optional[Dict[str, float]] = None,
 ) -> GateResult:
     """
     Evaluate all advice items through the gate.
@@ -504,6 +505,9 @@ def evaluate(
         state: SessionState from advisory_state
         tool_name: Current tool being invoked
         tool_input: Tool input dict
+        recent_global_emissions: Dict of {advice_id: age_s} for recently emitted
+            advice IDs (from global dedupe log). If present, gate absorbs
+            advice_id dedupe so post-gate only needs text_sig dedupe.
 
     Returns:
         GateResult with decisions on what to emit
@@ -522,6 +526,7 @@ def evaluate(
             tool_input,
             phase,
             agreement_meta=(agreement.get(aid) if aid else None),
+            recent_global_emissions=recent_global_emissions,
         )
         decisions.append(decision)
 
@@ -590,6 +595,7 @@ def _evaluate_single(
     phase: str,
     *,
     agreement_meta: Optional[Dict[str, Any]] = None,
+    recent_global_emissions: Optional[Dict[str, float]] = None,
 ) -> GateDecision:
     """Evaluate a single advice item through all gate filters."""
     from .advisory_state import is_tool_suppressed
@@ -669,6 +675,21 @@ def _evaluate_single(
             adjusted_score=0.0,
             original_score=base_score,
         )
+
+    # ---- Filter 2b: Global dedupe (advice_id) — absorbed from post-gate ----
+    # Previously ran as a separate pass after the gate. Now checked per-item
+    # inside the gate, so post-gate only needs text_sig dedupe.
+    if recent_global_emissions and advice_id:
+        age_s = recent_global_emissions.get(advice_id)
+        if age_s is not None:
+            return GateDecision(
+                advice_id=advice_id,
+                authority=AuthorityLevel.SILENT,
+                emit=False,
+                reason=f"global_dedupe: advice_id emitted {age_s:.0f}s ago",
+                adjusted_score=0.0,
+                original_score=base_score,
+            )
 
     # ---- Filter 3: Obvious-from-context suppression ----
     suppressed, suppression_reason = _check_obvious_suppression(
