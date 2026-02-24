@@ -12,8 +12,6 @@ import re
 from typing import Any, Dict, Optional
 
 from lib.diagnostics import log_debug
-from lib.cognitive_learner import get_cognitive_learner
-
 
 # ===== Domain Detection =====
 
@@ -93,20 +91,6 @@ def detect_domain(text: str) -> Optional[str]:
         return None
 
     return max(domain_scores, key=domain_scores.get)
-
-
-def _build_advisory_quality(text: str, source: str, confidence: float) -> Dict[str, Any]:
-    """Derive advisory metadata for user-sourced learnings."""
-    try:
-        from .distillation_transformer import transform_for_advisory
-
-        return transform_for_advisory(
-            text,
-            source=source or "user_prompt",
-            reliability=confidence,
-        ).to_dict()
-    except Exception:
-        return {}
 
 
 # ===== Cognitive Signal Patterns =====

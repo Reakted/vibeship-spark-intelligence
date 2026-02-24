@@ -113,9 +113,11 @@ class ImplicitOutcomeTracker:
                 return
             lines = FEEDBACK_FILE.read_text(encoding="utf-8").splitlines()
             if len(lines) > FEEDBACK_FILE_MAX:
-                FEEDBACK_FILE.write_text(
+                tmp = FEEDBACK_FILE.with_suffix(".tmp")
+                tmp.write_text(
                     "\n".join(lines[-FEEDBACK_FILE_MAX:]) + "\n", encoding="utf-8"
                 )
+                tmp.replace(FEEDBACK_FILE)
         except Exception:
             pass
 

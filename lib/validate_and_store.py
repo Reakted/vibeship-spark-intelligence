@@ -7,12 +7,19 @@ validate_and_store_insight(). This ensures every insight is:
 2. Checked by cognitive noise filter
 3. Quarantined on exception (fail-open)
 
-Bypass paths closed (Batch 2):
+Bypass paths closed (Batch 2 + review fixes):
 - memory_capture.py commit_learning()
 - feedback_loop.py _process_decision/outcome/preference()
 - chip_merger.py distillation
 - cognitive_signals.py extract_cognitive_signals()
 - pipeline.py store_deep_learnings() floor
+- hypothesis_tracker.py _promote_to_belief()
+- pattern_detection/aggregator.py promote_pattern()
+- curiosity_engine.py (deprecated)
+
+Intentional direct add_insight() bypasses (documented):
+- pipeline.py:672 — already runs Meta-Ralph before write (would double-roast)
+- depth_trainer.py — batch mode training system (66x speedup, separate domain)
 
 Rollback: Set flow.validate_and_store_enabled=false in tuneables.json
 """
@@ -27,8 +34,14 @@ from typing import Any, Dict, Optional
 
 from .diagnostics import log_debug
 
-# Tuneable rollback switch
+# Tuneable rollback switch (reset to None on hot-reload via reset_enabled_cache)
 _ENABLED: Optional[bool] = None
+
+
+def reset_enabled_cache() -> None:
+    """Clear the cached enabled flag so next call re-reads tuneables."""
+    global _ENABLED
+    _ENABLED = None
 TELEMETRY_FILE = Path.home() / ".spark" / "validate_and_store_telemetry.json"
 
 # Telemetry counters (flushed periodically)
@@ -52,8 +65,9 @@ def _is_enabled() -> bool:
         return True
     # Check tuneables
     try:
-        from .tuneables import get_tuneable
-        val = get_tuneable("flow.validate_and_store_enabled", True)
+        from .tuneables_reload import get_section
+        flow_cfg = get_section("flow")
+        val = flow_cfg.get("validate_and_store_enabled", True)
         _ENABLED = bool(val)
     except Exception:
         _ENABLED = True
@@ -100,7 +114,8 @@ def validate_and_store_insight(
         3. On Meta-Ralph exception → quarantine (fail-open)
 
     Returns:
-        True if stored, False if rejected or quarantined.
+        True if stored, False if rejected by quality gate or noise filter.
+        On Meta-Ralph exception: quarantines for diagnostics AND stores (fail-open).
     """
     if not text or not str(text).strip():
         return False
@@ -151,7 +166,7 @@ def validate_and_store_insight(
             _record("roast_quality")
 
     except Exception as e:
-        # Fail-open: quarantine the insight and continue
+        # Fail-open: quarantine the insight for diagnostics, then continue to storage
         _record("quarantined")
         try:
             from .advisory_quarantine import record_quarantine_item
@@ -164,8 +179,8 @@ def validate_and_store_insight(
             )
         except Exception:
             pass
-        log_debug("validate_and_store", "meta_ralph_failed_quarantined", e)
-        return False
+        log_debug("validate_and_store", "meta_ralph_failed_quarantined_continuing", e)
+        # Fall through to cognitive storage (true fail-open)
 
     # Step 2: Store through cognitive learner (has built-in noise filter)
     try:

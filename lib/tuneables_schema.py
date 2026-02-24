@@ -115,6 +115,13 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "minimax_model": TuneableSpec("str", "MiniMax-M2.5", None, None, "MiniMax model name"),
     },
 
+    # ---- flow: intelligence flow pipeline ----
+    "flow": {
+        "validate_and_store_enabled": TuneableSpec("bool", True, None, None,
+            "Enable unified validate_and_store_insight entry point. "
+            "When False, callers bypass Meta-Ralph and write directly to cognitive store"),
+    },
+
     # ---- advisory_engine: engine behavior ----
     "advisory_engine": {
         "enabled": TuneableSpec("bool", True, None, None, "Enable the advisory engine"),
@@ -137,6 +144,10 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "selective_ai_min_remaining_ms": TuneableSpec("float", 1800, 0, 20000, "Min ms remaining for AI synth"),
         "selective_ai_min_authority": TuneableSpec("str", "whisper", None, None, "Min authority for AI synth",
                                                    ["silent", "whisper", "note", "warning", "block"]),
+        "fallback_budget_cap": TuneableSpec("int", 1, 0, 10,
+            "Max fallback emissions per budget window. 0 = unlimited (old behavior)"),
+        "fallback_budget_window": TuneableSpec("int", 5, 1, 100,
+            "Number of tool calls per fallback budget window"),
     },
 
     # ---- advisory_gate: emission gating ----

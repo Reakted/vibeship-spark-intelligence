@@ -668,6 +668,8 @@ def store_deep_learnings(
 
             if roast_result.verdict == RoastVerdict.QUALITY or allow_low_volume_pass:
                 # Use refined version if MetaRalph improved it
+                # NOTE: Intentional direct add_insight() — pipeline already ran Meta-Ralph
+                # above, so routing through validate_and_store would double-roast.
                 final_text = roast_result.refined_version or insight_text
                 ok = bool(learner.add_insight(
                     category=category,

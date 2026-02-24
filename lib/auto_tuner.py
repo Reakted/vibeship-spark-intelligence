@@ -491,6 +491,12 @@ class AutoTuner:
         by_source = self.get_effectiveness_data()
         current_boosts = self._config.get("source_boosts", {})
 
+        # Clamp any out-of-bounds boosts from previous wider ranges
+        for src, val in list(current_boosts.items()):
+            clamped = max(self.BOOST_MIN, min(self.BOOST_MAX, float(val)))
+            if clamped != float(val):
+                current_boosts[src] = clamped
+
         # Compute global average effectiveness (weighted by sample count)
         total_helpful = sum(s.get("helpful", 0) for s in by_source.values())
         total_samples = sum(s.get("total", 0) for s in by_source.values())

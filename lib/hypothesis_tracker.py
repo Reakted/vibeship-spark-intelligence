@@ -328,12 +328,12 @@ class HypothesisTracker:
             return  # Already promoted
 
         try:
-            from .cognitive_learner import get_cognitive_learner, CognitiveCategory
-            learner = get_cognitive_learner()
+            from .cognitive_learner import CognitiveCategory
+            from .validate_and_store import validate_and_store_insight
 
-            insight = learner.add_insight(
+            stored = validate_and_store_insight(
+                text=hypothesis.statement,
                 category=CognitiveCategory.REASONING,
-                insight=hypothesis.statement,
                 context=f"Validated hypothesis ({hypothesis.accuracy:.0%} accuracy over {hypothesis.sample_size} predictions)",
                 confidence=hypothesis.accuracy,
                 source="hypothesis_tracker",

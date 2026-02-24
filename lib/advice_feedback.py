@@ -23,7 +23,7 @@ CORRELATION_SCHEMA_VERSION = 2
 
 
 def _rotate_jsonl(path: Path, max_lines: int) -> None:
-    """Trim a JSONL file to its last *max_lines* lines (size-estimated)."""
+    """Trim a JSONL file to its last *max_lines* lines (atomic temp+rename)."""
     try:
         if not path.exists():
             return
@@ -34,7 +34,9 @@ def _rotate_jsonl(path: Path, max_lines: int) -> None:
         lines = path.read_text(encoding="utf-8").splitlines()
         if len(lines) <= max_lines:
             return
-        path.write_text("\n".join(lines[-max_lines:]) + "\n", encoding="utf-8")
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text("\n".join(lines[-max_lines:]) + "\n", encoding="utf-8")
+        tmp.replace(path)
     except Exception:
         pass
 

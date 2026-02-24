@@ -484,14 +484,16 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
 
     if "fallback_budget_cap" in cfg:
         try:
-            FALLBACK_BUDGET_CAP = max(0, int(cfg.get("fallback_budget_cap") or FALLBACK_BUDGET_CAP))
+            raw = cfg["fallback_budget_cap"]
+            FALLBACK_BUDGET_CAP = max(0, int(raw if raw is not None else FALLBACK_BUDGET_CAP))
             applied.append("fallback_budget_cap")
         except Exception:
             warnings.append("invalid_fallback_budget_cap")
 
     if "fallback_budget_window" in cfg:
         try:
-            FALLBACK_BUDGET_WINDOW = max(1, int(cfg.get("fallback_budget_window") or FALLBACK_BUDGET_WINDOW))
+            raw = cfg["fallback_budget_window"]
+            FALLBACK_BUDGET_WINDOW = max(1, int(raw if raw is not None else FALLBACK_BUDGET_WINDOW))
             applied.append("fallback_budget_window")
         except Exception:
             warnings.append("invalid_fallback_budget_window")
@@ -1461,10 +1463,15 @@ def _fallback_budget_record(kind: str) -> None:
 
 
 def _fallback_budget_tick() -> None:
-    """Increment the call counter and reset the window when exhausted."""
+    """Increment the call counter and reset the window when exhausted.
+
+    Window semantics: with FALLBACK_BUDGET_WINDOW=5, calls 1-5 are in one window.
+    Reset happens *after* the window is full (call > window), so the Nth call
+    is still inside the window it started in.
+    """
     _fallback_budget["calls"] = _fallback_budget.get("calls", 0) + 1
-    if _fallback_budget["calls"] >= FALLBACK_BUDGET_WINDOW:
-        _fallback_budget["calls"] = 0
+    if _fallback_budget["calls"] > FALLBACK_BUDGET_WINDOW:
+        _fallback_budget["calls"] = 1
         _fallback_budget["quick_emits"] = 0
         _fallback_budget["packet_emits"] = 0
 
@@ -1632,18 +1639,19 @@ def on_pre_tool(
                     route = "live_quick"
                     _fallback_budget_record("quick")
                 except Exception:
+                    # Quick fallback failed — fall through to full retrieval below
                     t_live = time.time() * 1000.0
-                advice_items = advise_on_tool(
-                    tool_name,
-                    tool_input or {},
-                    context=state.user_intent,
-                    include_mind=INCLUDE_MIND_IN_MEMORY,
-                    track_retrieval=False,  # track retrieval only for *delivered* advice (after gating)
-                    log_recent=False,  # recent_advice should reflect *delivered* advice, not retrieval fanout
-                    trace_id=resolved_trace_id,
-                )
-                _mark("advisor_retrieval", t_live)
-                route = "live"
+                    advice_items = advise_on_tool(
+                        tool_name,
+                        tool_input or {},
+                        context=state.user_intent,
+                        include_mind=INCLUDE_MIND_IN_MEMORY,
+                        track_retrieval=False,
+                        log_recent=False,
+                        trace_id=resolved_trace_id,
+                    )
+                    _mark("advisor_retrieval", t_live)
+                    route = "live"
             else:
                 t_live = time.time() * 1000.0
                 advice_items = advise_on_tool(
