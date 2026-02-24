@@ -16,6 +16,7 @@ from typing import Dict, List, Any
 from datetime import datetime
 
 from lib.cognitive_learner import get_cognitive_learner, CognitiveCategory
+from lib.config_authority import resolve_section
 from lib.exposure_tracker import record_exposures
 from lib.queue import _tail_lines
 from lib.chips.registry import get_registry
@@ -206,12 +207,8 @@ def _load_merge_tuneables() -> Dict[str, float]:
                 use_host_tuneables = TUNEABLES_FILE.resolve() != (Path.home() / ".spark" / "tuneables.json").resolve()
             except Exception:
                 use_host_tuneables = False
-        if use_host_tuneables and TUNEABLES_FILE.exists():
-            # Accept UTF-8 with BOM (common on Windows).
-            data = json.loads(TUNEABLES_FILE.read_text(encoding="utf-8-sig"))
-            section = data.get("chip_merge") or {}
-            if isinstance(section, dict):
-                cfg = section
+        if use_host_tuneables:
+            cfg = resolve_section("chip_merge", runtime_path=TUNEABLES_FILE).data
     except Exception:
         cfg = {}
 

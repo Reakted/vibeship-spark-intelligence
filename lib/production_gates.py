@@ -11,11 +11,14 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any, Dict, List
 
+from .config_authority import resolve_section
+
 
 SPARK_DIR = Path.home() / ".spark"
 COGNITIVE_FILE = SPARK_DIR / "cognitive_insights.json"
 EFFECTIVENESS_FILE = SPARK_DIR / "advisor" / "effectiveness.json"
 CHIP_INSIGHTS_DIR = SPARK_DIR / "chip_insights"
+TUNEABLES_FILE = SPARK_DIR / "tuneables.json"
 
 
 @dataclass
@@ -362,11 +365,18 @@ def load_live_metrics() -> LoopMetrics:
     )
 
 
-def _load_loop_thresholds_from_tuneables() -> LoopThresholds:
-    """Load production gate thresholds from ~/.spark/tuneables.json when present."""
+def _load_loop_thresholds_from_tuneables(
+    path: Path | None = None,
+    *,
+    baseline_path: Path | None = None,
+) -> LoopThresholds:
+    """Load production-gate thresholds through config authority."""
     default = LoopThresholds()
-    data = _read_json(SPARK_DIR / "tuneables.json", {})
-    cfg = data.get("production_gates") if isinstance(data, dict) else None
+    cfg = resolve_section(
+        "production_gates",
+        baseline_path=baseline_path,
+        runtime_path=(path or TUNEABLES_FILE),
+    ).data
     if not isinstance(cfg, dict):
         return default
 

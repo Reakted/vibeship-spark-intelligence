@@ -18,7 +18,6 @@ Design constraints
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 import hashlib
@@ -26,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from lib.config_authority import env_bool, resolve_section
 from lib.queue import read_recent_events, EventType, _tail_lines
 
 
@@ -67,23 +67,17 @@ def _ensure_dirs():
 
 
 def _load_memory_emotion_config() -> Dict[str, Any]:
-    cfg: Dict[str, Any] = {}
-    try:
-        if TUNEABLES_FILE.exists():
-            data = json.loads(TUNEABLES_FILE.read_text(encoding="utf-8-sig"))
-            if isinstance(data, dict):
-                mem = data.get("memory_emotion")
-                if isinstance(mem, dict):
-                    cfg = mem
-    except Exception:
-        cfg = {}
-    return cfg
+    resolved = resolve_section(
+        "memory_emotion",
+        runtime_path=TUNEABLES_FILE,
+        env_overrides={
+            "write_capture_enabled": env_bool("SPARK_MEMORY_EMOTION_WRITE_CAPTURE"),
+        },
+    )
+    return resolved.data if isinstance(resolved.data, dict) else {}
 
 
 def _emotion_write_capture_enabled() -> bool:
-    env = os.getenv("SPARK_MEMORY_EMOTION_WRITE_CAPTURE")
-    if env is not None:
-        return str(env).strip().lower() not in {"0", "false", "no", "off"}
     cfg = _load_memory_emotion_config()
     raw = cfg.get("write_capture_enabled", True)
     if isinstance(raw, bool):

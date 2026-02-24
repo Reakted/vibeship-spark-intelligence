@@ -14,13 +14,13 @@ they are decisions to track through the full lifecycle.
 """
 
 import hashlib
-import json
 import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..config_authority import resolve_section
 from ..eidos.models import Step, Evaluation, ActionType
 
 
@@ -31,17 +31,8 @@ REQUEST_TRACKER_MAX_AGE_SECONDS = 3600.0
 
 
 def _load_request_tracker_config() -> Dict[str, Any]:
-    try:
-        if TUNEABLES_FILE.exists():
-            # Accept UTF-8 with BOM (common on Windows).
-            data = json.loads(TUNEABLES_FILE.read_text(encoding="utf-8-sig"))
-            if isinstance(data, dict):
-                cfg = data.get("request_tracker") or {}
-                if isinstance(cfg, dict):
-                    return cfg
-    except Exception:
-        pass
-    return {}
+    resolved = resolve_section("request_tracker", runtime_path=TUNEABLES_FILE)
+    return resolved.data if isinstance(resolved.data, dict) else {}
 
 
 def _apply_request_tracker_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
@@ -102,6 +93,16 @@ def get_request_tracker_config() -> Dict[str, Any]:
 
 
 _apply_request_tracker_config(_load_request_tracker_config())
+try:
+    from ..tuneables_reload import register_reload as _register_request_tracker_reload
+
+    _register_request_tracker_reload(
+        "request_tracker",
+        lambda _cfg: apply_request_tracker_config(_load_request_tracker_config()),
+        label="request_tracker.reload_from",
+    )
+except Exception:
+    pass
 
 
 @dataclass

@@ -67,6 +67,31 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "queue_batch_size": TuneableSpec("int", 100, 50, 1000, "Event queue batch processing size"),
     },
 
+    # ---- pipeline: runtime pipeline behavior ----
+    "pipeline": {
+        "importance_sampling_enabled": TuneableSpec(
+            "bool", False, None, None, "Enable backlog importance sampling",
+        ),
+        "low_priority_keep_rate": TuneableSpec(
+            "float", 0.25, 0.0, 1.0, "Retention rate for low-priority events when sampling",
+        ),
+        "macros_enabled": TuneableSpec(
+            "bool", False, None, None, "Enable macro workflow mining",
+        ),
+        "macro_min_count": TuneableSpec(
+            "int", 3, 2, 20, "Min pattern count for macro extraction",
+        ),
+        "min_insights_floor": TuneableSpec(
+            "int", 1, 0, 3, "Minimum insights generated on high-volume cycles",
+        ),
+        "floor_events_threshold": TuneableSpec(
+            "int", 20, 1, 200, "Event threshold to apply min_insights_floor",
+        ),
+        "floor_soft_min_events": TuneableSpec(
+            "int", 2, 1, 50, "Soft minimum events for floor eligibility",
+        ),
+    },
+
     # ---- semantic: semantic retrieval tuning ----
     "semantic": {
         "enabled": TuneableSpec("bool", True, None, None, "Enable semantic retrieval"),
@@ -158,6 +183,13 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
             "Repeated advice cooldown (s). Prevents same advice_id from re-emitting. "
             "See also: advisory_engine.advisory_text_repeat_cooldown_s (exact text), "
             "shown_advice_ttl_s (shown-state marker with source TTL scaling)"),
+        "agreement_gate_enabled": TuneableSpec(
+            "bool", False, None, None,
+            "Escalate warnings only when multiple sources agree",
+        ),
+        "agreement_min_sources": TuneableSpec(
+            "int", 2, 1, 5, "Minimum agreeing sources for escalation when agreement gate is enabled",
+        ),
         "shown_advice_ttl_s": TuneableSpec("int", 600, 5, 86400,
             "Shown-advice suppression TTL (s). Base TTL for shown-state markers; "
             "scaled per-source via source_ttl_multipliers and per-category via "
@@ -296,13 +328,21 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "run_interval_s": TuneableSpec("int", 43200, 3600, 604800, "Run interval (s, default 12h)"),
         "max_change_per_run": TuneableSpec("float", 0.15, 0.01, 0.5, "Max boost change per run"),
         "source_boosts": TuneableSpec("dict", {}, None, None, "Per-source boost multipliers"),
-        "min_boost": TuneableSpec("float", 0.8, 0.0, 5.0,
+        "min_boost": TuneableSpec("float", 0.2, 0.0, 2.0,
             "Floor for source boost — prevents auto-tuner from dampening proven sources below this value"),
-        "max_boost": TuneableSpec("float", 1.1, 0.5, 10.0,
+        "max_boost": TuneableSpec("float", 2.0, 0.5, 2.0,
             "Ceiling for source boost — prevents runaway amplification of any single source"),
         "source_effectiveness": TuneableSpec("dict", {}, None, None, "Computed effectiveness rates"),
         "tuning_log": TuneableSpec("list", [], None, None, "Recent tuning events (max 50)"),
         "max_changes_per_cycle": TuneableSpec("int", 4, 1, 20, "Max source adjustments per cycle"),
+        "apply_cross_section_recommendations": TuneableSpec(
+            "bool", False, None, None,
+            "Allow auto-tuner to write recommendations outside auto_tuner.source_boosts",
+        ),
+        "recommendation_sections_allowlist": TuneableSpec(
+            "list", [], None, None,
+            "Optional allowlist of sections auto-tuner may update when cross-section writes are enabled",
+        ),
     },
 
     # ---- chip_merge: chip deduplication ----
@@ -364,17 +404,49 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
     "bridge_worker": {
         "enabled": TuneableSpec("bool", True, None, None, "Enable bridge worker"),
         "mind_sync_enabled": TuneableSpec("bool", True, None, None, "Enable incremental Mind sync each cycle"),
-        "mind_sync_limit": TuneableSpec("int", 8, 0, 200, "Max cognitive insights to sync to Mind per cycle"),
+        "mind_sync_limit": TuneableSpec("int", 20, 0, 200, "Max cognitive insights to sync to Mind per cycle"),
         "mind_sync_min_readiness": TuneableSpec("float", 0.45, 0.0, 1.0, "Min advisory readiness for Mind sync"),
         "mind_sync_min_reliability": TuneableSpec("float", 0.35, 0.0, 1.0, "Min reliability for Mind sync"),
         "mind_sync_max_age_s": TuneableSpec("int", 1209600, 0, 31536000, "Max insight age for Mind sync (s)"),
         "mind_sync_drain_queue": TuneableSpec("bool", True, None, None, "Drain bounded Mind offline queue each cycle"),
-        "mind_sync_queue_budget": TuneableSpec("int", 2, 0, 1000, "Max offline queue entries drained per cycle"),
+        "mind_sync_queue_budget": TuneableSpec("int", 25, 0, 1000, "Max offline queue entries drained per cycle"),
+    },
+
+    # ---- sync ----
+    "sync": {
+        "mode": TuneableSpec("str", "core", None, None, "Sync adapter mode", ["core", "all"]),
+        "adapters_enabled": TuneableSpec("list", [], None, None, "Optional explicit sync target allowlist"),
+        "adapters_disabled": TuneableSpec("list", [], None, None, "Optional sync target denylist"),
+        "mind_limit": TuneableSpec("int", 2, 0, 6, "Max Mind highlights included in sync context"),
+    },
+
+    # ---- queue ----
+    "queue": {
+        "max_events": TuneableSpec("int", 10000, 100, 1000000, "Rotate queue after this many events"),
+        "max_queue_bytes": TuneableSpec("int", 10485760, 1048576, 1073741824, "Max queue file size in bytes"),
+        "compact_head_bytes": TuneableSpec("int", 5242880, 1048576, 134217728, "Head compaction target size in bytes"),
+        "tail_chunk_bytes": TuneableSpec("int", 65536, 4096, 4194304, "Tail read chunk size in bytes"),
     },
 
     # ---- memory_capture ----
     "memory_capture": {
         "enabled": TuneableSpec("bool", True, None, None, "Enable memory capture"),
+        "auto_save_threshold": TuneableSpec(
+            "float", 0.65, 0.1, 1.0, "Importance threshold for auto-save",
+        ),
+        "suggest_threshold": TuneableSpec(
+            "float", 0.55, 0.05, 0.99, "Importance threshold for suggestion queue",
+        ),
+        "max_capture_chars": TuneableSpec(
+            "int", 2000, 200, 20000, "Max characters captured from source text",
+        ),
+    },
+
+    # ---- request_tracker ----
+    "request_tracker": {
+        "max_pending": TuneableSpec("int", 50, 10, 500, "Max pending requests tracked"),
+        "max_completed": TuneableSpec("int", 200, 50, 5000, "Max completed requests retained"),
+        "max_age_seconds": TuneableSpec("float", 3600.0, 60.0, 604800.0, "Pending request timeout window"),
     },
 
     # ---- observatory: Obsidian pipeline visualization ----
@@ -418,6 +490,7 @@ _DOC_KEY_SECTIONS = {"source_roles"}
 # Module consumer map (which module reads which section)
 SECTION_CONSUMERS: Dict[str, List[str]] = {
     "values": ["lib/pipeline.py", "lib/advisor.py", "lib/eidos/models.py"],
+    "pipeline": ["lib/pipeline.py"],
     "semantic": ["lib/semantic_retriever.py", "lib/advisor.py"],
     "triggers": ["lib/advisor.py"],
     "promotion": ["lib/promoter.py", "lib/auto_promote.py"],
@@ -433,14 +506,18 @@ SECTION_CONSUMERS: Dict[str, List[str]] = {
     "scheduler": ["lib/bridge_cycle.py"],
     "source_roles": ["lib/advisory_engine.py", "lib/auto_tuner.py"],
     "auto_tuner": ["lib/auto_tuner.py"],
-    "chip_merge": ["lib/chips/runtime.py"],
+    "chip_merge": ["lib/chips/runtime.py", "lib/chip_merger.py"],
     "advisory_quality": ["lib/advisory_synthesizer.py"],
     "advisory_preferences": ["lib/advisory_preferences.py"],
-    "memory_emotion": ["lib/memory_store.py"],
+    "memory_emotion": ["lib/memory_store.py", "lib/memory_banks.py"],
     "memory_learning": ["lib/memory_store.py"],
     "memory_retrieval_guard": ["lib/memory_store.py"],
     "bridge_worker": ["lib/bridge_cycle.py"],
+    "sync": ["lib/context_sync.py"],
+    "queue": ["lib/queue.py"],
     "memory_capture": ["lib/memory_capture.py"],
+    "request_tracker": ["lib/pattern_detection/request_tracker.py"],
+    "observatory": ["lib/observatory/config.py"],
     "production_gates": ["lib/production_gates.py"],
 }
 

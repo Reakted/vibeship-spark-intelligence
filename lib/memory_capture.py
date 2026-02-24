@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from lib.cognitive_learner import CognitiveCategory, get_cognitive_learner
+from lib.config_authority import resolve_section
 from lib.queue import read_recent_events, EventType
 from lib.memory_banks import store_memory
 from lib.outcome_log import append_outcome, make_outcome_id
@@ -322,17 +323,8 @@ _CHANNEL_PREFIX_RE = re.compile(r"^\s*\[[^\]]+\]\s*", re.IGNORECASE)
 
 
 def _load_memory_capture_config() -> Dict[str, Any]:
-    try:
-        if TUNEABLES_FILE.exists():
-            # Accept UTF-8 with BOM (common on Windows).
-            data = json.loads(TUNEABLES_FILE.read_text(encoding="utf-8-sig"))
-            if isinstance(data, dict):
-                cfg = data.get("memory_capture") or {}
-                if isinstance(cfg, dict):
-                    return cfg
-    except Exception:
-        pass
-    return {}
+    resolved = resolve_section("memory_capture", runtime_path=TUNEABLES_FILE)
+    return resolved.data if isinstance(resolved.data, dict) else {}
 
 
 def _apply_memory_capture_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
@@ -385,7 +377,21 @@ def get_memory_capture_config() -> Dict[str, Any]:
     }
 
 
+def _reload_memory_capture_config(_cfg: Dict[str, Any]) -> None:
+    _apply_memory_capture_config(_load_memory_capture_config())
+
+
 _apply_memory_capture_config(_load_memory_capture_config())
+try:
+    from lib.tuneables_reload import register_reload as _register_memory_capture_reload
+
+    _register_memory_capture_reload(
+        "memory_capture",
+        _reload_memory_capture_config,
+        label="memory_capture.reload_from",
+    )
+except Exception:
+    pass
 
 
 def normalize_memory_text(text: str) -> str:

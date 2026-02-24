@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .config_authority import resolve_section
+
 # httpx moved to advisory_packet_llm_reranker.py
 
 PACKET_DIR = Path.home() / ".spark" / "advice_packets"
@@ -588,20 +590,19 @@ def _trace_coverage_summary(
     return coverage
 
 
-def _load_packet_store_config(path: Optional[Path] = None) -> Dict[str, Any]:
-    """Load advisory packet store tuneables."""
+def _load_packet_store_config(
+    path: Optional[Path] = None,
+    *,
+    baseline_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Load advisory packet-store tuneables through config authority."""
     tuneables = path or (Path.home() / ".spark" / "tuneables.json")
-    if not tuneables.exists():
-        return {}
-    try:
-        data = json.loads(tuneables.read_text(encoding="utf-8-sig"))
-    except Exception:
-        try:
-            data = json.loads(tuneables.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-    section = data.get("advisory_packet_store") if isinstance(data, dict) else {}
-    return section if isinstance(section, dict) else {}
+    resolved = resolve_section(
+        "advisory_packet_store",
+        baseline_path=baseline_path,
+        runtime_path=tuneables,
+    )
+    return resolved.data if isinstance(resolved.data, dict) else {}
 
 
 def _to_int(value: Any, default: int = 0) -> int:
@@ -3107,6 +3108,10 @@ def apply_packet_store_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     return {"applied": applied, "warnings": warnings}
 
 
+def _reload_packet_store_config(_cfg: Dict[str, Any]) -> None:
+    apply_packet_store_config(_load_packet_store_config())
+
+
 def get_packet_store_config() -> Dict[str, Any]:
     return {
         "packet_ttl_s": float(DEFAULT_PACKET_TTL_S),
@@ -3276,7 +3281,7 @@ try:
 
         _register_packet_store_reload(
             "advisory_packet_store",
-            apply_packet_store_config,
+            _reload_packet_store_config,
             label="advisory_packet_store.apply_config",
         )
     except Exception:
