@@ -607,8 +607,8 @@ Advice Emitted
           ▼
 ┌─────────────────────┐
 │ AUTO-TUNER           │  Reads effectiveness cache
-│                      │  Adjusts source_weights (additive, not multiplicative)
-│                      │  Bounded: min_boost=0.2, max_boost=3.0
+│                      │  Adjusts source_boosts (additive, not multiplicative)
+│                      │  Bounded: min_boost=0.8, max_boost=1.1 (tightened from 0.2-3.0)
 │                      │  Cycle: every 12h, max 4 changes
 └─────────┬───────────┘
           │
@@ -789,12 +789,10 @@ KEPT (Codex corrected — NOT dead):
 ### Rollback Strategy
 
 All behavioral changes behind tuneables:
-- `flow.validate_and_store_enabled: true/false` (Batch 2)
-- `flow.quarantine_enabled: true/false` (Batch 2)
-- `flow.fallback_budget_cap: 0` to disable cap (Batch 3)
-- Per-source fail-open toggles for write path (Batch 2)
-- Backward-compat tuneable aliases for renamed keys (Batch 5)
-- Dual-write mode for storage consolidation (Batch 4)
+- `flow.validate_and_store_enabled: true/false` (Batch 2) — bypasses Meta-Ralph, direct writes resume
+- `advisory_engine.fallback_budget_cap: 0` to disable cap (Batch 3) — unlimited fallbacks (old behavior)
+- `advisory_engine.fallback_budget_window: N` to change window size (Batch 3)
+- `SPARK_VALIDATE_AND_STORE=0` env var override (Batch 2) — emergency bypass
 
 ### Risk Matrix (from Codex Review)
 
@@ -812,17 +810,56 @@ All behavioral changes behind tuneables:
 
 | Metric | Current | Target |
 |--------|---------|--------|
-| Bypass paths | 18 (was 15 + 3 from Codex) | 0 validated, rest quarantined |
-| Insight write entry points | 6+ scattered | 1 (`validate_and_store_insight()`) |
-| Dedup evaluation passes | 2 (gate + engine) | 1 (absorbed into gate) |
-| Feedback systems | 8 | 2 (tracker + cache) |
-| Storage files | ~38 | ~20 |
-| Tuneable keys | ~127 | ~95 (conservative, not aggressive) |
-| Noise pattern locations | 5 | 1 (`noise_patterns.py`) |
-| Config loaders | 20+ | 1 (`config_loader.py`) |
-| Env var shadows | 97 undocumented | 97 documented + deprecation warnings |
+| Bypass paths | 18 → **~10** | 8 closed, 2 intentional (documented) |
+| Insight write entry points | 6+ scattered → **1** | `validate_and_store_insight()` + 2 documented bypasses |
+| Dedup evaluation passes | 2 → **1** | Absorbed into gate (single pass) |
+| Feedback systems | 8 | 8 (deferred — different schemas, high risk) |
+| Storage files | ~38 | ~38 (rotation caps added, race fix applied) |
+| Tuneable keys | ~127 → **~124** | Removed source_weights + eidos.max_steps, added flow.* |
+| Noise pattern locations | 5 → **1** | `noise_patterns.py` (consumers import from shared) |
+| Config loaders | 20+ | 20+ (deferred — low urgency) |
+| Env var shadows | 97 undocumented | 97 undocumented (deferred — low urgency) |
 | Synthesis waste | unknown | measured via telemetry → target 0 |
 | Emit rate | ~18% | ~18-20% (same or better) |
 | Follow rate | ~97% | >= 97% (higher quality) |
 | Quarantine volume | N/A | < 10 per cycle (healthy) |
 | Fallback emit ratio | unknown | < 5% of total emissions |
+
+---
+
+## Implementation Status (2026-02-24)
+
+All 7 batches implemented + Codex peer review fixes applied.
+
+| Batch | Status | Commit | Key Changes |
+|-------|--------|--------|-------------|
+| 0 | COMPLETE | `a5e063e` | 68 safety-net tests + telemetry baselines |
+| 1 | COMPLETE | `595da97` | Reordered on_pre_tool cheap checks first, absorbed dedupe into gate |
+| 2 | COMPLETE | `1a5c454` | Unified validate_and_store_insight, closed 8 bypass paths |
+| 3 | COMPLETE | `8eb1fbf` | Fallback budget cap (rate-limited fallback emissions) |
+| 4 | COMPLETE | `4aca454` | outcome_links race fix, rotation caps on 5 JSONL files |
+| 5 | COMPLETE | `f9f3357` | Removed dead keys, tightened auto-tuner bounds [0.8, 1.1] |
+| 6 | COMPLETE | `2519b14` | Extracted shared noise_patterns module |
+| Review | COMPLETE | `720c9ad` | 2 critical + 6 high + 2 medium from Codex review |
+
+### Codex Review Findings (2026-02-24)
+
+| Severity | Finding | Resolution |
+|----------|---------|------------|
+| CRITICAL | UnboundLocalError in quick-fallback (t_live unbound) | Moved advise_on_tool into except block |
+| CRITICAL | validate_and_store fail-open was actually fail-closed | Removed return False after quarantine |
+| HIGH | Rollback switch imported non-existent get_tuneable | Use tuneables_reload.get_section("flow") |
+| HIGH | fallback_budget_cap=0 impossible (or-coercion) | Use cfg[key] if not None else default |
+| HIGH | Fallback budget window off-by-one | Changed >= to >, reset to 1 not 0 |
+| HIGH | JSONL rotation race (concurrent append lost) | open-read-truncate-write on single file handle |
+| HIGH | Auto-tuner out-of-bounds boosts not clamped on load | Added _clamp_existing_boosts() in __init__ |
+| HIGH | 3 remaining add_insight() bypass paths | Wired hypothesis_tracker, aggregator, curiosity_engine |
+| MEDIUM | fallback_budget_cap/window missing from schema | Added to tuneables_schema.py + config |
+| MEDIUM | Dead code in cognitive_signals.py | Removed get_cognitive_learner import, _build_advisory_quality |
+
+### Deferred Items (low value or high risk)
+
+- Advisory log file merge (3→1): different schemas in hot paths, high risk
+- Cooldown key rename to advisory_suppression.*: cosmetic, complex backward-compat
+- config_loader.py extraction: 20+ loaders, low urgency
+- env_utils.py extraction: 3 implementations, low urgency

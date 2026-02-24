@@ -75,6 +75,7 @@ def _val_repr(val: Any) -> str:
 
 # Which sections have register_reload() calls in code
 KNOWN_RELOAD_SECTIONS = {
+    "flow": ["lib/validate_and_store.py"],
     "advisory_engine": ["lib/advisory_engine.py"],
     "advisory_gate": ["lib/advisory_gate.py"],
     "advisory_packet_store": ["lib/advisory_packet_store.py"],
@@ -90,7 +91,7 @@ KNOWN_RELOAD_SECTIONS = {
 # Schema sections from tuneables_schema.py
 SCHEMA_SECTIONS = [
     "values", "semantic", "triggers", "promotion", "synthesizer",
-    "advisory_engine", "advisory_gate", "advisory_packet_store",
+    "flow", "advisory_engine", "advisory_gate", "advisory_packet_store",
     "advisory_prefetch", "advisor", "retrieval", "meta_ralph", "eidos",
     "scheduler", "source_roles", "auto_tuner", "chip_merge",
     "advisory_quality", "advisory_preferences", "memory_emotion",
@@ -100,6 +101,7 @@ SCHEMA_SECTIONS = [
 
 # Impact rating for each section
 SECTION_IMPACT = {
+    "flow": "HIGH",
     "advisory_engine": "CRITICAL",
     "advisory_gate": "CRITICAL",
     "advisor": "HIGH",
@@ -516,7 +518,7 @@ def generate_tuneables_deep_dive(data: Dict[int, Dict[str, Any]]) -> str:
             lines.append("> **AUTO-TUNER CONCERN**: The following sources have high effectiveness but are being dampened:")
             for d in dampened:
                 lines.append(f"> - `{d['source']}`: effectiveness={d['effectiveness']}, boost={d['boost']}")
-            lines.append("> Consider adding min_boost floors to prevent over-dampening of proven sources.")
+            lines.append("> min_boost floor is now 0.8 (tightened from 0.2 in Batch 5). Boosts are clamped on load.")
             lines.append("")
 
         # Recent changes
@@ -597,8 +599,9 @@ def generate_tuneables_deep_dive(data: Dict[int, Dict[str, Any]]) -> str:
     lines.append("| 5. Meta-Ralph gate | `meta_ralph` | `quality_threshold`, `needs_work_threshold` |")
     lines.append("| 6. Cognitive/EIDOS | `eidos`, `semantic` | `max_steps`, `min_fusion_score`, `dedupe_similarity` |")
     lines.append("| 7. Mind sync | `bridge_worker`, `advisor` | `mind_sync_*`, `mind_max_stale_s`, `mind_min_salience` |")
-    lines.append("| 8. Pre-tool orchestrator | `advisory_engine` | `max_ms`, `include_mind`, `delivery_stale_s` |")
-    lines.append("| 9. Retrieval fanout | `advisor`, `retrieval`, `semantic` | `min_rank_score`, `source_weights`, `level` |")
+    lines.append("| 5.5. Unified write gate | `flow` | `validate_and_store_enabled` (bypass Meta-Ralph if false) |")
+    lines.append("| 8. Pre-tool orchestrator | `advisory_engine` | `max_ms`, `include_mind`, `delivery_stale_s`, `fallback_budget_cap/window` |")
+    lines.append("| 9. Retrieval fanout | `advisor`, `retrieval`, `semantic` | `min_rank_score`, `level` |")
     lines.append("| 10. Gate + suppression | `advisory_gate` | `max_emit_per_call`, `*_cooldown_*`, `*_threshold` |")
     lines.append("| 11. Synth + emit | `synthesizer`, `advisory_quality` | `mode`, `preferred_provider` |")
     lines.append("| 12. Post-tool feedback | `advisory_engine` | `advisory_text_repeat_cooldown_s`, `global_dedupe_cooldown_s` |")
@@ -652,7 +655,7 @@ def generate_tuneables_deep_dive(data: Dict[int, Dict[str, Any]]) -> str:
     if dampened:
         for d in dampened:
             lines.append(f"| MEDIUM | Auto-tuner dampening | `{d['source']}` boost={d['boost']} | "
-                         f"Add `min_boost` floor (e.g., 1.0 for cognitive) | {d['effectiveness']} effective but being reduced |")
+                         f"min_boost floor is 0.8 (clamped on load) | {d['effectiveness']} effective but being reduced |")
 
     # Schema missing keys
     gate_schema_missing = []

@@ -80,6 +80,24 @@ def _pct(part: float, whole: float) -> float:
     return 100.0 * float(part) / float(whole)
 
 
+def _rejection_telemetry() -> Dict[str, Any]:
+    """Read advisory rejection telemetry for fallback budget and quarantine checks."""
+    path = _SPARK_DIR / "advisory_rejection_telemetry.json"
+    data = _read_json(path)
+    return data if isinstance(data, dict) else {}
+
+
+def _quarantine_count() -> int:
+    """Count lines in insight_quarantine.jsonl."""
+    path = _SPARK_DIR / "insight_quarantine.jsonl"
+    if not path.exists():
+        return 0
+    try:
+        return sum(1 for line in path.open("r", encoding="utf-8", errors="replace") if line.strip())
+    except Exception:
+        return 0
+
+
 def _suppression_24h() -> Dict[str, Any]:
     rows = _read_jsonl(_SPARK_DIR / "advisory_decision_ledger.jsonl", max_rows=12000)
     cutoff = time.time() - 86400.0
@@ -114,6 +132,8 @@ def _suppression_24h() -> Dict[str, Any]:
                 buckets["global_dedupe"] += count
             elif "budget exhausted" in low:
                 buckets["budget_exhausted"] += count
+            elif "fallback_budget" in low or "fallback budget" in low:
+                buckets["fallback_budget"] += count
             elif "on cooldown" in low:
                 buckets["tool_cooldown"] += count
             elif "phase=" in low or "exploration phase" in low:
@@ -202,6 +222,8 @@ def generate_system_flow_operator_playbook(data: Dict[int, Dict[str, Any]]) -> s
     suppression = _suppression_24h()
     feedback = _feedback_24h()
     mind = _mind_status()
+    rejection = _rejection_telemetry()
+    quarantine_count = _quarantine_count()
 
     queue_pending = int((data.get(2) or {}).get("estimated_pending", 0) or 0)
     pipeline_ts = _parse_ts((data.get(3) or {}).get("last_cycle_ts"))
@@ -213,6 +235,13 @@ def generate_system_flow_operator_playbook(data: Dict[int, Dict[str, Any]]) -> s
         (suppression.get("buckets") or {}).get("shown_ttl", 0),
         max(int(suppression.get("suppressed_total", 0) or 0), 1),
     )
+
+    # Fallback budget utilization
+    fb_quick = int(rejection.get("fallback_quick_emit", 0) or 0)
+    fb_packet = int(rejection.get("fallback_packet_emit", 0) or 0)
+    total_emits = int((suppression.get("outcomes") or {}).get("emitted", 0) or 0)
+    fb_total = fb_quick + fb_packet
+    fb_pct = _pct(fb_total, max(total_emits, 1))
 
     checks = [
         {
@@ -277,6 +306,24 @@ def generate_system_flow_operator_playbook(data: Dict[int, Dict[str, Any]]) -> s
             "cmd": "python -c \"import json, pathlib; p=pathlib.Path.home()/'.spark'/'bridge_worker_heartbeat.json'; print(json.loads(p.read_text()).get('stats',{}).get('mind_sync'))\"",
             "immediate": "If stale, verify mind service and bridge worker are both running.",
             "fix": "Harden mind auth/service checks and queue drain behavior.",
+        },
+        {
+            "name": "Fallback budget utilization",
+            "value": f"{fb_pct:.1f}% of emissions are fallbacks ({fb_total}/{max(total_emits, 1)})",
+            "threshold": "<= 50% preferred",
+            "status": _status_badge(fb_pct <= 30.0, fb_pct <= 50.0),
+            "cmd": "python -c \"import json, pathlib; p=pathlib.Path.home()/'.spark'/'advisory_rejection_telemetry.json'; print(json.loads(p.read_text()) if p.exists() else 'no data')\"",
+            "immediate": "If high, retrieval is failing and fallback path is dominating emissions.",
+            "fix": "Investigate retrieval failures; check cognitive store size and advisor source health.",
+        },
+        {
+            "name": "Quarantine volume",
+            "value": f"{quarantine_count} items",
+            "threshold": "<= 50 normal; > 50 investigate Meta-Ralph health",
+            "status": _status_badge(quarantine_count <= 50, quarantine_count <= 100),
+            "cmd": "python -c \"import pathlib; p=pathlib.Path.home()/'.spark'/'insight_quarantine.jsonl'; print(sum(1 for l in open(p) if l.strip()) if p.exists() else 0)\"",
+            "immediate": "If high (>50/day), Meta-Ralph may be broken or misconfigured — insights are being quarantined rather than properly scored.",
+            "fix": "Check Meta-Ralph configuration, verify quality_threshold is float not int, inspect quarantine entries for patterns.",
         },
     ]
 

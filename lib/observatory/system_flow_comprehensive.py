@@ -288,6 +288,8 @@ def _suppression_snapshot_24h() -> Dict[str, Any]:
                 buckets["global_dedupe"] += count
             elif "budget exhausted" in low:
                 buckets["budget_exhausted"] += count
+            elif "fallback_budget" in low or "fallback budget" in low:
+                buckets["fallback_budget"] += count
             elif "on cooldown" in low:
                 buckets["tool_cooldown"] += count
             elif "phase=" in low or "exploration phase" in low:
@@ -395,6 +397,7 @@ def generate_system_flow_comprehensive(data: Dict[int, Dict[str, Any]]) -> str:
     lines.append("3. Bridge cycle + pipeline process events into learning signals and derived metrics.")
     lines.append("4. Memory capture identifies high-signal candidate learnings and stores/queues them.")
     lines.append("5. Meta-Ralph quality gate filters weak/noisy learnings before they become intelligence.")
+    lines.append("5.5. `validate_and_store` is the unified write gate — every cognitive write routes through Meta-Ralph. On Meta-Ralph failure it quarantines AND stores (fail-open).")
     lines.append("6. Cognitive store + EIDOS distillations + chips build reusable intelligence assets.")
     lines.append("7. Mind sync persists selected insights for cross-session retrieval and recall.")
     lines.append("8. Pre-tool advisory engine retrieves, gates, dedupes, synthesizes, and emits advice.")
@@ -569,6 +572,14 @@ def generate_system_flow_comprehensive(data: Dict[int, Dict[str, Any]]) -> str:
     lines.append("3. Tune cooldowns by tool family and phase instead of one-size-fits-all.")
     lines.append("4. Add emit-rate floor alerts when follow-rate stays high but emissions drop.")
     lines.append("5. Decide prefetch strategy (enable with metrics, or simplify/remove inactive complexity).")
+    lines.append("")
+    lines.append("### Gaps Closed by Intelligence Flow Evolution")
+    lines.append("")
+    lines.append("- **Unified write path**: 8 bypass paths closed via `validate_and_store` — all cognitive writes now routed through Meta-Ralph.")
+    lines.append("- **Fallback budget**: Quick/packet fallback emissions rate-limited (`fallback_budget_cap=1`, `window=5`).")
+    lines.append("- **Auto-tuner bounds**: Clamped from [0.2, 3.0] to [0.8, 1.1] on load, preventing runaway boosts.")
+    lines.append("- **JSONL rotation race**: Atomic single-handle rotation prevents lost appends during concurrent writes.")
+    lines.append("- **Advisory reorder**: Cheap checks first in `on_pre_tool()` (safety, text repeat, budget before retrieval).")
     lines.append("")
 
     lines.append("## Linked Docs")

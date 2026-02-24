@@ -12,11 +12,20 @@ The advisory system delivers contextual guidance to Claude Code before every too
 Hook: on_pre_tool(session_id, tool_name, tool_input, trace_id)
   |
   v
-1. Session State (advisory_state.py)
+1. Safety Check — abort early if tool is in safety bypass list
+  |
+  v
+2. Session State (advisory_state.py)
    Load/create session, detect task phase, check cooldowns
   |
   v
-2. Advisory Packet Store (advisory_packet_store.py)
+3. Text Repeat Guard — suppress if same context text was recently emitted
+  |
+  v
+4. Emission Budget Check — skip retrieval if budget already exhausted
+  |
+  v
+5. Advisory Packet Store (advisory_packet_store.py)
    Read/watch advisory packet cache and watchtower metadata
   |
   v
@@ -25,25 +34,57 @@ Hook: on_pre_tool(session_id, tool_name, tool_input, trace_id)
    - on miss/fallback: go live retrieval below
   |
   v
-3. Retrieve (advisor.py)
+6. Retrieve (advisor.py)
    Query 7 sources -> rank by 3-factor model -> top 8 items
   |
   v
-4. Quality Gate (advisory_gate.py)
-   Score each item -> assign authority -> emit top 2
+7. Quality Gate (advisory_gate.py)
+   Score each item -> assign authority -> gate absorbs advice_id dedupe -> emit top 2
   |
   v
-5. Synthesize (advisory_synthesizer.py)
+8. Synthesize (advisory_synthesizer.py)
    Compose text (programmatic or AI-assisted)
   |
   v
-6. Emit (advisory_emitter.py)
+9. Emit (advisory_emitter.py)
    Print to stdout: "[SPARK] advice text"
   |
   v
-7. Post-Emit (advisory_state.py + advisory_engine.py)
-   Mark shown (TTL), update fingerprint, log diagnostics
+10. Post-Emit (advisory_state.py + advisory_engine.py)
+    Mark shown (TTL), update fingerprint, log diagnostics
 ```
+
+> **Note**: Steps 1-4 are cheap checks that run before any retrieval. This reorder
+> (Intelligence Flow Evolution, Batch 2) prevents unnecessary retrieval when the
+> result would be suppressed anyway.
+
+### Write Path: validate_and_store
+
+All cognitive insight writes now route through `validate_and_store_insight()` (`lib/validate_and_store.py`):
+
+```
+caller (bridge_cycle, hypothesis_tracker, etc.)
+  |
+  v
+validate_and_store_insight(text, source, category, ...)
+  |
+  v
+Meta-Ralph quality gate
+  |
+  ├─ pass  → cognitive_learner.add_insight()
+  ├─ reject → return False (logged)
+  └─ exception → quarantine to insight_quarantine.jsonl AND add_insight() (fail-open)
+```
+
+**Rollback**: Set `flow.validate_and_store_enabled = false` in tuneables to bypass.
+
+### Fallback Budget
+
+When retrieval fails or returns no items, advisory_engine falls back to quick/packet
+fallback emissions. These are rate-limited:
+
+- `advisory_engine.fallback_budget_cap = 1` (max fallback emissions per window)
+- `advisory_engine.fallback_budget_window = 5` (window size in calls)
 
 ---
 

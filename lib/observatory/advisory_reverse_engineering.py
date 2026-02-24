@@ -102,6 +102,8 @@ def _classify_reason(reason: str) -> str:
         return "other"
     if "global_dedupe" in text:
         return "global_dedupe"
+    if "fallback_budget" in text or "fallback budget" in text:
+        return "fallback_rate_limit"
     if "budget exhausted" in text:
         return "budget_exhausted"
     if "on cooldown" in text:
@@ -110,6 +112,8 @@ def _classify_reason(reason: str) -> str:
         return "shown_ttl"
     if "phase=" in text or "during exploration phase" in text:
         return "context_phase_guard"
+    if "context_repeat" in text or "early_exit_context_repeat" in text:
+        return "context_repeat"
     if "duplicate" in text or "repeat" in text:
         return "duplicate_repeat"
     return "other"

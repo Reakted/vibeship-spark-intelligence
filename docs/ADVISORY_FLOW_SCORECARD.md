@@ -48,14 +48,14 @@ This scorecard reviews the full intelligence flow for:
 |2|Signals are filtered for minimum semantic signal (importance/quality)?|5|Importance scorer plus pattern set used before roast.|
 3|Extraction path avoids synthetic test prompts or benchmark chatter?|5|`[PIPELINE_TEST` filter in cognitive extraction.|
 4|Low-quality / garbled lines are pruned before storage?|5|Injection/garbage checks and advisory suppression gates exist.|
-|5|Every stored insight has advisory transform metadata for downstream ranking?|3|Distillation paths improved, but non-distilled user insights still depend on transform fallback quality in some spots.|
+|5|Every stored insight has advisory transform metadata for downstream ranking?|4|Distillation paths improved. validate_and_store ensures Meta-Ralph quality gate runs on all writes; non-distilled user insights still depend on transform fallback quality in some spots.|
 |6|User-derived cognitive signals are transformed into advisory format?|5|Task 5 now applies `transform_for_advisory` before add_insight.|
 |7|Reliability and validation are separated from readiness signals?|5|`reliability` and `advisory_readiness` are both preserved.|
 |8|`advisory_readiness` is persisted and backfilled for legacy insights?|5|Task 2 implemented backfill.|
 |9|Conflict resolution avoids dropping validated learning when contradictory variants exist?|4|Conflict resolution exists with effective reliability and recency weighting.|
 |10|Low-signal telemetry-style patterns are blocked from insight store?|4|Multiple suppression patterns and `_is_noise_evidence` / `_is_primitive` checks exist.|
 |11|Actionability and reasoning are extracted into advisory-quality fields?|5|`distillation_transformer` computes dimensions and `unified_score`.|
-|12|Suppressed distillations are retained for audit if needed?|3|Suppression currently prunes from advisory flow; audit visibility is partial.|
+|12|Suppressed distillations are retained for audit if needed?|4|Suppression prunes from advisory flow; quarantined insights now stored in `insight_quarantine.jsonl` for audit. Rejection telemetry persisted.|
 |13|Semantic index writes happen on insight write (best effort) to support retrieval?|5|Cognitive indexing path in learner present.|
 |14|Insight de-duplication avoids churn from counter variants?|5|Normalization and dedupe paths exist in learner and chip merger.|
 |15|Promotion logic is conservative (reliability/times constraints)?|4|Promote-to-wisdom and promoter thresholds exist, but policy may still be too conservative in dynamic workflows.|
@@ -65,12 +65,12 @@ This scorecard reviews the full intelligence flow for:
 |19|Advisory-quality suppression reasons are stored for debugging?|5|Suppression reason is carried in advisory quality dict when generated.|
 |20|Distillation pipeline is traceable from source event to final insight key?|4|Good traceability in logs and metadata, with few edge gaps in adapter-only paths.|
 
-**Part 2 total: 82 / 100**
+**Part 2 total: 84 / 100** (was 82, +2 from unified write path and quarantine store)
 
 ### Part 2 recommendations
 - P1: ensure every path that creates stored cognition (including chip merges and eidos imports) produces advisory_quality + advisory_readiness for consistency.
 - P1: add a lightweight source-level audit column in insights for `source_mode` (`tool|user|eidos|chip|mind`) to prevent silent mix bias.
-- P2: tighten suppression telemetry to preserve suppressed candidates in a dedicated "quarantine" store.
+- ~~P2: tighten suppression telemetry to preserve suppressed candidates in a dedicated "quarantine" store.~~ DONE: `insight_quarantine.jsonl` + `advisory_rejection_telemetry.json` now persist both quarantined insights and per-reason suppression counters.
 
 ## Part 3 — Advisory retrieval, ranking, and hot-path delivery (20 questions)
 
@@ -89,7 +89,7 @@ This scorecard reviews the full intelligence flow for:
 |11|Low-quality/noisy results are filtered before synthesis/gate?|4|Quality/dedup and suppression logic exist, but some semantic edge cases remain.|
 |12|Result provenance (`source`,`provider_path`,`route`) is retained for decision audits?|5|Recent improvements added provenance fields in logs.|
 |13|Hot path avoids expensive full fusion when packet lookup succeeds?|5|Fallback-path intent to avoid heavy retrieval on hot path now present.|
-|14|Fallback emission from advisory engine includes actionable command/check?|4|Actionability enforcement exists with next-check append.|
+|14|Fallback emission from advisory engine includes actionable command/check?|5|Actionability enforcement exists with next-check append. Fallback emissions now rate-limited via fallback_budget_cap/window.|
 |15|Legacy advisor compatibility still retained for resilience?|5|Legacy fallback still available behind safeguards.|
 |16|Contextual recency aging is applied to avoid stale recommendations dominating?|4|Effective recency and reliability flows are present.|
 |17|Duplicate recommendations are de-duplicated across sources?|4|Cross-source de-dupe and caps exist, but collisions still occur in rare edge cases.|

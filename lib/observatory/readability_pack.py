@@ -172,6 +172,8 @@ def generate_topic_finder() -> str:
     lines.append("| Where are advisory bottlenecks? | [[advisory_reverse_engineering|Advisory Reverse Engineering]] | suppression buckets + top reasons |")
     lines.append("| How do I debug by symptom? | [[troubleshooting_by_symptom|Troubleshooting by Symptom]] | symptom table + first commands |")
     lines.append("| What changed after my tuning edits? | [[changes_since_last_regen|Changes Since Last Regen]] | metric deltas + movement status |")
+    lines.append("| Are writes going through validate_and_store? | [[stages/05-meta-ralph|Stage 5 - Meta-Ralph]] | validate_and_store telemetry section |")
+    lines.append("| Is fallback budget limiting emissions? | [[stages/08-advisory|Stage 8 - Advisory]] | fallback budget subsection |")
     lines.append("| What should we build next? | [[../Advisory Implementation Tasks|Advisory Implementation Tasks]] | task backlog + acceptance criteria |")
     lines.append("")
     lines.append("## Power Navigation")
@@ -212,6 +214,13 @@ def generate_glossary() -> str:
         ("Shown TTL", "Time window during which recently shown advice is suppressed from re-emission."),
         ("Task Phase", "Inferred execution phase (exploration/planning/implementation/testing/debugging/deployment)."),
         ("Tool Cooldown", "Per-tool temporary suppression window to reduce advisory spam."),
+        ("Validate and Store", "Unified write gate (`lib/validate_and_store.py`) that routes every cognitive insight through Meta-Ralph before storage. Fail-open: quarantines on error, then stores anyway."),
+        ("Noise Patterns", "Shared module (`lib/noise_patterns.py`) consolidating noise detection regex from 5 locations into one importable set."),
+        ("Fallback Budget", "Rate-limiter on quick/packet fallback emissions (`fallback_budget_cap` / `fallback_budget_window` in tuneables advisory_engine section)."),
+        ("Flow Tuneables", "The `flow` tuneable section controlling unified write-path behavior, notably `validate_and_store_enabled`."),
+        ("Fail-Open Quarantine", "On Meta-Ralph exception during validate_and_store: the insight is logged to `~/.spark/insight_quarantine.jsonl` AND still stored in cognitive (true fail-open)."),
+        ("Rejection Telemetry", "Per-reason counters at every advisory exit path, flushed to `~/.spark/advisory_rejection_telemetry.json`."),
+        ("Source Boosts", "Auto-tuner multipliers per advice source, clamped to [0.8, 1.1] and stored in tuneables `auto_tuner.source_boosts`."),
     ]
     lines = []
     lines.append(_frontmatter("Glossary", ["observatory", "glossary", "reference"]))
@@ -275,6 +284,7 @@ def generate_troubleshooting_by_symptom(current_snapshot: Dict[str, Any]) -> str
     lines.append("|---|---|---|---|")
     lines.append("| Advice feels too quiet | [[stages/08-advisory|Stage 8 - Advisory]] | Over-suppression from TTL/dedupe/cooldowns | `python scripts/generate_observatory.py --force` |")
     lines.append("| Advice repeats too much | [[advisory_reverse_engineering|Advisory Reverse Engineering]] | Weak dedupe or short repeat cooldown | `python -c \"import json, pathlib; p=pathlib.Path.home()/'.spark'/'advisory_decision_ledger.jsonl'; print(len(p.read_text().splitlines()))\"` |")
+    lines.append("| High rejection rate or quarantine spikes | [[stages/05-meta-ralph|Stage 5 - Meta-Ralph]] | Meta-Ralph threshold drift or flow.validate_and_store_enabled toggle | `python -c \"import json, pathlib; t=pathlib.Path.home()/'.spark'/'validate_and_store_telemetry.json'; print(json.loads(t.read_text()) if t.exists() else 'no telemetry')\"` |")
     lines.append("| Pipeline appears frozen | [[stages/03-pipeline|Stage 3 - Pipeline]] | Bridge cycle not running or crash loop | `python -c \"import json, pathlib; p=pathlib.Path.home()/'.spark'/'pipeline_state.json'; print(json.loads(p.read_text()))\"` |")
     lines.append("| Queue keeps growing | [[stages/02-queue|Stage 2 - Queue]] | Intake exceeds consumption, or worker stale | `python -c \"import lib.queue as q; print(q.get_queue_stats())\"` |")
     lines.append("| Advice quality feels weak | [[stages/05-meta-ralph|Stage 5 - Meta-Ralph]] | Low-quality insights passing/overfitting | `python -m pytest -q tests/test_safety_guardrails.py tests/test_sparkd_hardening.py` |")
