@@ -259,9 +259,9 @@
     "mode": "all"
   },
   "source_roles": {
-    "_doc": "Defines each source's PRIMARY job. Distillers are NOT advisory sources Ã¢â‚¬â€ measure them on pattern quality, not helpfulness.",
+    "_doc": "Defines each source's PRIMARY job. Distillers are NOT advisory sources -- measure them on pattern quality, not helpfulness.",
     "distillers": {
-      "_doc": "These sources distill/funnel/learn Ã¢â‚¬â€ advisory helpfulness is NOT their metric",
+      "_doc": "These sources distill/funnel/learn -- advisory helpfulness is NOT their metric",
       "cognitive": {
         "role": "learner",
         "metric": "insight_diversity_and_validation_rate",
@@ -279,7 +279,7 @@
       }
     },
     "direct_advisory": {
-      "_doc": "These sources exist TO advise Ã¢â‚¬â€ measure them on helpfulness",
+      "_doc": "These sources exist TO advise -- measure them on helpfulness",
       "sources": [
         "semantic",
         "semantic-agentic",

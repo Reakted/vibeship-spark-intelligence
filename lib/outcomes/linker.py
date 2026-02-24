@@ -66,7 +66,7 @@ class OutcomeLinker:
             # Create link if relevant
             if recency > 0.2 or context_match > 0.5:
                 link = OutcomeLink(
-                    outcome_id=f"out_{hashlib.sha1(outcome.content.encode('utf-8', errors='ignore')).hexdigest()[:10]}",
+                    outcome_id=f"out_{hashlib.sha1((outcome.content or '').encode('utf-8', errors='ignore')).hexdigest()[:10]}",
                     insight_id=insight.get("id") or f"ins_{hashlib.sha1(str(insight).encode('utf-8', errors='ignore')).hexdigest()[:10]}",
                     outcome_type=outcome.type.value,
                     confidence=outcome.confidence * recency * max(0.5, context_match),
@@ -107,7 +107,7 @@ class OutcomeLinker:
         """Calculate how well outcome context matches insight."""
         score = 0.3  # Base
 
-        outcome_content = outcome.content.lower()
+        outcome_content = (outcome.content or "").lower()
         insight_content = str(insight.get("content", "")).lower()
         captured = insight.get("captured_data", {})
 

@@ -219,28 +219,9 @@ def extract_cognitive_signals(text: str, session_id: str, trace_id: Optional[str
     # If any cognitive signals found, extract and roast
     if signals_found:
         try:
-            from lib.meta_ralph import get_meta_ralph
-
-            ralph = get_meta_ralph()
             learning = _derive_candidate(text, signals_found)
             if not learning:
                 return
-
-            result = ralph.roast(
-                learning,
-                source="user_prompt",
-                context={
-                    "signals": signals_found,
-                    "session_id": session_id,
-                    "trace_id": trace_id,
-                    "importance_score": importance_score,
-                    "is_priority": importance_score and importance_score >= 0.7,
-                    "domain": detected_domain,
-                }
-            )
-
-            if result.verdict.value == "quality":
-                log_debug("cognitive_signals", f"CAPTURED: [{signals_found}] {text[:50]}...", None)
 
             from lib.cognitive_learner import CognitiveCategory
             category = CognitiveCategory.USER_UNDERSTANDING  # default

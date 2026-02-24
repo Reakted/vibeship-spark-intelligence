@@ -1969,7 +1969,13 @@ def on_pre_tool(
                     task_plane=task_plane,
                 )
                 if fallback_emitted:
+                    state.last_advisory_packet_id = ""
+                    state.last_advisory_route = str(route or "")
+                    state.last_advisory_tool = str(tool_name or "")
+                    state.last_advisory_advice_ids = []
+                    state.last_advisory_at = time.time()
                     state.last_advisory_text_fingerprint = repeat_meta["fingerprint"]
+                    state.last_advisory_context_fingerprint = context_fp
             except Exception as e:
                 log_debug("advisory_engine", "AE_FALLBACK_EMIT_FAILED", e)
                 fallback_error = build_error_fields(str(e), "AE_FALLBACK_EMIT_FAILED")
