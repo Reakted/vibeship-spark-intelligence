@@ -6,6 +6,26 @@ Navigation hub: `docs/GLOSSARY.md`
 
 ---
 
+## Configuration Precedence (Canonical)
+
+Spark runtime now resolves tuneables using a single authority model:
+
+1. `lib/tuneables_schema.py` defaults
+2. `config/tuneables.json` baseline
+3. `~/.spark/tuneables.json` runtime overrides
+4. Explicit env overrides (allowlisted per key)
+
+Reference: `docs/CONFIG_AUTHORITY.md`
+
+Core runtime sections now routed through this model:
+- `advisory_engine`, `advisory_gate`, `advisor`, `synthesizer`, `semantic`, `triggers`
+- `meta_ralph`, `eidos`, `promotion`, `memory_emotion`, `memory_learning`, `memory_retrieval_guard`
+- `bridge_worker`, `queue`, `pipeline`, `values`
+- `advisory_packet_store`, `advisory_prefetch`, `sync`, `production_gates`
+- `chip_merge`, `memory_capture`, `request_tracker`, `observatory`, `advisory_preferences`
+
+---
+
 ## 0. Advisor Retrieval Router (Carmack Path)
 
 **File:** `lib/advisor.py`
