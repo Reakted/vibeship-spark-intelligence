@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 ReloadCallback = Callable[[Dict[str, Any]], None]
 
 TUNEABLES_FILE = Path.home() / ".spark" / "tuneables.json"
+_CONFIG_DEFAULTS_FILE = Path(__file__).resolve().parent.parent / "config" / "tuneables.json"
 
 _lock = threading.Lock()
 _last_mtime: Optional[float] = None
@@ -187,3 +188,120 @@ def get_registered_sections() -> Dict[str, List[str]]:
             section: [label for label, _ in cbs]
             for section, cbs in _callbacks.items()
         }
+
+
+# ---------------------------------------------------------------------------
+# Default-reconciliation: prevent stale copies of config/ defaults from
+# overriding newer code defaults in ~/.spark/tuneables.json.
+#
+# Problem: when code changes a default (e.g. queue_budget 2→25), the runtime
+# file still has the old value "2" which wins.  This happens because the
+# runtime file stores ALL values, including copies of defaults.
+#
+# Solution: on startup, compare each key in ~/.spark/tuneables.json against
+# config/tuneables.json.  If a runtime value equals the config/ default,
+# it was never intentionally changed — remove it so the code default wins.
+# Keys that DIFFER from config/ defaults are kept (intentional overrides).
+# ---------------------------------------------------------------------------
+
+_RECONCILE_SKIP_SECTIONS = frozenset({
+    # Auto-tuner state is all intentional — never strip it
+    "auto_tuner",
+    # Updated_at is metadata
+    "updated_at",
+})
+
+
+def reconcile_with_defaults(*, dry_run: bool = False) -> Dict[str, Any]:
+    """Strip values from ~/.spark/tuneables.json that match config/ defaults.
+
+    Only keeps values that DIFFER from the version-controlled defaults
+    (i.e. intentional overrides by user or auto-tuner).
+
+    Args:
+        dry_run: If True, report what would change without writing.
+
+    Returns:
+        Dict with keys: stripped (list of "section.key" removed),
+        kept (count of intentional overrides kept), written (bool).
+    """
+    result: Dict[str, Any] = {"stripped": [], "kept": 0, "written": False}
+
+    if not TUNEABLES_FILE.exists():
+        return result
+    if not _CONFIG_DEFAULTS_FILE.exists():
+        logger.warning("reconcile: config/tuneables.json not found at %s", _CONFIG_DEFAULTS_FILE)
+        return result
+
+    try:
+        runtime = json.loads(TUNEABLES_FILE.read_text(encoding="utf-8-sig"))
+        defaults = json.loads(_CONFIG_DEFAULTS_FILE.read_text(encoding="utf-8-sig"))
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("reconcile: read error: %s", e)
+        return result
+
+    if not isinstance(runtime, dict) or not isinstance(defaults, dict):
+        return result
+
+    changed = False
+    for section_name in list(runtime.keys()):
+        if section_name in _RECONCILE_SKIP_SECTIONS:
+            continue
+        runtime_section = runtime.get(section_name)
+        defaults_section = defaults.get(section_name)
+
+        # Only reconcile dict sections (not top-level scalars)
+        if not isinstance(runtime_section, dict) or not isinstance(defaults_section, dict):
+            continue
+
+        keys_to_strip = []
+        for key, runtime_val in list(runtime_section.items()):
+            if key.startswith("_"):
+                # Skip metadata/doc keys
+                continue
+            default_val = defaults_section.get(key, _SENTINEL)
+            if default_val is _SENTINEL:
+                # Key doesn't exist in defaults — it's an intentional addition, keep it
+                result["kept"] += 1
+                continue
+            if _values_match(runtime_val, default_val):
+                keys_to_strip.append(key)
+            else:
+                result["kept"] += 1
+
+        for key in keys_to_strip:
+            result["stripped"].append(f"{section_name}.{key}")
+            if not dry_run:
+                del runtime_section[key]
+                changed = True
+
+    if changed and not dry_run:
+        try:
+            tmp = TUNEABLES_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(runtime, indent=2, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(TUNEABLES_FILE)
+            result["written"] = True
+            logger.info(
+                "reconcile: stripped %d stale defaults, kept %d overrides",
+                len(result["stripped"]), result["kept"],
+            )
+        except Exception as e:
+            logger.warning("reconcile: write failed: %s", e)
+
+    return result
+
+
+_SENTINEL = object()
+
+
+def _values_match(runtime_val: Any, default_val: Any) -> bool:
+    """Compare values loosely (int 8 == float 8.0, etc.)."""
+    if runtime_val == default_val:
+        return True
+    # Handle int/float comparison (common source of drift)
+    try:
+        if isinstance(runtime_val, (int, float)) and isinstance(default_val, (int, float)):
+            return float(runtime_val) == float(default_val)
+    except (TypeError, ValueError):
+        pass
+    return False

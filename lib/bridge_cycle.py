@@ -256,6 +256,22 @@ def run_bridge_cycle(
     import os
     os.environ.setdefault("SPARK_EMBED_BACKEND", "tfidf")
 
+    # --- Reconcile stale defaults on first cycle (once per process) ---
+    global _reconcile_done
+    try:
+        _reconcile_done
+    except NameError:
+        _reconcile_done = False
+    if not _reconcile_done:
+        _reconcile_done = True
+        try:
+            from lib.tuneables_reload import reconcile_with_defaults
+            rc = reconcile_with_defaults()
+            if rc["stripped"]:
+                log_debug("bridge_cycle", "reconcile_stripped_stale_defaults", rc["stripped"])
+        except Exception:
+            pass
+
     # --- Hot-reload tuneables if file changed ---
     try:
         from lib.tuneables_reload import check_and_reload

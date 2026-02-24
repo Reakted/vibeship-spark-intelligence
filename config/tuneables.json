@@ -469,12 +469,12 @@
   "bridge_worker": {
     "enabled": true,
     "mind_sync_enabled": true,
-    "mind_sync_limit": 8,
+    "mind_sync_limit": 20,
     "mind_sync_min_readiness": 0.45,
     "mind_sync_min_reliability": 0.35,
     "mind_sync_max_age_s": 1209600,
     "mind_sync_drain_queue": true,
-    "mind_sync_queue_budget": 2
+    "mind_sync_queue_budget": 25
   },
   "memory_capture": {
     "enabled": true,
