@@ -30,7 +30,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TypedDict, Union
 
 from .diagnostics import log_debug
 
@@ -50,6 +50,15 @@ TELEMETRY_FILE = Path.home() / ".spark" / "validate_and_store_telemetry.json"
 _counters: Dict[str, int] = {}
 _flush_counter = 0
 _FLUSH_INTERVAL = 20
+
+
+class StoreDetails(TypedDict):
+    stored: bool
+    insight_key: str
+    stored_text: str
+
+
+StoreResult = Union[bool, StoreDetails]
 
 
 def _is_enabled() -> bool:
@@ -105,7 +114,7 @@ def validate_and_store_insight(
     *,
     record_exposure: bool = True,
     return_details: bool = False,
-) -> Any:
+) -> StoreResult:
     """
     Validate an insight through Meta-Ralph and store in cognitive learner.
 
@@ -121,7 +130,7 @@ def validate_and_store_insight(
         If return_details=True: dict with {stored, insight_key, stored_text}.
         On Meta-Ralph exception: quarantines for diagnostics AND stores (fail-open).
     """
-    def _result(stored: bool, *, insight_key: str = "", stored_text: str = "") -> Any:
+    def _result(stored: bool, *, insight_key: str = "", stored_text: str = "") -> StoreResult:
         if not return_details:
             return bool(stored)
         return {
