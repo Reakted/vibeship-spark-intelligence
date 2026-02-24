@@ -2,8 +2,8 @@
 
 Auto-generated from `lib/tuneables_schema.py`. Do not edit manually.
 
-**Sections:** 25
-**Total keys:** 153
+**Sections:** 31
+**Total keys:** 231
 
 ## Overview
 
@@ -16,30 +16,36 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 ## Section Index
 
 - [`values`](#values) (10 keys) — `lib/pipeline.py`, `lib/advisor.py`, `lib/eidos/models.py`
+- [`pipeline`](#pipeline) (7 keys) — `lib/pipeline.py`
 - [`semantic`](#semantic) (17 keys) — `lib/semantic_retriever.py`, `lib/advisor.py`
 - [`triggers`](#triggers) (2 keys) — `lib/advisor.py`
 - [`promotion`](#promotion) (5 keys) — `lib/promoter.py`, `lib/auto_promote.py`
 - [`synthesizer`](#synthesizer) (6 keys) — `lib/advisory_synthesizer.py`
-- [`advisory_engine`](#advisory_engine) (13 keys) — `lib/advisory_engine.py`
-- [`advisory_gate`](#advisory_gate) (7 keys) — `lib/advisory_gate.py`
-- [`advisory_packet_store`](#advisory_packet_store) (5 keys) — `lib/advisory_packet_store.py`
+- [`flow`](#flow) (1 keys) — —
+- [`advisory_engine`](#advisory_engine) (16 keys) — `lib/advisory_engine.py`
+- [`advisory_gate`](#advisory_gate) (13 keys) — `lib/advisory_gate.py`, `lib/advisory_state.py`
+- [`advisory_packet_store`](#advisory_packet_store) (19 keys) — `lib/advisory_packet_store.py`
 - [`advisory_prefetch`](#advisory_prefetch) (4 keys) — `lib/advisory_prefetch_worker.py`
-- [`advisor`](#advisor) (19 keys) — `lib/advisor.py`
+- [`advisor`](#advisor) (20 keys) — `lib/advisor.py`
 - [`retrieval`](#retrieval) (4 keys) — `lib/advisor.py`, `lib/semantic_retriever.py`
 - [`meta_ralph`](#meta_ralph) (9 keys) — `lib/meta_ralph.py`
-- [`eidos`](#eidos) (5 keys) — `lib/eidos/models.py`
+- [`eidos`](#eidos) (4 keys) — `lib/eidos/models.py`
 - [`scheduler`](#scheduler) (1 keys) — `lib/bridge_cycle.py`
 - [`source_roles`](#source_roles) (3 keys) — `lib/advisory_engine.py`, `lib/auto_tuner.py`
-- [`auto_tuner`](#auto_tuner) (9 keys) — `lib/auto_tuner.py`
-- [`chip_merge`](#chip_merge) (7 keys) — `lib/chips/runtime.py`
+- [`auto_tuner`](#auto_tuner) (13 keys) — `lib/auto_tuner.py`
+- [`chip_merge`](#chip_merge) (7 keys) — `lib/chips/runtime.py`, `lib/chip_merger.py`
 - [`advisory_quality`](#advisory_quality) (6 keys) — `lib/advisory_synthesizer.py`
 - [`advisory_preferences`](#advisory_preferences) (4 keys) — `lib/advisory_preferences.py`
-- [`memory_emotion`](#memory_emotion) (4 keys) — `lib/memory_store.py`
+- [`memory_emotion`](#memory_emotion) (4 keys) — `lib/memory_store.py`, `lib/memory_banks.py`
 - [`memory_learning`](#memory_learning) (4 keys) — `lib/memory_store.py`
 - [`memory_retrieval_guard`](#memory_retrieval_guard) (3 keys) — `lib/memory_store.py`
-- [`bridge_worker`](#bridge_worker) (1 keys) — `lib/bridge_cycle.py`
-- [`memory_capture`](#memory_capture) (1 keys) — `lib/memory_capture.py`
-- [`production_gates`](#production_gates) (4 keys) — `lib/production_gates.py`
+- [`bridge_worker`](#bridge_worker) (8 keys) — `lib/bridge_cycle.py`
+- [`sync`](#sync) (4 keys) — `lib/context_sync.py`
+- [`queue`](#queue) (4 keys) — `lib/queue.py`
+- [`memory_capture`](#memory_capture) (4 keys) — `lib/memory_capture.py`
+- [`request_tracker`](#request_tracker) (3 keys) — `lib/pattern_detection/request_tracker.py`
+- [`observatory`](#observatory) (16 keys) — `lib/observatory/config.py`
+- [`production_gates`](#production_gates) (10 keys) — `lib/production_gates.py`
 
 ## `values`
 
@@ -57,6 +63,20 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `max_steps` | int | `40` | 5 | 200 | Max episode steps |
 | `advice_cache_ttl` | int | `180` | 10 | 3600 | Advice cache TTL in seconds |
 | `queue_batch_size` | int | `100` | 50 | 1000 | Event queue batch processing size |
+
+## `pipeline`
+
+**Consumed by:** `lib/pipeline.py`
+
+| Key | Type | Default | Min | Max | Description |
+|-----|------|---------|-----|-----|-------------|
+| `importance_sampling_enabled` | bool | `False` | — | — | Enable backlog importance sampling |
+| `low_priority_keep_rate` | float | `0.25` | 0.0 | 1.0 | Retention rate for low-priority events when sampling |
+| `macros_enabled` | bool | `False` | — | — | Enable macro workflow mining |
+| `macro_min_count` | int | `3` | 2 | 20 | Min pattern count for macro extraction |
+| `min_insights_floor` | int | `1` | 0 | 3 | Minimum insights generated on high-volume cycles |
+| `floor_events_threshold` | int | `20` | 1 | 200 | Event threshold to apply min_insights_floor |
+| `floor_soft_min_events` | int | `2` | 1 | 50 | Soft minimum events for floor eligibility |
 
 ## `semantic`
 
@@ -116,6 +136,14 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `preferred_provider` | str | `minimax` | — | — | Preferred AI provider (minimax, ollama, gemini, openai, anthropic) |
 | `minimax_model` | str | `MiniMax-M2.5` | — | — | MiniMax model name |
 
+## `flow`
+
+**Consumed by:** —
+
+| Key | Type | Default | Min | Max | Description |
+|-----|------|---------|-----|-----|-------------|
+| `validate_and_store_enabled` | bool | `True` | — | — | Enable unified validate_and_store_insight entry point. When False, callers bypass Meta-Ralph and write directly to cognitive store |
+
 ## `advisory_engine`
 
 **Consumed by:** `lib/advisory_engine.py`
@@ -129,7 +157,8 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `prefetch_inline_enabled` | bool | `True` | — | — | Enable inline prefetch |
 | `prefetch_inline_max_jobs` | int | `1` | 0 | 10 | Max inline prefetch jobs |
 | `delivery_stale_s` | float | `600` | 60 | 86400 | Delivery staleness threshold (s) |
-| `advisory_text_repeat_cooldown_s` | float | `900` | 30 | 86400 | Text repeat cooldown (s) |
+| `advisory_text_repeat_cooldown_s` | float | `300` | 30 | 86400 | Text repeat cooldown (s). Prevents identical text from re-emitting. See also: advisory_gate.advice_repeat_cooldown_s (same advice_id), advisory_gate.shown_advice_ttl_s (shown-state marker) |
+| `global_dedupe_cooldown_s` | float | `600` | 0 | 86400 | Cross-session global dedupe cooldown (s). Prevents same insight across sessions. Distinct from text_repeat (exact text) and advice_repeat (same ID) |
 | `actionability_enforce` | bool | `True` | — | — | Enforce actionability scoring |
 | `force_programmatic_synth` | bool | `False` | — | — | Force programmatic synthesis |
 | `selective_ai_synth_enabled` | bool | `True` | — | — | Enable selective AI synthesis |
@@ -137,17 +166,22 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `selective_ai_min_authority` | str | `whisper` | — | — | Min authority for AI synth (silent, whisper, note, warning, block) |
 | `fallback_budget_cap` | int | `1` | 0 | 10 | Max fallback emissions per budget window. 0 = unlimited (old behavior) |
 | `fallback_budget_window` | int | `5` | 1 | 100 | Number of tool calls per fallback budget window |
-| `global_dedupe_cooldown_s` | float | `600` | 0 | 86400 | Cross-session global dedupe cooldown (s) |
 
 ## `advisory_gate`
 
-**Consumed by:** `lib/advisory_gate.py`
+**Consumed by:** `lib/advisory_gate.py`, `lib/advisory_state.py`
 
 | Key | Type | Default | Min | Max | Description |
 |-----|------|---------|-----|-----|-------------|
 | `max_emit_per_call` | int | `2` | 1 | 10 | Max advice items emitted per tool call |
 | `tool_cooldown_s` | int | `15` | 1 | 3600 | Same-tool suppression cooldown (s) |
-| `advice_repeat_cooldown_s` | int | `300` | 5 | 86400 | Repeated advice cooldown (s) |
+| `advice_repeat_cooldown_s` | int | `300` | 5 | 86400 | Repeated advice cooldown (s). Prevents same advice_id from re-emitting. See also: advisory_engine.advisory_text_repeat_cooldown_s (exact text), shown_advice_ttl_s (shown-state marker with source TTL scaling) |
+| `agreement_gate_enabled` | bool | `False` | — | — | Escalate warnings only when multiple sources agree |
+| `agreement_min_sources` | int | `2` | 1 | 5 | Minimum agreeing sources for escalation when agreement gate is enabled |
+| `shown_advice_ttl_s` | int | `600` | 5 | 86400 | Shown-advice suppression TTL (s). Base TTL for shown-state markers; scaled per-source via source_ttl_multipliers and per-category via category_cooldown_multipliers. Primary suppression mechanism (~69% of all suppressions) |
+| `category_cooldown_multipliers` | dict | `{}` | — | — | Per-category cooldown multipliers (e.g., {"security": 2.0, "mind": 0.5}) |
+| `source_ttl_multipliers` | dict | `{}` | — | — | Per-source shown TTL scale factors. Low-value sources (baseline=0.5x) get shorter TTL; high-quality sources (cognitive=1.0x) keep full TTL |
+| `tool_cooldown_multipliers` | dict | `{}` | — | — | Per-tool cooldown scale factors. Exploration tools (Read=0.5x) get shorter cooldown; mutation tools (Edit=1.2x) keep longer cooldown |
 | `warning_threshold` | float | `0.68` | 0.2 | 0.99 | Score threshold for WARNING authority |
 | `note_threshold` | float | `0.38` | 0.1 | 0.95 | Score threshold for NOTE authority |
 | `whisper_threshold` | float | `0.27` | 0.01 | 0.9 | Score threshold for WHISPER authority |
@@ -164,6 +198,20 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `relaxed_effectiveness_weight` | float | `2.0` | 0.0 | 10.0 | Effectiveness weight (relaxed mode) |
 | `relaxed_low_effectiveness_threshold` | float | `0.3` | 0.0 | 1.0 | Low effectiveness threshold |
 | `relaxed_low_effectiveness_penalty` | float | `0.5` | 0.0 | 1.0 | Low effectiveness penalty |
+| `relaxed_max_candidates` | int | `6` | 1 | 30 | Top N rows to consider in relaxed match |
+| `packet_lookup_candidates` | int | `6` | 1 | 30 | Top N relaxed match candidates to score |
+| `packet_lookup_llm_enabled` | bool | `False` | — | — | Enable LLM-assisted relaxed lookup rerank |
+| `packet_lookup_llm_provider` | str | `minimax` | — | — | LLM provider for packet rerank |
+| `packet_lookup_llm_timeout_s` | float | `1.2` | 0.2 | 10.0 | Packet lookup LLM timeout (s) |
+| `packet_lookup_llm_top_k` | int | `3` | 1 | 20 | LLM rerank top-K responses |
+| `packet_lookup_llm_min_candidates` | int | `2` | 1 | 20 | Min candidate count before LLM rerank |
+| `packet_lookup_llm_context_chars` | int | `220` | 40 | 5000 | Max context chars sent to lookup LLM |
+| `packet_lookup_llm_provider_url` | str | `https://api.minimax.io/v1` | — | — | Base URL for lookup LLM provider |
+| `packet_lookup_llm_model` | str | `MiniMax-M2.5` | — | — | Model for lookup LLM |
+| `obsidian_enabled` | bool | `False` | — | — | Enable advisory packet export to Obsidian |
+| `obsidian_auto_export` | bool | `False` | — | — | Auto-export packet payloads to Obsidian |
+| `obsidian_export_max_packets` | int | `300` | 1 | 5000 | Max Obsidian packet exports to retain |
+| `obsidian_export_dir` | str | `C:\Users\USER\.spark\advice_packets\obsidian` | — | — | Override Obsidian export directory |
 
 ## `advisory_prefetch`
 
@@ -191,6 +239,8 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `mind_max_stale_s` | int | `86400` | 0 | 604800 | Max Mind staleness (s) |
 | `mind_stale_allow_if_empty` | bool | `False` | — | — | Allow stale Mind if empty |
 | `mind_min_salience` | float | `0.55` | 0.0 | 1.0 | Min Mind memory salience |
+| `mind_reserve_slots` | int | `1` | 0 | 4 | Reserved top advice slots for Mind |
+| `mind_reserve_min_rank` | float | `0.45` | 0.0 | 1.0 | Min rank score for reserved Mind slots |
 | `replay_enabled` | bool | `True` | — | — | Enable replay advisory |
 | `replay_min_strict` | int | `5` | 1 | 100 | Min strict samples for replay |
 | `replay_min_delta` | float | `0.25` | 0.0 | 1.0 | Min improvement delta for replay |
@@ -200,15 +250,6 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `replay_max_records` | int | `2500` | 100 | 50000 | Max replay records |
 | `replay_mode` | str | `standard` | — | — | Replay mode (off, standard, replay) |
 | `guidance_style` | str | `balanced` | — | — | Guidance verbosity (concise, balanced, coach) |
-| ~~`source_weights`~~ | ~~str~~ | — | — | — | **REMOVED** (Batch 5) — was logged only, never used for weighting |
-
-## `flow`
-
-**Consumed by:** `lib/validate_and_store.py`
-
-| Key | Type | Default | Min | Max | Description |
-|-----|------|---------|-----|-----|-------------|
-| `validate_and_store_enabled` | bool | `true` | — | — | Enable unified write path through Meta-Ralph. When false, callers bypass validation and write directly to cognitive store |
 
 ## `retrieval`
 
@@ -243,7 +284,6 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 
 | Key | Type | Default | Min | Max | Description |
 |-----|------|---------|-----|-----|-------------|
-| `max_steps` | int | `40` | 5 | 200 | Max steps per episode |
 | `max_time_seconds` | int | `1200` | 60 | 7200 | Max episode time (s) |
 | `max_retries_per_error` | int | `3` | 1 | 20 | Retry limit per error type |
 | `max_file_touches` | int | `5` | 1 | 50 | Max times to modify same file |
@@ -278,16 +318,18 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `last_run` | str | `""` | — | — | Timestamp of last run |
 | `run_interval_s` | int | `43200` | 3600 | 604800 | Run interval (s, default 12h) |
 | `max_change_per_run` | float | `0.15` | 0.01 | 0.5 | Max boost change per run |
-| `min_boost` | float | `0.8` | 0.0 | 1.0 | Boost floor (tightened from 0.2 in Batch 5). Clamped on load |
-| `max_boost` | float | `1.1` | min+0.1 | 5.0 | Boost ceiling (tightened from 3.0 in Batch 5). Clamped on load |
-| `source_boosts` | dict | `{}` | — | — | Per-source boost multipliers (clamped to [min_boost, max_boost] on load) |
+| `source_boosts` | dict | `{}` | — | — | Per-source boost multipliers |
+| `min_boost` | float | `0.2` | 0.0 | 2.0 | Floor for source boost — prevents auto-tuner from dampening proven sources below this value |
+| `max_boost` | float | `2.0` | 0.5 | 2.0 | Ceiling for source boost — prevents runaway amplification of any single source |
 | `source_effectiveness` | dict | `{}` | — | — | Computed effectiveness rates |
 | `tuning_log` | list | `[]` | — | — | Recent tuning events (max 50) |
 | `max_changes_per_cycle` | int | `4` | 1 | 20 | Max source adjustments per cycle |
+| `apply_cross_section_recommendations` | bool | `False` | — | — | Allow auto-tuner to write recommendations outside auto_tuner.source_boosts |
+| `recommendation_sections_allowlist` | list | `[]` | — | — | Optional allowlist of sections auto-tuner may update when cross-section writes are enabled |
 
 ## `chip_merge`
 
-**Consumed by:** `lib/chips/runtime.py`
+**Consumed by:** `lib/chips/runtime.py`, `lib/chip_merger.py`
 
 | Key | Type | Default | Min | Max | Description |
 |-----|------|---------|-----|-----|-------------|
@@ -325,7 +367,7 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 
 ## `memory_emotion`
 
-**Consumed by:** `lib/memory_store.py`
+**Consumed by:** `lib/memory_store.py`, `lib/memory_banks.py`
 
 | Key | Type | Default | Min | Max | Description |
 |-----|------|---------|-----|-----|-------------|
@@ -362,6 +404,35 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | Key | Type | Default | Min | Max | Description |
 |-----|------|---------|-----|-----|-------------|
 | `enabled` | bool | `True` | — | — | Enable bridge worker |
+| `mind_sync_enabled` | bool | `True` | — | — | Enable incremental Mind sync each cycle |
+| `mind_sync_limit` | int | `20` | 0 | 200 | Max cognitive insights to sync to Mind per cycle |
+| `mind_sync_min_readiness` | float | `0.45` | 0.0 | 1.0 | Min advisory readiness for Mind sync |
+| `mind_sync_min_reliability` | float | `0.35` | 0.0 | 1.0 | Min reliability for Mind sync |
+| `mind_sync_max_age_s` | int | `1209600` | 0 | 31536000 | Max insight age for Mind sync (s) |
+| `mind_sync_drain_queue` | bool | `True` | — | — | Drain bounded Mind offline queue each cycle |
+| `mind_sync_queue_budget` | int | `25` | 0 | 1000 | Max offline queue entries drained per cycle |
+
+## `sync`
+
+**Consumed by:** `lib/context_sync.py`
+
+| Key | Type | Default | Min | Max | Description |
+|-----|------|---------|-----|-----|-------------|
+| `mode` | str | `core` | — | — | Sync adapter mode (core, all) |
+| `adapters_enabled` | list | `[]` | — | — | Optional explicit sync target allowlist |
+| `adapters_disabled` | list | `[]` | — | — | Optional sync target denylist |
+| `mind_limit` | int | `2` | 0 | 6 | Max Mind highlights included in sync context |
+
+## `queue`
+
+**Consumed by:** `lib/queue.py`
+
+| Key | Type | Default | Min | Max | Description |
+|-----|------|---------|-----|-----|-------------|
+| `max_events` | int | `10000` | 100 | 1000000 | Rotate queue after this many events |
+| `max_queue_bytes` | int | `10485760` | 1048576 | 1073741824 | Max queue file size in bytes |
+| `compact_head_bytes` | int | `5242880` | 1048576 | 134217728 | Head compaction target size in bytes |
+| `tail_chunk_bytes` | int | `65536` | 4096 | 4194304 | Tail read chunk size in bytes |
 
 ## `memory_capture`
 
@@ -370,6 +441,42 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | Key | Type | Default | Min | Max | Description |
 |-----|------|---------|-----|-----|-------------|
 | `enabled` | bool | `True` | — | — | Enable memory capture |
+| `auto_save_threshold` | float | `0.65` | 0.1 | 1.0 | Importance threshold for auto-save |
+| `suggest_threshold` | float | `0.55` | 0.05 | 0.99 | Importance threshold for suggestion queue |
+| `max_capture_chars` | int | `2000` | 200 | 20000 | Max characters captured from source text |
+
+## `request_tracker`
+
+**Consumed by:** `lib/pattern_detection/request_tracker.py`
+
+| Key | Type | Default | Min | Max | Description |
+|-----|------|---------|-----|-----|-------------|
+| `max_pending` | int | `50` | 10 | 500 | Max pending requests tracked |
+| `max_completed` | int | `200` | 50 | 5000 | Max completed requests retained |
+| `max_age_seconds` | float | `3600.0` | 60.0 | 604800.0 | Pending request timeout window |
+
+## `observatory`
+
+**Consumed by:** `lib/observatory/config.py`
+
+| Key | Type | Default | Min | Max | Description |
+|-----|------|---------|-----|-----|-------------|
+| `enabled` | bool | `True` | — | — | Enable observatory generation |
+| `auto_sync` | bool | `True` | — | — | Auto-sync on bridge cycle |
+| `sync_cooldown_s` | int | `120` | 10 | 3600 | Min seconds between auto-syncs |
+| `vault_dir` | str | `""` | — | — | Obsidian vault directory path |
+| `generate_canvas` | bool | `True` | — | — | Generate .canvas spatial view |
+| `max_recent_items` | int | `20` | 5 | 100 | Max recent items per stage page |
+| `explore_cognitive_max` | int | `200` | 1 | 5000 | Max cognitive insights to export as detail pages |
+| `explore_distillations_max` | int | `200` | 1 | 5000 | Max EIDOS distillations to export |
+| `explore_episodes_max` | int | `100` | 1 | 2000 | Max EIDOS episodes to export |
+| `explore_verdicts_max` | int | `100` | 1 | 5000 | Max Meta-Ralph verdicts to export |
+| `explore_promotions_max` | int | `200` | 1 | 5000 | Max promotion log entries to export |
+| `explore_advice_max` | int | `200` | 1 | 5000 | Max advisory log entries to export |
+| `explore_routing_max` | int | `100` | 1 | 5000 | Max retrieval routing decisions to export |
+| `explore_tuning_max` | int | `200` | 1 | 5000 | Max tuneable evolution entries to export |
+| `explore_decisions_max` | int | `200` | 1 | 5000 | Max advisory decision ledger entries to export |
+| `explore_feedback_max` | int | `200` | 1 | 5000 | Max implicit feedback entries to export |
 
 ## `production_gates`
 
@@ -381,3 +488,10 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `min_quality_samples` | int | `50` | 5 | 1000 | Min samples for quality gate |
 | `min_quality_rate` | float | `0.3` | 0.0 | 1.0 | Min quality rate (floor) |
 | `max_quality_rate` | float | `0.6` | 0.0 | 1.0 | Max quality rate (ceiling) |
+| `min_advisory_readiness_ratio` | float | `0.4` | 0.0 | 1.0 | Min advisory store readiness ratio |
+| `min_advisory_freshness_ratio` | float | `0.35` | 0.0 | 1.0 | Min advisory store freshness ratio |
+| `max_advisory_inactive_ratio` | float | `0.4` | 0.0 | 1.0 | Max advisory inactive ratio |
+| `min_advisory_avg_effectiveness` | float | `0.35` | 0.0 | 1.0 | Min advisory avg effectiveness |
+| `max_advisory_store_queue_depth` | int | `1200` | 0 | 100000 | Max advisory prefetch queue depth |
+| `max_advisory_top_category_concentration` | float | `0.85` | 0.0 | 1.0 | Max top category concentration |
+

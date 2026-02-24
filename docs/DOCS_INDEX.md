@@ -2,8 +2,15 @@
 
 Canonical navigation hub. Start here.
 
+## First Read Order
+- `docs/SPARK_ONBOARDING_COMPLETE.md` - Canonical first-time onboarding (install -> first insight -> troubleshooting).
+- `docs/GETTING_STARTED_5_MIN.md` - Minimal quick path.
+- `docs/QUICKSTART.md` - CLI and runtime operations quickstart.
+
 ## Core launch docs
 - `README.md`
+- `docs/SPARK_ONBOARDING_COMPLETE.md`
+- `docs/SPARK_CLI_SYSTEM_BLUEPRINT.md`
 - `docs/LAUNCH_DOCUMENTATION_MAP.md`
 - `OSS_ONLY_MANIFEST.md`
 - `docs/GLOSSARY.md`
@@ -35,9 +42,10 @@ Canonical navigation hub. Start here.
 
 ## Tuneables and routing
 - `TUNEABLES.md` — All tuneable parameters, section map, hot-reload matrix
-- `docs/TUNEABLES_REFERENCE.md` — Auto-generated schema reference (25 sections, 153 keys)
+- `docs/CONFIG_AUTHORITY.md` — Canonical precedence model and resolver contract
+- `docs/TUNEABLES_REFERENCE.md` — Auto-generated schema reference from `lib/tuneables_schema.py`
 - `lib/tuneables_schema.py` — Central schema validator (type, bounds, defaults)
-- `lib/tuneables_reload.py` — Hot-reload coordinator (mtime-based, 6 modules registered)
+- `lib/tuneables_reload.py` — Hot-reload coordinator (mtime-based callback dispatch)
 - `lib/tuneables_drift.py` — Drift distance from baseline (`config/tuneables.json`)
 
 ## Chips (domain learning modules)
@@ -106,6 +114,6 @@ Canonical navigation hub. Start here.
 - `prompts/CARMACK_SPARK_REVIEW_PROMPT.md`
 
 ## Learning guide
-- `SPARK_LEARNING_GUIDE.md` — Primitive vs valuable learning, tiers, chips
-- `docs/ONBOARDING.md`
+- `SPARK_LEARNING_GUIDE.md` - Primitive vs valuable learning, tiers, chips
+- `docs/ONBOARDING.md` - Legacy onboarding notes (superseded by `docs/SPARK_ONBOARDING_COMPLETE.md`)
 - `docs/CHANGE_AND_UPGRADE_WORKFLOW.md`

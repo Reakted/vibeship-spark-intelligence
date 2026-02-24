@@ -1,5 +1,8 @@
 # 🧠 Spark Intelligence — Onboarding Guide
 
+> Legacy note: this document is kept for historical/reference context.
+> For current onboarding, use `docs/SPARK_ONBOARDING_COMPLETE.md`.
+
 ## For New Users
 
 ### What is Spark Intelligence?
