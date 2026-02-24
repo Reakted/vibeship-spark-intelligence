@@ -5,6 +5,7 @@ When we detect a success/failure signal, link it back to
 recent insights to validate or invalidate them.
 """
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -65,8 +66,8 @@ class OutcomeLinker:
             # Create link if relevant
             if recency > 0.2 or context_match > 0.5:
                 link = OutcomeLink(
-                    outcome_id=f"out_{hash(outcome.content)%100000}",
-                    insight_id=insight.get("id") or f"ins_{hash(str(insight))%100000}",
+                    outcome_id=f"out_{hashlib.sha1(outcome.content.encode('utf-8', errors='ignore')).hexdigest()[:10]}",
+                    insight_id=insight.get("id") or f"ins_{hashlib.sha1(str(insight).encode('utf-8', errors='ignore')).hexdigest()[:10]}",
                     outcome_type=outcome.type.value,
                     confidence=outcome.confidence * recency * max(0.5, context_match),
                     recency_weight=recency,

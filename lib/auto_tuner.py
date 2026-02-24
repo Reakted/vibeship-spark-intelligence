@@ -377,7 +377,7 @@ class AutoTuner:
 
         # --- Meta-Ralph quality threshold ---
         mr_cfg = tuneables.get("meta_ralph", {})
-        current_qt = int(mr_cfg.get("quality_threshold", 4))
+        current_qt = float(mr_cfg.get("quality_threshold", 4))
         if health.feedback_loop_closure < 0.3 and health.cognitive_growth > 50:
             recs.append(TuneRecommendation(
                 section="meta_ralph", key="quality_threshold",

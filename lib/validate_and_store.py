@@ -206,3 +206,16 @@ def validate_and_store_insight(
         _record("storage_failed")
         log_debug("validate_and_store", "cognitive_store_failed", e)
         return False
+
+
+# Wire reload: reset cached _ENABLED when flow section changes in tuneables
+def _apply_flow_config(cfg: Dict[str, Any]) -> None:
+    """Hot-reload callback: clear _ENABLED cache so next call re-reads tuneables."""
+    reset_enabled_cache()
+
+
+try:
+    from .tuneables_reload import register_reload as _vs_register
+    _vs_register("flow", _apply_flow_config, label="validate_and_store.reset_enabled")
+except ImportError:
+    pass

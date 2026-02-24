@@ -10,6 +10,7 @@ Storage: ~/.spark/advisor/implicit_feedback.jsonl
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -106,20 +107,19 @@ class ImplicitOutcomeTracker:
 
     @staticmethod
     def _rotate_if_needed() -> None:
-        """Trim feedback file using open-read-truncate-write (no lost appends)."""
+        """Trim feedback file using atomic temp-write + os.replace."""
         try:
             if not FEEDBACK_FILE.exists():
                 return
             if FEEDBACK_FILE.stat().st_size // 250 <= FEEDBACK_FILE_MAX:
                 return
-            with open(FEEDBACK_FILE, "r+", encoding="utf-8") as f:
-                lines = f.read().splitlines()
-                if len(lines) <= FEEDBACK_FILE_MAX:
-                    return
-                keep = "\n".join(lines[-FEEDBACK_FILE_MAX:]) + "\n"
-                f.seek(0)
-                f.write(keep)
-                f.truncate()
+            lines = FEEDBACK_FILE.read_text(encoding="utf-8").splitlines()
+            if len(lines) <= FEEDBACK_FILE_MAX:
+                return
+            keep = "\n".join(lines[-FEEDBACK_FILE_MAX:]) + "\n"
+            tmp = FEEDBACK_FILE.with_suffix(".tmp")
+            tmp.write_text(keep, encoding="utf-8")
+            os.replace(str(tmp), str(FEEDBACK_FILE))
         except Exception:
             pass
 

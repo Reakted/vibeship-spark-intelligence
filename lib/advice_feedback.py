@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -25,8 +26,9 @@ CORRELATION_SCHEMA_VERSION = 2
 def _rotate_jsonl(path: Path, max_lines: int) -> None:
     """Trim a JSONL file to its last *max_lines* lines.
 
-    Uses open-read-truncate-write on a single file handle to prevent
-    concurrent append loss (no window between read and replace).
+    Uses atomic temp-write + os.replace to avoid partial-write corruption.
+    A concurrent append between read and replace may lose one line (rare,
+    rotation runs only when file exceeds size estimate).
     """
     try:
         if not path.exists():
@@ -35,14 +37,13 @@ def _rotate_jsonl(path: Path, max_lines: int) -> None:
         estimated_lines = path.stat().st_size // 250
         if estimated_lines <= max_lines:
             return
-        with open(path, "r+", encoding="utf-8") as f:
-            lines = f.read().splitlines()
-            if len(lines) <= max_lines:
-                return
-            keep = "\n".join(lines[-max_lines:]) + "\n"
-            f.seek(0)
-            f.write(keep)
-            f.truncate()
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if len(lines) <= max_lines:
+            return
+        keep = "\n".join(lines[-max_lines:]) + "\n"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(keep, encoding="utf-8")
+        os.replace(str(tmp), str(path))
     except Exception:
         pass
 

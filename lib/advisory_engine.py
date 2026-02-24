@@ -1370,18 +1370,8 @@ def _fallback_guard_allows() -> Dict[str, Any]:
     fallback_count = 0
     emitted_count = 0
     try:
-        if ENGINE_LOG.exists():
-            lines = ENGINE_LOG.read_text(encoding="utf-8").splitlines()[-FALLBACK_RATE_GUARD_WINDOW:]
-        else:
-            lines = []
-        for line in lines:
-            raw = (line or "").strip()
-            if not raw:
-                continue
-            try:
-                row = json.loads(raw)
-            except Exception:
-                continue
+        rows = _tail_jsonl(ENGINE_LOG, FALLBACK_RATE_GUARD_WINDOW)
+        for row in rows:
             event = str(row.get("event") or "")
             if event == "fallback_emit":
                 fallback_count += 1
@@ -1956,6 +1946,16 @@ def on_pre_tool(
 
             fallback_emitted = False
             fallback_error: Optional[Dict[str, Any]] = None
+            # Safety check on fallback text before emit
+            try:
+                from .promoter import is_unsafe_insight as _is_unsafe
+                if fallback_text and _is_unsafe(fallback_text):
+                    log_debug("advisory_engine", f"SAFETY_BLOCK: unsafe fallback blocked for {tool_name}", None)
+                    _record_rejection("safety_blocked_fallback")
+                    save_state(state)
+                    return None
+            except Exception as _sfb_err:
+                log_debug("advisory_engine", "SAFETY_CHECK_FALLBACK_fail_open", _sfb_err)
             try:
                 from .advisory_emitter import emit_advisory
                 fallback_emitted = _emit_advisory_compat(
@@ -2287,6 +2287,35 @@ def on_pre_tool(
             _record_rejection("duplicate_suppressed")
             return None
 
+        # Safety gate: block unsafe content BEFORE emit (pre-emit position).
+        try:
+            from .promoter import is_unsafe_insight
+            if synth_text and is_unsafe_insight(synth_text):
+                log_debug("advisory_engine", f"SAFETY_BLOCK: unsafe content blocked for {tool_name}", None)
+                _record_advisory_decision_ledger(
+                    stage="safety_blocked",
+                    outcome="blocked",
+                    tool_name=tool_name,
+                    intent_family=intent_family,
+                    task_plane=task_plane,
+                    route=route,
+                    packet_id=packet_id,
+                    advice_items=advice_items,
+                    gate_result=gate_result,
+                    session_id=session_id,
+                    trace_id=resolved_trace_id,
+                    extras={
+                        "error_kind": "safety",
+                        "error_code": "AE_SAFETY_BLOCKED",
+                        "emitted_text_preview": (synth_text or "")[:140],
+                    },
+                )
+                _record_rejection("safety_blocked")
+                save_state(state)
+                return None
+        except Exception as safety_err:
+            log_debug("advisory_engine", "SAFETY_CHECK_EXCEPTION_fail_open", safety_err)
+
         t_emit = time.time() * 1000.0
         emitted = _emit_advisory_compat(
             emit_advisory,
@@ -2310,37 +2339,6 @@ def on_pre_tool(
                 effective_text = " ".join(fragments)
         effective_action_meta = _ensure_actionability(effective_text, tool_name, task_plane) if emitted else {"text": effective_text, "added": False, "command": ""}
         effective_text = str(effective_action_meta.get("text") or effective_text)
-
-        # Safety gate: block unsafe content BEFORE persisting side effects.
-        # (Moved from post-emit position to pre-side-effect position in Batch 1.)
-        if emitted and effective_text:
-            try:
-                from .promoter import is_unsafe_insight
-                if is_unsafe_insight(effective_text):
-                    log_debug("advisory_engine", f"SAFETY_BLOCK: unsafe content blocked for {tool_name}", None)
-                    _record_advisory_decision_ledger(
-                        stage="safety_blocked",
-                        outcome="blocked",
-                        tool_name=tool_name,
-                        intent_family=intent_family,
-                        task_plane=task_plane,
-                        route=route,
-                        packet_id=packet_id,
-                        advice_items=advice_items,
-                        gate_result=gate_result,
-                        session_id=session_id,
-                        trace_id=resolved_trace_id,
-                        extras={
-                            "error_kind": "safety",
-                            "error_code": "AE_SAFETY_BLOCKED",
-                            "emitted_text_preview": effective_text[:140],
-                        },
-                    )
-                    _record_rejection("safety_blocked")
-                    save_state(state)
-                    return None
-            except Exception as safety_err:
-                log_debug("advisory_engine", "SAFETY_CHECK_EXCEPTION_fail_open", safety_err)
 
         if emitted:
             shown_ids = [d.advice_id for d in gate_result.emitted]
