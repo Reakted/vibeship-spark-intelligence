@@ -34,6 +34,7 @@ from lib.runtime_hygiene import cleanup_runtime_artifacts
 
 
 BRIDGE_HEARTBEAT_FILE = Path.home() / ".spark" / "bridge_worker_heartbeat.json"
+_reconcile_done = False
 
 # --- OpenClaw notification integration ---
 SPARK_OPENCLAW_NOTIFY = os.environ.get("SPARK_OPENCLAW_NOTIFY", "1").strip().lower() not in {
@@ -255,6 +256,18 @@ def run_bridge_cycle(
     # TF-IDF hashing: ~0MB overhead, 0.4ms/embed, no model download needed.
     import os
     os.environ.setdefault("SPARK_EMBED_BACKEND", "tfidf")
+
+    # --- Reconcile stale defaults on first cycle (once per process) ---
+    global _reconcile_done
+    if not _reconcile_done:
+        _reconcile_done = True
+        try:
+            from lib.tuneables_reload import reconcile_with_defaults
+            rc = reconcile_with_defaults()
+            if rc["stripped"]:
+                log_debug("bridge_cycle", "reconcile_stripped_stale_defaults", rc["stripped"])
+        except Exception:
+            pass
 
     # --- Hot-reload tuneables if file changed ---
     try:

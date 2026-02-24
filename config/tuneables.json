@@ -11,6 +11,15 @@
     "advice_cache_ttl": 180,
     "queue_batch_size": 100
   },
+  "pipeline": {
+    "importance_sampling_enabled": false,
+    "low_priority_keep_rate": 0.25,
+    "macros_enabled": false,
+    "macro_min_count": 3,
+    "min_insights_floor": 1,
+    "floor_events_threshold": 20,
+    "floor_soft_min_events": 2
+  },
   "semantic": {
     "enabled": true,
     "min_similarity": 0.5,
@@ -42,7 +51,7 @@
   },
   "triggers": {
     "enabled": true,
-    "rules_file": "<USER_HOME>\\.spark\\trigger_rules.yaml"
+    "rules_file": ""
   },
   "promotion": {
     "adapter_budgets": {
@@ -103,6 +112,8 @@
     "max_emit_per_call": 2,
     "tool_cooldown_s": 15,
     "advice_repeat_cooldown_s": 300,
+    "agreement_gate_enabled": false,
+    "agreement_min_sources": 2,
     "shown_advice_ttl_s": 600,
     "warning_threshold": 0.68,
     "note_threshold": 0.38,
@@ -256,7 +267,10 @@
     "enabled": true
   },
   "sync": {
-    "mode": "all"
+    "mode": "all",
+    "adapters_enabled": [],
+    "adapters_disabled": [],
+    "mind_limit": 2
   },
   "source_roles": {
     "_doc": "Defines each source's PRIMARY job. Distillers are NOT advisory sources -- measure them on pattern quality, not helpfulness.",
@@ -302,8 +316,8 @@
     "last_run": "2026-02-20T10:25:16+00:00",
     "run_interval_s": 43200,
     "max_change_per_run": 0.15,
-    "min_boost": 0.8,
-    "max_boost": 1.1,
+    "min_boost": 0.2,
+    "max_boost": 2.0,
     "source_boosts": {
       "cognitive": 1.65,
       "semantic": 0.35,
@@ -423,7 +437,9 @@
         "data_basis": "33,315 advisor outcomes across 15 sources"
       }
     ],
-    "max_changes_per_cycle": 4
+    "max_changes_per_cycle": 4,
+    "apply_cross_section_recommendations": false,
+    "recommendation_sections_allowlist": []
   },
   "updated_at": "2026-02-20T10:25:16+00:00",
   "chip_merge": {
@@ -469,22 +485,35 @@
   "bridge_worker": {
     "enabled": true,
     "mind_sync_enabled": true,
-    "mind_sync_limit": 8,
+    "mind_sync_limit": 20,
     "mind_sync_min_readiness": 0.45,
     "mind_sync_min_reliability": 0.35,
     "mind_sync_max_age_s": 1209600,
     "mind_sync_drain_queue": true,
-    "mind_sync_queue_budget": 2
+    "mind_sync_queue_budget": 25
+  },
+  "queue": {
+    "max_events": 10000,
+    "max_queue_bytes": 10485760,
+    "compact_head_bytes": 5242880,
+    "tail_chunk_bytes": 65536
   },
   "memory_capture": {
     "enabled": true,
-    "auto_save_threshold": 0.65
+    "auto_save_threshold": 0.65,
+    "suggest_threshold": 0.55,
+    "max_capture_chars": 2000
+  },
+  "request_tracker": {
+    "max_pending": 50,
+    "max_completed": 200,
+    "max_age_seconds": 3600
   },
   "observatory": {
     "enabled": true,
     "auto_sync": true,
     "sync_cooldown_s": 120,
-    "vault_dir": "C:\\Users\\USER\\Documents\\Obsidian Vault\\Spark-Intelligence-Observatory",
+    "vault_dir": "",
     "generate_canvas": true,
     "max_recent_items": 20,
     "explore_cognitive_max": 200,

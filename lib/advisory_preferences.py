@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
+from .config_authority import resolve_section
+
 
 TUNEABLES_PATH = Path.home() / ".spark" / "tuneables.json"
 VALID_MEMORY_MODES = {"off", "standard", "replay"}
@@ -264,16 +266,19 @@ def setup_questions(current: Dict[str, Any] | None = None) -> Dict[str, Any]:
 
 def get_current_preferences(path: Path = TUNEABLES_PATH) -> Dict[str, Any]:
     data = _read_json(path)
-    advisor = data.get("advisor") if isinstance(data.get("advisor"), dict) else {}
+    runtime_advisor = data.get("advisor") if isinstance(data.get("advisor"), dict) else {}
+    advisor = resolve_section("advisor", runtime_path=path).data
+    if not isinstance(advisor, dict):
+        advisor = {}
     memory_mode = _normalize_memory_mode(advisor.get("replay_mode"))
     guidance_style = _normalize_guidance_style(advisor.get("guidance_style"))
     baseline = _derived_overrides(memory_mode, guidance_style)
     effective = dict(baseline)
-    drift = _detect_profile_drift(advisor, baseline)
+    drift = _detect_profile_drift(runtime_advisor, baseline)
     # Keep explicit overrides visible if present.
     for key in DRIFT_KEYS:
-        if key in advisor:
-            effective[key] = advisor.get(key)
+        if key in runtime_advisor:
+            effective[key] = runtime_advisor.get(key)
     return {
         "memory_mode": memory_mode,
         "guidance_style": guidance_style,

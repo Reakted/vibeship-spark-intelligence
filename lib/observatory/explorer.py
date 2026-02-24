@@ -623,7 +623,12 @@ def _export_advisory(explore_dir: Path, advice_limit: int) -> int:
     index.append(f"| Total advice given | {fmt_num(total_given)} |")
     index.append(f"| Followed | {fmt_num(total_followed)} ({total_followed/max(total_given,1)*100:.1f}%) |")
     index.append(f"| Helpful | {fmt_num(total_helpful)} |")
-    index.append(f"| Cognitive helpful rate | {metrics.get('cognitive_helpful_rate', 0):.1%} |")
+    cognitive_helpful_rate = metrics.get('cognitive_helpful_rate')
+    try:
+        cognitive_helpful_rate = float(cognitive_helpful_rate) if cognitive_helpful_rate is not None else 0.0
+    except (TypeError, ValueError):
+        cognitive_helpful_rate = 0.0
+    index.append(f"| Cognitive helpful rate | {cognitive_helpful_rate:.1%} |")
     index.append("")
 
     by_source = eff.get("by_source", {})

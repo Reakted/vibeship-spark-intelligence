@@ -1,86 +1,28 @@
 ﻿# Spark Quick Start Guide
 
-Get Spark running in 5 minutes.
+Runtime and operations reference for an already-installed Spark setup.
 
-If you are brand new, start with `docs/GETTING_STARTED_5_MIN.md` (shorter, newcomer path).
+If this is your first time:
+- Canonical onboarding: `docs/SPARK_ONBOARDING_COMPLETE.md`
+- Fast onboarding path: `docs/GETTING_STARTED_5_MIN.md`
+
 For the full active documentation map, see `docs/DOCS_INDEX.md`.
 For term-based navigation, see `docs/GLOSSARY.md`.
+Command style: this guide uses explicit interpreter commands (`python -m spark.cli ...`) for portability.
 
-## Prerequisites
+## First-Time Setup (Do Once)
 
-- Python 3.10+ (Windows one-command bootstrap auto-installs latest Python 3 via `winget` when missing)
-- pip
-- Git
-- Windows one-command path: PowerShell
-- Mac/Linux one-command path: `curl` + `bash`
+Use `docs/GETTING_STARTED_5_MIN.md` for install/start/health.
+For full context and troubleshooting depth, use `docs/SPARK_ONBOARDING_COMPLETE.md`.
 
-## Installation
+After first successful health check, return to this guide for runtime operations.
 
-### Option 1: Windows One Command (includes startup + health check)
-
-```powershell
-irm https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.ps1 | iex
-```
-
-Optional re-check (from repo root):
-
-```powershell
-.\.venv\Scripts\python -m spark.cli up
-.\.venv\Scripts\python -m spark.cli health
-```
-
-### Option 2: Mac/Linux One Command
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/vibeforge1111/vibeship-spark-intelligence/main/install.sh | bash
-```
-
-Then run a ready check (from repo root):
-
-```bash
-./.venv/bin/python -m spark.cli up
-./.venv/bin/python -m spark.cli health
-```
-
-### Option 3: Quick Install
-
-```bash
-cd /path/to/Spark
-./scripts/install.sh
-```
-
-### Option 4: Manual Install
-
-```bash
-# Install dependencies in a virtual environment (recommended)
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .[services]
-
-# Optional: Enable embeddings (fastembed)
-python -m pip install -e .[embeddings]
-
-# Test it works
-python -m spark.cli health
-```
-
-```powershell
-# Windows manual install without activation policy issues:
-py -3 -m venv .venv
-.\.venv\Scripts\python -m pip install -e ".[services]"
-.\.venv\Scripts\python -m spark.cli health
-```
-
-If pip reports `externally-managed-environment`, you are likely running on a
-system-managed Python install (Ubuntu/Debian policy). Re-run after creating and
-activating a local virtualenv as above.
-
-## Basic Usage
+## Runtime Operations
 
 ### Check Status
 
 ```bash
-python3 -m spark.cli status
+python -m spark.cli status
 ```
 
 ### Start Background Services (Recommended)
@@ -88,12 +30,12 @@ python3 -m spark.cli status
 These keep the bridge worker running and the dashboard live.
 
 ```bash
-python3 -m spark.cli up
+python -m spark.cli up
 # or: spark up
 ```
 Lightweight mode (core services only: sparkd + bridge_worker):
 ```bash
-python3 -m spark.cli up --lite
+python -m spark.cli up --lite
 ```
 
 Repo shortcuts:
@@ -107,24 +49,20 @@ start_spark.bat
 ```
 Preferred launch paths on Windows are `start_spark.bat` and `python -m spark.cli ...`.
 `scripts/spark.ps1` and `scripts/spark.cmd` are deprecated compatibility wrappers.
-This also starts Mind on `SPARK_MIND_PORT` (default `8080`) if `mind.exe` is available.  
+By default this starts built-in Mind on `SPARK_MIND_PORT` (default `8080`).
 Set `SPARK_NO_MIND=1` to skip Mind startup.
 Set `SPARK_LITE=1` to skip dashboards/pulse/watchdog (core services only).
+Set `SPARK_NO_PULSE=1` or `SPARK_NO_WATCHDOG=1` for targeted disables.
 Spark auto-detects sibling `../vibeship-spark-pulse`. Set `SPARK_PULSE_DIR` env var if it's elsewhere.
-Set `SPARK_PULSE_DIR` to override both.
+Set `SPARK_PULSE_DIR` to override auto-detection.
 For this setup, use:
 ```bat
 set SPARK_PULSE_DIR=<SPARK_PULSE_DIR>
 ```
-If Mind CLI is installed but unstable, force Spark's built-in Mind server:
-```bat
-set SPARK_FORCE_BUILTIN_MIND=1
-start_spark.bat
-```
 
 Check status:
 ```bash
-python3 -m spark.cli services
+python -m spark.cli services
 # or: spark services
 ```
 
@@ -179,7 +117,7 @@ The watchdog auto-restarts workers and warns when the queue grows. Set
 
 Stop services:
 ```bash
-python3 -m spark.cli down
+python -m spark.cli down
 # or: spark down
 ```
 
@@ -283,7 +221,7 @@ Description=Spark background services
 
 [Service]
 Type=simple
-ExecStart=python3 -m spark.cli up --sync-context --project /path/to/your/project
+ExecStart=python -m spark.cli up --sync-context --project /path/to/your/project
 Restart=on-failure
 
 [Install]
@@ -304,7 +242,7 @@ systemctl --user disable --now spark-up.service
 #### Fallback (cron)
 If you prefer cron:
 ```
-@reboot python3 -m spark.cli up --sync-context --project /path/to/your/project >/dev/null 2>&1
+@reboot python -m spark.cli up --sync-context --project /path/to/your/project >/dev/null 2>&1
 ```
 
 ### Per-Project Ensure (Optional)
@@ -314,7 +252,7 @@ project start script or editor task:
 
 ```bash
 spark ensure --sync-context --project .
-# or: python3 -m spark.cli ensure --sync-context --project .
+# or: python -m spark.cli ensure --sync-context --project .
 ```
 
 Windows helper (run from project root):
@@ -350,7 +288,7 @@ cognitive.learn_principle(
 ### Write to Markdown
 
 ```bash
-python3 -m spark.cli write
+python -m spark.cli write
 # Creates .learnings/LEARNINGS.md
 ```
 
@@ -375,7 +313,7 @@ If you want a safety net (for sessions launched outside wrappers), run sync on a
 - Action: `spark`
 - Args: `sync-context`
 - Start in: your repo root
-- Trigger: every 10â€“30 minutes
+- Trigger: every 10-30 minutes
 
 **macOS/Linux (cron)**
 ```
@@ -386,28 +324,28 @@ If you want a safety net (for sessions launched outside wrappers), run sync on a
 
 ```bash
 # Check what's ready
-python3 -m spark.cli promote --dry-run
+python -m spark.cli promote --dry-run
 
 # Actually promote
-python3 -m spark.cli promote
+python -m spark.cli promote
 # Creates/updates AGENTS.md, CLAUDE.md, etc.
 ```
 
 ## Mind Integration (Optional)
 
-For persistent semantic memory:
+Spark ships with a built-in Mind server (`mind_server.py`) started by `spark up`.
+Use this section only if you need explicit checks or want an external Mind runtime.
 
 ```bash
-# Install Mind
-pip install vibeship-mind
+# Check built-in Mind health
+curl http://127.0.0.1:${SPARK_MIND_PORT:-8080}/health
 
-# Start Mind server
-python3 -m mind.lite_tier
-# If Mind CLI fails, use Spark's built-in server:
-python3 mind_server.py
+# Optional: external Mind runtime (if you use it)
+# pip install vibeship-mind
+# python3 -m mind.lite_tier
 
 # Sync Spark learnings to Mind
-python3 -m spark.cli sync
+python -m spark.cli sync
 ```
 
 ## Semantic Retrieval (Optional)
@@ -441,47 +379,22 @@ Semantic retrieval logs and metrics:
 
 ## Claude Code Integration
 
-Add to `.claude/settings.json`:
+Use the maintained integration flow in `docs/claude_code.md`.
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "python3 /path/to/Spark/hooks/observe.py"
-      }]
-    }],
-    "PostToolUse": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "python3 /path/to/Spark/hooks/observe.py"
-      }]
-    }],
-    "PostToolUseFailure": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "python3 /path/to/Spark/hooks/observe.py"
-      }]
-    }],
-    "UserPromptSubmit": [{
-      "matcher": "",
-      "hooks": [{
-        "type": "command",
-        "command": "python3 /path/to/Spark/hooks/observe.py"
-      }]
-    }]
-  }
-}
+Minimal path:
+
+```bash
+# macOS/Linux
+./scripts/install_claude_hooks.sh
+
+# Windows (PowerShell)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\install_claude_hooks.ps1
 ```
 
-Spark maps these hook names to runtime event types used by chips:
-`pre_tool`, `post_tool`, `post_tool_failure`, `user_prompt`.
+Then merge `~/.claude/spark-hooks.json` into `~/.claude/settings.json`.
 
-For predictive advisory to work end-to-end, `PreToolUse` must be enabled.
+Note: generated hooks use `python`/`python3` from PATH. If you run Spark in a venv,
+replace the hook command with that venv interpreter path.
 
 ## Codex Integration (Optional)
 
@@ -521,7 +434,7 @@ python -m lib.integration_status
 If status still reports missing Codex sync, confirm:
 
 - the command runs in the same shell/environment where `SPARK_CODEX_CMD` or `CODEX_CMD` is set
-- `spark.cli sync-context` is completing successfully
+- `python -m spark.cli sync-context` is completing successfully
 - `SPARK_SYNC_TARGETS` is not overridden to exclude `codex`
 
 ## Directory Structure
@@ -576,9 +489,10 @@ CLAUDE.md                      # Promoted conventions
 
 ### "Mind API: Not available"
 
-Mind isn't running. Either:
-- Start Mind: `python3 -m mind.lite_tier`
-- Or ignore it â€” Spark works offline and queues for later
+Mind is not reachable. Try:
+- Start services with Mind enabled: `python -m spark.cli up` (default includes built-in `mind_server.py`)
+- Verify Mind health: `curl http://127.0.0.1:${SPARK_MIND_PORT:-8080}/health`
+- Or ignore it - Spark still works offline and queues sync for later
 
 ### "requests not installed"
 
@@ -620,10 +534,10 @@ expand scope if needed.
 
 ## Next Steps
 
-1. **Integrate with your workflow** â€” Set up the hooks
-2. **Start Mind** â€” For persistent cross-project learning
-3. **Review learnings** â€” `python3 -m spark.cli learnings`
-4. **Promote insights** â€” `python3 -m spark.cli promote`
+1. **Integrate with your workflow** - Set up the hooks
+2. **Confirm services** - `python -m spark.cli services` and `python -m spark.cli health`
+3. **Review learnings** - `python -m spark.cli learnings`
+4. **Promote insights** - `python -m spark.cli promote`
 
 ---
 

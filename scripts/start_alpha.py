@@ -149,7 +149,7 @@ def main() -> None:
 
     print()
     print(f"=== Pre-Alpha Era Started ===")
-    print(f"Archived:     {moved_count} items → {archive_dir}")
+    print(f"Archived:     {moved_count} items -> {archive_dir}")
     print(f"Era marker:   {era_path}")
     print(f"Config kept:  {', '.join(KEEP_FILES)}")
     print(f"Dirs created: {', '.join(RECREATE_DIRS)}")
