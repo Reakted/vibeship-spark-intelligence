@@ -132,8 +132,8 @@ def _record_rejection(reason: str) -> None:
                 json.dumps(existing, indent=2), encoding="utf-8"
             )
             _rejection_counts.clear()
-        except Exception:
-            pass
+        except Exception as exc:
+            log_debug("advisory_engine", f"rejection telemetry flush failed: {exc}", None)
 
 
 try:
@@ -596,8 +596,8 @@ if _BOOT_ENGINE_CFG:
 try:
     from .tuneables_reload import register_reload as _engine_register
     _engine_register("advisory_engine", apply_engine_config, label="advisory_engine.apply_config")
-except Exception:
-    pass
+except Exception as exc:
+    log_debug("advisory_engine", f"hot-reload registration failed: {exc}", None)
 
 
 def _project_key() -> str:
@@ -1140,8 +1140,8 @@ def _record_advisory_decision_ledger(
             entry,
             max_lines=ADVISORY_DECISION_LEDGER_MAX,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug("advisory_engine", f"decision ledger write failed: {exc}", None)
 
 
 def _gate_suppression_metadata(gate_result: Any) -> Dict[str, Any]:
@@ -1707,8 +1707,8 @@ def on_pre_tool(
                             recent_global_emissions[aid] = age_s
                     except Exception:
                         continue
-            except Exception:
-                pass
+            except Exception as exc:
+                log_debug("advisory_engine", f"global dedupe log scan failed: {exc}", None)
 
         t_gate = time.time() * 1000.0
         gate_result = evaluate(
@@ -2145,8 +2145,8 @@ def on_pre_tool(
                         item._authority = decision.authority
                         emitted_advice.append(item)
                     emitted_advice_source_counts = _advice_source_counts(emitted_advice)
-        except Exception:
-            pass
+        except Exception as exc:
+            log_debug("advisory_engine", f"emission filtering failed: {exc}", None)
 
         elapsed_ms = (time.time() * 1000.0) - start_ms
         remaining_ms = MAX_ENGINE_MS - elapsed_ms
@@ -2376,8 +2376,8 @@ def on_pre_tool(
                     source=str(getattr(adv, "source", "") or "") or None,
                     trace_id=resolved_trace_id,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            log_debug("advisory_engine", f"delivery tracking failed: {exc}", None)
         # Write delivery-backed recent_advice entry for post-tool outcome linkage.
         try:
             from .advisor import record_recent_delivery
@@ -2395,8 +2395,8 @@ def on_pre_tool(
                     for q in [getattr(adv, "advisory_quality", None) for adv in list(emitted_advice or [])[:4]]
                 ],
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            log_debug("advisory_engine", f"recent advice write failed: {exc}", None)
 
         # Update global dedupe log on successful emission (any authority).
         try:
@@ -2431,8 +2431,8 @@ def on_pre_tool(
                         },
                         max_lines=int(GLOBAL_DEDUPE_LOG_MAX),
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            log_debug("advisory_engine", f"dedupe log append failed: {exc}", None)
 
         if route == "live":
             lineage_sources = []
@@ -2627,8 +2627,8 @@ def on_post_tool(
                 phase=state.task_phase or "implementation",
                 success=bool(success),
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            log_debug("advisory_engine", f"post-tool state update failed: {exc}", None)
 
         if state.shown_advice_ids:
             _record_implicit_feedback(state, tool_name, success, resolved_trace_id)
@@ -2908,8 +2908,8 @@ def _log_engine_event(
         with open(ENGINE_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
         _rotate_engine_log()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug("advisory_engine", f"engine log write failed: {exc}", None)
 
 
 def _rotate_engine_log() -> None:
@@ -2920,8 +2920,8 @@ def _rotate_engine_log() -> None:
         if len(lines) > ENGINE_LOG_MAX:
             keep = lines[-ENGINE_LOG_MAX:]
             ENGINE_LOG.write_text("\n".join(keep) + "\n", encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        log_debug("advisory_engine", f"engine log rotation failed: {exc}", None)
 
 
 def get_engine_status() -> Dict[str, Any]:
