@@ -211,7 +211,7 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `obsidian_enabled` | bool | `False` | — | — | Enable advisory packet export to Obsidian |
 | `obsidian_auto_export` | bool | `False` | — | — | Auto-export packet payloads to Obsidian |
 | `obsidian_export_max_packets` | int | `300` | 1 | 5000 | Max Obsidian packet exports to retain |
-| `obsidian_export_dir` | str | `C:\Users\USER\.spark\advice_packets\obsidian` | — | — | Override Obsidian export directory |
+| `obsidian_export_dir` | str | `` | — | — | Override Obsidian export directory (empty = ~/.spark/advice_packets/obsidian) |
 
 ## `advisory_prefetch`
 

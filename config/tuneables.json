@@ -51,7 +51,7 @@
   },
   "triggers": {
     "enabled": true,
-    "rules_file": "<USER_HOME>\\.spark\\trigger_rules.yaml"
+    "rules_file": ""
   },
   "promotion": {
     "adapter_budgets": {
@@ -513,7 +513,7 @@
     "enabled": true,
     "auto_sync": true,
     "sync_cooldown_s": 120,
-    "vault_dir": "C:\\Users\\USER\\Documents\\Obsidian Vault\\Spark-Intelligence-Observatory",
+    "vault_dir": "",
     "generate_canvas": true,
     "max_recent_items": 20,
     "explore_cognitive_max": 200,

@@ -102,6 +102,10 @@ def _load_sync_adapter_policy() -> Dict[str, Any]:
         # keep Codex in sync automatically (backward-compatible default).
         enabled.add("codex")
 
+    # Re-apply disabled set as final override so SPARK_SYNC_DISABLE_TARGETS
+    # always wins (backward-compatible kill-switch semantics).
+    enabled -= cfg_disabled
+
     return {
         "mode": mode,
         "enabled": sorted(enabled),

@@ -55,11 +55,20 @@ def _tuneables_write_lock(path: Path) -> Iterator[None]:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = None
         deadline = time.time() + 3.0
+        stale_s = 30.0
         while True:
             try:
                 fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
                 break
             except FileExistsError:
+                # Remove stale locks left by crashed processes.
+                try:
+                    age = time.time() - lock_path.stat().st_mtime
+                    if age >= stale_s:
+                        lock_path.unlink(missing_ok=True)
+                        continue
+                except Exception:
+                    pass
                 if time.time() >= deadline:
                     raise TimeoutError(f"timed out acquiring lock: {lock_path}")
                 time.sleep(0.01)
@@ -328,7 +337,9 @@ def reconcile_with_defaults(*, dry_run: bool = False) -> Dict[str, Any]:
                     from .tuneables_schema import validate_tuneables
 
                     validated = validate_tuneables(runtime).data
-                    tmp = TUNEABLES_FILE.with_suffix(".tmp")
+                    tmp = TUNEABLES_FILE.with_suffix(
+                        TUNEABLES_FILE.suffix + f".tmp.{os.getpid()}.{time.time_ns()}"
+                    )
                     tmp.write_text(json.dumps(validated, indent=2, ensure_ascii=False), encoding="utf-8")
                     tmp.replace(TUNEABLES_FILE)
                     result["written"] = True

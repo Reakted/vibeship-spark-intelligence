@@ -239,7 +239,7 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "obsidian_enabled": TuneableSpec("bool", False, None, None, "Enable advisory packet export to Obsidian"),
         "obsidian_auto_export": TuneableSpec("bool", False, None, None, "Auto-export packet payloads to Obsidian"),
         "obsidian_export_max_packets": TuneableSpec("int", 300, 1, 5000, "Max Obsidian packet exports to retain"),
-        "obsidian_export_dir": TuneableSpec("str", str(Path.home() / ".spark" / "advice_packets" / "obsidian"), None, None, "Override Obsidian export directory"),
+        "obsidian_export_dir": TuneableSpec("str", "", None, None, "Override Obsidian export directory (empty = ~/.spark/advice_packets/obsidian)"),
     },
 
     # ---- advisory_prefetch: prefetch worker ----

@@ -119,8 +119,8 @@ def resolve_section(
                 for key, value in defaults.items():
                     merged[key] = value
                     sources[key] = "schema"
-        except Exception:
-            pass
+        except Exception as exc:
+            warnings.append(f"schema_load_failed:{section_name}:{exc!r}")
 
     baseline_section = _section(_read_json(baseline), section_name)
     for key, value in baseline_section.items():

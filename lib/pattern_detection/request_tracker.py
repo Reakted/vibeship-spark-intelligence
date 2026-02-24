@@ -92,13 +92,17 @@ def get_request_tracker_config() -> Dict[str, Any]:
     }
 
 
+def _reload_request_tracker_config(_cfg: Dict[str, Any]) -> None:
+    apply_request_tracker_config(_load_request_tracker_config())
+
+
 _apply_request_tracker_config(_load_request_tracker_config())
 try:
     from ..tuneables_reload import register_reload as _register_request_tracker_reload
 
     _register_request_tracker_reload(
         "request_tracker",
-        lambda _cfg: apply_request_tracker_config(_load_request_tracker_config()),
+        _reload_request_tracker_config,
         label="request_tracker.reload_from",
     )
 except Exception:

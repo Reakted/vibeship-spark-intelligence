@@ -13,7 +13,7 @@ from .advisory_prefetch_planner import plan_prefetch_jobs
 from .config_authority import env_bool, resolve_section
 
 
-WORKER_ENABLED = True
+WORKER_ENABLED = os.getenv("SPARK_ADVISORY_PREFETCH_WORKER", "1") != "0"
 PROCESSED_MAX = 4000
 PREFETCH_MAX_JOBS = 3
 PREFETCH_MAX_TOOLS_PER_JOB = 3
