@@ -135,6 +135,9 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `selective_ai_synth_enabled` | bool | `True` | — | — | Enable selective AI synthesis |
 | `selective_ai_min_remaining_ms` | float | `1800` | 0 | 20000 | Min ms remaining for AI synth |
 | `selective_ai_min_authority` | str | `whisper` | — | — | Min authority for AI synth (silent, whisper, note, warning, block) |
+| `fallback_budget_cap` | int | `1` | 0 | 10 | Max fallback emissions per budget window. 0 = unlimited (old behavior) |
+| `fallback_budget_window` | int | `5` | 1 | 100 | Number of tool calls per fallback budget window |
+| `global_dedupe_cooldown_s` | float | `600` | 0 | 86400 | Cross-session global dedupe cooldown (s) |
 
 ## `advisory_gate`
 
@@ -197,7 +200,15 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `replay_max_records` | int | `2500` | 100 | 50000 | Max replay records |
 | `replay_mode` | str | `standard` | — | — | Replay mode (off, standard, replay) |
 | `guidance_style` | str | `balanced` | — | — | Guidance verbosity (concise, balanced, coach) |
-| `source_weights` | str | `0.400` | — | — | Source weight override string |
+| ~~`source_weights`~~ | ~~str~~ | — | — | — | **REMOVED** (Batch 5) — was logged only, never used for weighting |
+
+## `flow`
+
+**Consumed by:** `lib/validate_and_store.py`
+
+| Key | Type | Default | Min | Max | Description |
+|-----|------|---------|-----|-----|-------------|
+| `validate_and_store_enabled` | bool | `true` | — | — | Enable unified write path through Meta-Ralph. When false, callers bypass validation and write directly to cognitive store |
 
 ## `retrieval`
 
@@ -267,7 +278,9 @@ All tuneables are stored in `~/.spark/tuneables.json` (runtime) and `config/tune
 | `last_run` | str | `""` | — | — | Timestamp of last run |
 | `run_interval_s` | int | `43200` | 3600 | 604800 | Run interval (s, default 12h) |
 | `max_change_per_run` | float | `0.15` | 0.01 | 0.5 | Max boost change per run |
-| `source_boosts` | dict | `{}` | — | — | Per-source boost multipliers |
+| `min_boost` | float | `0.8` | 0.0 | 1.0 | Boost floor (tightened from 0.2 in Batch 5). Clamped on load |
+| `max_boost` | float | `1.1` | min+0.1 | 5.0 | Boost ceiling (tightened from 3.0 in Batch 5). Clamped on load |
+| `source_boosts` | dict | `{}` | — | — | Per-source boost multipliers (clamped to [min_boost, max_boost] on load) |
 | `source_effectiveness` | dict | `{}` | — | — | Computed effectiveness rates |
 | `tuning_log` | list | `[]` | — | — | Recent tuning events (max 50) |
 | `max_changes_per_cycle` | int | `4` | 1 | 20 | Max source adjustments per cycle |

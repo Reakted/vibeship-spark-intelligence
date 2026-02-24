@@ -4,11 +4,19 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
+_MODULE_PATH = Path(__file__).resolve().parents[1] / "benchmarks" / "advisory_profile_sweeper.py"
+
+# Skip entire module if benchmarks/ is not present (e.g. clean worktree)
+pytestmark = pytest.mark.skipif(
+    not _MODULE_PATH.exists(),
+    reason="benchmarks/advisory_profile_sweeper.py not found (gitignored or clean checkout)",
+)
+
 
 def _load_module():
-    root = Path(__file__).resolve().parents[1]
-    module_path = root / "benchmarks" / "advisory_profile_sweeper.py"
-    spec = importlib.util.spec_from_file_location("advisory_profile_sweeper", module_path)
+    spec = importlib.util.spec_from_file_location("advisory_profile_sweeper", _MODULE_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError("failed to load advisory_profile_sweeper module")
     module = importlib.util.module_from_spec(spec)

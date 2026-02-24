@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -16,7 +17,35 @@ FEEDBACK_FILE = Path.home() / ".spark" / "advice_feedback.jsonl"
 SUMMARY_FILE = Path.home() / ".spark" / "advice_feedback_summary.json"
 STATE_FILE = Path.home() / ".spark" / "advice_feedback_state.json"
 
+REQUESTS_FILE_MAX = 2000
+FEEDBACK_FILE_MAX = 2000
+
 CORRELATION_SCHEMA_VERSION = 2
+
+
+def _rotate_jsonl(path: Path, max_lines: int) -> None:
+    """Trim a JSONL file to its last *max_lines* lines.
+
+    Uses atomic temp-write + os.replace to avoid partial-write corruption.
+    A concurrent append between read and replace may lose one line (rare,
+    rotation runs only when file exceeds size estimate).
+    """
+    try:
+        if not path.exists():
+            return
+        # Cheap heuristic: average ~250 bytes per JSON line.
+        estimated_lines = path.stat().st_size // 250
+        if estimated_lines <= max_lines:
+            return
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if len(lines) <= max_lines:
+            return
+        keep = "\n".join(lines[-max_lines:]) + "\n"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(keep, encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    except Exception:
+        pass
 
 
 def _session_lineage(session_id: Optional[str]) -> Dict[str, Any]:
@@ -180,6 +209,7 @@ def record_advice_request(
         }
         with REQUESTS_FILE.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        _rotate_jsonl(REQUESTS_FILE, REQUESTS_FILE_MAX)
 
         last_by_tool[tool] = now
         state["last_by_tool"] = last_by_tool
@@ -277,6 +307,7 @@ def record_feedback(
         }
         with FEEDBACK_FILE.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        _rotate_jsonl(FEEDBACK_FILE, FEEDBACK_FILE_MAX)
         return True
     except Exception as e:
         log_debug("advice_feedback", "record_feedback failed", e)

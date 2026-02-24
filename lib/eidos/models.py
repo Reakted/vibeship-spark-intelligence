@@ -168,11 +168,30 @@ _EIDOS_CFG = _load_eidos_config()
 
 
 def reload_eidos_from(cfg: Dict[str, Any]) -> None:
-    """Hot-reload EIDOS budget tuneables from coordinator-supplied dict."""
+    """Hot-reload EIDOS budget tuneables from coordinator-supplied dict.
+
+    Merges with values section (same logic as _load_eidos_config) so that
+    keys like max_steps inherited from values are not lost after reload.
+    """
     global _EIDOS_CFG
     if not isinstance(cfg, dict):
         return
-    _EIDOS_CFG = dict(cfg)
+    merged = dict(cfg)
+    # Merge with values section for shared keys (same as _load_eidos_config)
+    try:
+        tuneables = Path.home() / ".spark" / "tuneables.json"
+        if tuneables.exists():
+            data = json.loads(tuneables.read_text(encoding="utf-8-sig"))
+            values = data.get("values") or {}
+            if isinstance(values, dict):
+                for key in ("max_steps", "max_retries_per_error", "max_file_touches"):
+                    if key not in merged and key in values:
+                        merged[key] = values[key]
+                if "no_evidence_limit" not in merged and "no_evidence_steps" in values:
+                    merged["no_evidence_limit"] = values["no_evidence_steps"]
+    except Exception:
+        pass
+    _EIDOS_CFG = merged
 
 
 try:

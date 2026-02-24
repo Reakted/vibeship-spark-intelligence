@@ -458,10 +458,11 @@ class PatternAggregator:
                 except Exception:
                     pass
 
-            # Create insight with importance metadata
-            insight = learner.add_insight(
+            # Create insight through unified validation
+            from lib.validate_and_store import validate_and_store_insight
+            insight = validate_and_store_insight(
+                text=pattern.suggested_insight,
                 category=category,
-                insight=pattern.suggested_insight,
                 context=f"Detected from {pattern.pattern_type.value} pattern (importance: {importance.tier.value})",
                 confidence=effective_confidence,
                 source="pattern_aggregator",

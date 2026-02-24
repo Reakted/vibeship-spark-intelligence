@@ -68,6 +68,37 @@ ADVICE_REPEAT_COOLDOWN_S = 300  # 5 minutes
 # Values are multipliers applied to shown/tool cooldown windows.
 CATEGORY_COOLDOWN_MULTIPLIERS: Dict[str, float] = {}
 
+# Source-aware TTL multipliers — adjust how long advice from each source
+# stays suppressed after being shown.  Lower = re-eligible sooner.
+# Evidence: shown_ttl was 69.4% of all suppressions (4194 ledger rows / 24h).
+# Baseline/bank/trigger have lower repeat-value than cognitive/eidos.
+SOURCE_TTL_MULTIPLIERS: Dict[str, float] = {
+    "baseline": 0.5,     # generic advice, low repeat value
+    "bank": 0.6,         # user memories, context-dependent
+    "trigger": 0.7,      # contextual rules, may need refresh
+    "mind": 0.75,        # cross-session, already filtered
+    "cognitive": 1.0,    # high quality distilled insights
+    "eidos": 1.0,        # pattern distillations
+    "semantic": 0.8,     # retrieval-based, context-dependent
+    "semantic-agentic": 0.8,
+    "default": 1.0,
+}
+
+# Per-tool cooldown multipliers — adjust tool suppression window by tool family.
+# Exploration tools change context rapidly; implementation tools are slower.
+# Evidence: tool_cooldown was 8.9% of suppressions (513 in 24h), hiding
+# advice bursts during rapid Read/Grep exploration sequences.
+TOOL_COOLDOWN_MULTIPLIERS: Dict[str, float] = {
+    "Read": 0.5,         # fast context change during exploration
+    "Grep": 0.5,
+    "Glob": 0.5,
+    "Task": 0.6,
+    "Bash": 0.7,
+    "Edit": 1.2,         # slower context change during implementation
+    "Write": 1.2,
+    "default": 1.0,
+}
+
 # Whether WHISPER-level advice should be emitted at all.
 # Default: off (whispers are high-noise in real operations).
 EMIT_WHISPERS = os.getenv("SPARK_ADVISORY_EMIT_WHISPERS", "1") == "1"
@@ -157,8 +188,36 @@ def _cooldown_scale_for_category(category: str) -> float:
     return 1.0
 
 
-def _shown_ttl_for_category(category: str) -> Tuple[int, float]:
-    scale = _cooldown_scale_for_category(category)
+def _source_ttl_scale(source: str) -> float:
+    """Return TTL multiplier for a given advisory source."""
+    src = str(source or "").strip().lower()
+    if src and src in SOURCE_TTL_MULTIPLIERS:
+        return float(SOURCE_TTL_MULTIPLIERS[src])
+    for fallback in ("default", "*"):
+        if fallback in SOURCE_TTL_MULTIPLIERS:
+            return float(SOURCE_TTL_MULTIPLIERS[fallback])
+    return 1.0
+
+
+def _tool_cooldown_scale(tool_name: str) -> float:
+    """Return cooldown multiplier for a given tool family."""
+    tool = str(tool_name or "").strip()
+    if tool and tool in TOOL_COOLDOWN_MULTIPLIERS:
+        return float(TOOL_COOLDOWN_MULTIPLIERS[tool])
+    for fallback in ("default", "*"):
+        if fallback in TOOL_COOLDOWN_MULTIPLIERS:
+            return float(TOOL_COOLDOWN_MULTIPLIERS[fallback])
+    return 1.0
+
+
+def _shown_ttl_for_advice(category: str, source: str = "") -> Tuple[int, float]:
+    """Compute shown-TTL for an advice item using category + source multipliers.
+
+    Returns (effective_ttl_seconds, combined_scale).
+    """
+    cat_scale = _cooldown_scale_for_category(category)
+    src_scale = _source_ttl_scale(source)
+    combined = cat_scale * src_scale
     base_ttl = int(ADVICE_REPEAT_COOLDOWN_S)
     try:
         from .advisory_state import get_shown_advice_ttl_s
@@ -166,8 +225,8 @@ def _shown_ttl_for_category(category: str) -> Tuple[int, float]:
         base_ttl = int(get_shown_advice_ttl_s())
     except Exception:
         pass
-    ttl = max(5, int(round(base_ttl * scale)))
-    return ttl, scale
+    ttl = max(5, int(round(base_ttl * combined)))
+    return ttl, combined
 
 
 def apply_gate_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
@@ -176,6 +235,8 @@ def apply_gate_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     global TOOL_COOLDOWN_S
     global ADVICE_REPEAT_COOLDOWN_S
     global CATEGORY_COOLDOWN_MULTIPLIERS
+    global SOURCE_TTL_MULTIPLIERS
+    global TOOL_COOLDOWN_MULTIPLIERS
     global EMIT_WHISPERS
 
     applied: List[str] = []
@@ -211,6 +272,27 @@ def apply_gate_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
         CATEGORY_COOLDOWN_MULTIPLIERS = parsed
         applied.append("category_cooldown_multipliers")
         warnings.extend(parse_warnings)
+
+    if "source_ttl_multipliers" in cfg:
+        parsed, parse_warnings = _parse_category_cooldowns(cfg.get("source_ttl_multipliers"))
+        SOURCE_TTL_MULTIPLIERS.update(parsed)
+        applied.append("source_ttl_multipliers")
+        warnings.extend(parse_warnings)
+
+    if "tool_cooldown_multipliers" in cfg:
+        raw_tool = cfg.get("tool_cooldown_multipliers")
+        if isinstance(raw_tool, dict):
+            for key, value in raw_tool.items():
+                tool_key = str(key or "").strip()
+                if not tool_key:
+                    continue
+                try:
+                    TOOL_COOLDOWN_MULTIPLIERS[tool_key] = max(0.1, min(10.0, float(value)))
+                except Exception:
+                    warnings.append(f"invalid_tool_cooldown_multiplier:{tool_key}")
+            applied.append("tool_cooldown_multipliers")
+        else:
+            warnings.append("invalid_tool_cooldown_multipliers")
 
     if "emit_whispers" in cfg:
         raw_emit = cfg.get("emit_whispers")
@@ -303,6 +385,8 @@ def get_gate_config() -> Dict[str, Any]:
         "advice_repeat_cooldown_s": int(ADVICE_REPEAT_COOLDOWN_S),
         "shown_advice_ttl_s": int(shown_ttl),
         "category_cooldown_multipliers": dict(CATEGORY_COOLDOWN_MULTIPLIERS),
+        "source_ttl_multipliers": dict(SOURCE_TTL_MULTIPLIERS),
+        "tool_cooldown_multipliers": dict(TOOL_COOLDOWN_MULTIPLIERS),
         "emit_whispers": bool(EMIT_WHISPERS),
         "warning_threshold": float(AUTHORITY_THRESHOLDS.get(AuthorityLevel.WARNING, 0.8)),
         "note_threshold": float(AUTHORITY_THRESHOLDS.get(AuthorityLevel.NOTE, 0.5)),
@@ -411,6 +495,7 @@ def evaluate(
     state,  # SessionState
     tool_name: str,
     tool_input: Optional[dict] = None,
+    recent_global_emissions: Optional[Dict[str, float]] = None,
 ) -> GateResult:
     """
     Evaluate all advice items through the gate.
@@ -420,6 +505,9 @@ def evaluate(
         state: SessionState from advisory_state
         tool_name: Current tool being invoked
         tool_input: Tool input dict
+        recent_global_emissions: Dict of {advice_id: age_s} for recently emitted
+            advice IDs (from global dedupe log). If present, gate absorbs
+            advice_id dedupe so post-gate only needs text_sig dedupe.
 
     Returns:
         GateResult with decisions on what to emit
@@ -438,11 +526,29 @@ def evaluate(
             tool_input,
             phase,
             agreement_meta=(agreement.get(aid) if aid else None),
+            recent_global_emissions=recent_global_emissions,
         )
         decisions.append(decision)
 
     # Sort by adjusted score descending
     decisions.sort(key=lambda d: d.adjusted_score, reverse=True)
+
+    # Dynamic emission budget: increase when high-authority items are present
+    # or confidence spread justifies more emissions.
+    # Evidence: budget_exhausted was 8.1% of suppressions (466 in 24h).
+    effective_budget = int(MAX_EMIT_PER_CALL)
+    emit_eligible = [d for d in decisions if d.emit]
+    has_warning = any(d.authority == AuthorityLevel.WARNING for d in emit_eligible)
+    if has_warning:
+        effective_budget += 1
+    if (
+        len(emit_eligible) >= 2
+        and emit_eligible[0].adjusted_score >= 0.75
+        and emit_eligible[1].adjusted_score >= 0.60
+    ):
+        effective_budget += 1
+    # Hard cap: never exceed base + 2
+    effective_budget = min(effective_budget, MAX_EMIT_PER_CALL + 2)
 
     # Apply emission budget
     emitted = []
@@ -454,9 +560,9 @@ def evaluate(
             suppressed.append(d)
             continue
 
-        if emit_count >= MAX_EMIT_PER_CALL:
+        if emit_count >= effective_budget:
             d.emit = False
-            d.reason = f"budget exhausted ({MAX_EMIT_PER_CALL} max)"
+            d.reason = f"budget exhausted ({effective_budget} effective, {MAX_EMIT_PER_CALL} base)"
             suppressed.append(d)
             continue
 
@@ -489,6 +595,7 @@ def _evaluate_single(
     phase: str,
     *,
     agreement_meta: Optional[Dict[str, Any]] = None,
+    recent_global_emissions: Optional[Dict[str, float]] = None,
 ) -> GateDecision:
     """Evaluate a single advice item through all gate filters."""
     from .advisory_state import is_tool_suppressed
@@ -507,7 +614,7 @@ def _evaluate_single(
 
     # Infer category early: it drives category-aware cooldown windows.
     category = _infer_category(insight_key, source)
-    shown_ttl_s, cooldown_scale = _shown_ttl_for_category(category)
+    shown_ttl_s, cooldown_scale = _shown_ttl_for_advice(category, source)
 
     # ---- Filter 1: Already shown recently? (TTL-based) ----
     shown_ids = state.shown_advice_ids if state else {}
@@ -550,10 +657,14 @@ def _evaluate_single(
         )
 
     # ---- Filter 2: Tool suppressed? ----
-    if state and is_tool_suppressed(state, tool_name, cooldown_scale=cooldown_scale):
+    # Combine category-based and tool-family-based cooldown scales.
+    tool_scale = _tool_cooldown_scale(tool_name)
+    effective_cooldown_scale = cooldown_scale * tool_scale
+    if state and is_tool_suppressed(state, tool_name, cooldown_scale=effective_cooldown_scale):
         cooldown_note = (
-            f" (category={category}, scale={cooldown_scale:.2f})"
-            if abs(cooldown_scale - 1.0) > 1e-9
+            f" (category={category}, cat_scale={cooldown_scale:.2f},"
+            f" tool_scale={tool_scale:.2f}, effective={effective_cooldown_scale:.2f})"
+            if abs(effective_cooldown_scale - 1.0) > 1e-9
             else ""
         )
         return GateDecision(
@@ -564,6 +675,21 @@ def _evaluate_single(
             adjusted_score=0.0,
             original_score=base_score,
         )
+
+    # ---- Filter 2b: Global dedupe (advice_id) — absorbed from post-gate ----
+    # Previously ran as a separate pass after the gate. Now checked per-item
+    # inside the gate, so post-gate only needs text_sig dedupe.
+    if recent_global_emissions and advice_id:
+        age_s = recent_global_emissions.get(advice_id)
+        if age_s is not None:
+            return GateDecision(
+                advice_id=advice_id,
+                authority=AuthorityLevel.SILENT,
+                emit=False,
+                reason=f"global_dedupe: advice_id emitted {age_s:.0f}s ago",
+                adjusted_score=0.0,
+                original_score=base_score,
+            )
 
     # ---- Filter 3: Obvious-from-context suppression ----
     suppressed, suppression_reason = _check_obvious_suppression(

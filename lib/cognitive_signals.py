@@ -12,8 +12,6 @@ import re
 from typing import Any, Dict, Optional
 
 from lib.diagnostics import log_debug
-from lib.cognitive_learner import get_cognitive_learner
-
 
 # ===== Domain Detection =====
 
@@ -93,20 +91,6 @@ def detect_domain(text: str) -> Optional[str]:
         return None
 
     return max(domain_scores, key=domain_scores.get)
-
-
-def _build_advisory_quality(text: str, source: str, confidence: float) -> Dict[str, Any]:
-    """Derive advisory metadata for user-sourced learnings."""
-    try:
-        from .distillation_transformer import transform_for_advisory
-
-        return transform_for_advisory(
-            text,
-            source=source or "user_prompt",
-            reliability=confidence,
-        ).to_dict()
-    except Exception:
-        return {}
 
 
 # ===== Cognitive Signal Patterns =====
@@ -235,28 +219,9 @@ def extract_cognitive_signals(text: str, session_id: str, trace_id: Optional[str
     # If any cognitive signals found, extract and roast
     if signals_found:
         try:
-            from lib.meta_ralph import get_meta_ralph
-
-            ralph = get_meta_ralph()
             learning = _derive_candidate(text, signals_found)
             if not learning:
                 return
-
-            result = ralph.roast(
-                learning,
-                source="user_prompt",
-                context={
-                    "signals": signals_found,
-                    "session_id": session_id,
-                    "trace_id": trace_id,
-                    "importance_score": importance_score,
-                    "is_priority": importance_score and importance_score >= 0.7,
-                    "domain": detected_domain,
-                }
-            )
-
-            if result.verdict.value == "quality":
-                log_debug("cognitive_signals", f"CAPTURED: [{signals_found}] {text[:50]}...", None)
 
             from lib.cognitive_learner import CognitiveCategory
             category = CognitiveCategory.USER_UNDERSTANDING  # default
@@ -272,21 +237,16 @@ def extract_cognitive_signals(text: str, session_id: str, trace_id: Optional[str
             elif "remember" in signals_found:
                 category = CognitiveCategory.WISDOM
 
-            cognitive = get_cognitive_learner()
             domain_ctx = f", domain: {detected_domain}" if detected_domain else ""
             confidence = 0.7 + (importance_score * 0.2 if importance_score else 0)
-            advisory_quality = _build_advisory_quality(
-                learning,
-                source=(source or "user_prompt"),
-                confidence=confidence,
-            )
-            stored = cognitive.add_insight(
+            # Wire through unified validation (also fixes invalid advisory_quality= kwarg).
+            from lib.validate_and_store import validate_and_store_insight
+            stored = validate_and_store_insight(
+                text=learning,
                 category=category,
-                insight=learning,
                 context=f"signals: {signals_found}, session: {session_id}{domain_ctx}",
                 confidence=confidence,
                 source=source,
-                advisory_quality=advisory_quality,
             )
 
             if stored:

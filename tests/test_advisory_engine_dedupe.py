@@ -80,7 +80,7 @@ def test_on_pre_tool_global_dedupe_filters_emitted(monkeypatch, tmp_path):
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_LOG", tmp_path / "global.jsonl")
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_LOG_MAX", 200)
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_TEXT_ENABLED", True)
-    monkeypatch.setattr(advisory_engine, "LOW_AUTH_GLOBAL_DEDUPE_ENABLED", False)
+
 
     # Avoid writing state into the real ~/.spark folder.
     import lib.advisory_state as advisory_state
@@ -135,27 +135,27 @@ def test_on_pre_tool_global_dedupe_filters_emitted(monkeypatch, tmp_path):
     import lib.advisory_gate as gate
     from lib.advisory_gate import GateDecision, GateResult
 
-    def fake_evaluate(advice_items, state, tool_name, tool_input=None):
-        d1 = GateDecision(
-            advice_id="a1",
-            authority="note",
-            emit=True,
-            reason="ok",
-            adjusted_score=0.9,
-            original_score=0.9,
-        )
-        d2 = GateDecision(
-            advice_id="a2",
-            authority="note",
-            emit=True,
-            reason="ok",
-            adjusted_score=0.9,
-            original_score=0.9,
-        )
+    def fake_evaluate(advice_items, state, tool_name, tool_input=None, recent_global_emissions=None):
+        # Simulate real gate behavior: filter out globally-deduped items.
+        candidates = [
+            ("a1", GateDecision(advice_id="a1", authority="note", emit=True, reason="ok", adjusted_score=0.9, original_score=0.9)),
+            ("a2", GateDecision(advice_id="a2", authority="note", emit=True, reason="ok", adjusted_score=0.9, original_score=0.9)),
+        ]
+        emitted = []
+        suppressed = []
+        decisions = []
+        for aid, d in candidates:
+            if recent_global_emissions and aid in recent_global_emissions:
+                d.emit = False
+                d.reason = f"global_dedupe: advice_id emitted {recent_global_emissions[aid]:.0f}s ago"
+                suppressed.append(d)
+            else:
+                emitted.append(d)
+            decisions.append(d)
         return GateResult(
-            decisions=[d1, d2],
-            emitted=[d1, d2],
-            suppressed=[],
+            decisions=decisions,
+            emitted=emitted,
+            suppressed=suppressed,
             phase="implementation",
             total_retrieved=len(advice_items),
         )
@@ -197,7 +197,7 @@ def test_on_pre_tool_global_dedupe_filters_by_text_sig(monkeypatch, tmp_path):
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_COOLDOWN_S", 600.0)
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_LOG", tmp_path / "global.jsonl")
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_LOG_MAX", 200)
-    monkeypatch.setattr(advisory_engine, "LOW_AUTH_GLOBAL_DEDUPE_ENABLED", False)
+
 
     import lib.advisory_state as advisory_state
 
@@ -245,7 +245,7 @@ def test_on_pre_tool_global_dedupe_filters_by_text_sig(monkeypatch, tmp_path):
     import lib.advisory_gate as gate
     from lib.advisory_gate import GateDecision, GateResult
 
-    def fake_evaluate(advice_items, state, tool_name, tool_input=None):
+    def fake_evaluate(advice_items, state, tool_name, tool_input=None, **kwargs):
         d1 = GateDecision(
             advice_id="b1",
             authority="warning",

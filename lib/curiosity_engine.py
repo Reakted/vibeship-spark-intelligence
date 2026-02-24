@@ -325,9 +325,11 @@ class CuriosityEngine:
                 }
 
                 category = category_map.get(gap.gap_type, CognitiveCategory.CONTEXT)
-                learner.add_insight(
+                # Route through unified validation (deprecated module, but still correct path)
+                from lib.validate_and_store import validate_and_store_insight
+                validate_and_store_insight(
+                    text=answer,
                     category=category,
-                    insight=answer,
                     context=f"Answer to: {gap.question}",
                     confidence=0.8,
                     source="curiosity_engine",

@@ -10,6 +10,7 @@ Storage: ~/.spark/advisor/implicit_feedback.jsonl
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -17,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from lib.diagnostics import log_debug
 
 FEEDBACK_FILE = Path.home() / ".spark" / "advisor" / "implicit_feedback.jsonl"
+FEEDBACK_FILE_MAX = 2000
 # How long to keep advice records for matching (seconds)
 ADVICE_TTL_S = 300  # 5 minutes
 
@@ -99,8 +101,27 @@ class ImplicitOutcomeTracker:
             FEEDBACK_FILE.parent.mkdir(parents=True, exist_ok=True)
             with FEEDBACK_FILE.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            self._rotate_if_needed()
         except Exception as e:
             log_debug("implicit_tracker", "write failed", e)
+
+    @staticmethod
+    def _rotate_if_needed() -> None:
+        """Trim feedback file using atomic temp-write + os.replace."""
+        try:
+            if not FEEDBACK_FILE.exists():
+                return
+            if FEEDBACK_FILE.stat().st_size // 250 <= FEEDBACK_FILE_MAX:
+                return
+            lines = FEEDBACK_FILE.read_text(encoding="utf-8").splitlines()
+            if len(lines) <= FEEDBACK_FILE_MAX:
+                return
+            keep = "\n".join(lines[-FEEDBACK_FILE_MAX:]) + "\n"
+            tmp = FEEDBACK_FILE.with_suffix(".tmp")
+            tmp.write_text(keep, encoding="utf-8")
+            os.replace(str(tmp), str(FEEDBACK_FILE))
+        except Exception:
+            pass
 
 
 # Singleton

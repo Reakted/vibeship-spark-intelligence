@@ -198,3 +198,23 @@ Bimodal: peak at 1-2 (noise) and secondary peak at 8 (well-structured useful con
 | Avg latency | 69ms | 78ms | +9ms (negligible) |
 
 **Key result**: The cognitive retrieval path went from DEAD (0 items) to the DOMINANT advisory source (43 items). Before, ALL advice came from EIDOS distillations and trigger rules because cognitive was drowned by cycle summary noise. Now cognitive is the primary source.
+
+---
+
+## Intelligence Flow Evolution Fixes (Issues 26-35)
+
+**Date**: 2026-02-23
+**Branch**: `intelligence-flow-evolution` (7 batches + Codex review fixes)
+
+| # | Issue | Root Cause | File(s) | Fix | Status |
+|---|-------|-----------|---------|-----|--------|
+| 26 | 8+ bypass paths around Meta-Ralph | Direct add_insight() calls skip quality gate | validate_and_store.py (NEW) | Unified write path via validate_and_store_insight() | DONE |
+| 27 | Advisory engine check ordering wasteful | Retrieval runs before cheap exit checks | advisory_engine.py | Reorder: safety, text repeat, budget before retrieval | DONE |
+| 28 | Fallback emissions unrate-limited | Quick/packet fallback can spam | advisory_engine.py | fallback_budget_cap=1, fallback_budget_window=5 | DONE |
+| 29 | JSONL rotation race loses appends | Read-delete-write has window for lost data | outcome_log.py, advice_feedback.py, implicit_outcome_tracker.py | Single file-handle read+truncate (no temp file) | DONE |
+| 30 | Auto-tuner bounds too wide [0.2, 3.0] | Runaway boosts degrade advisory quality | auto_tuner.py | Tighten to [0.8, 1.1], clamp on load in __init__ | DONE |
+| 31 | UnboundLocalError in quick-fallback | advise_on_tool() called after successful quick fallback | advisory_engine.py | Move into except block | DONE (Codex) |
+| 32 | Fail-open was actually fail-closed | return False after quarantine prevented storage | validate_and_store.py | Remove return False, fall through to cognitive | DONE (Codex) |
+| 33 | Rollback switch used wrong function | get_tuneable() doesn't exist | validate_and_store.py | Use tuneables_reload.get_section("flow") | DONE (Codex) |
+| 34 | fallback_budget_cap=0 coercion bug | `cfg.get(k) or default` swallows explicit zero | advisory_engine.py | Explicit None check: `raw if raw is not None` | DONE (Codex) |
+| 35 | Dead code in cognitive_signals.py | Unused get_cognitive_learner import + _build_advisory_quality | cognitive_signals.py | Removed dead code | DONE (Codex) |

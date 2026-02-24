@@ -668,6 +668,8 @@ def store_deep_learnings(
 
             if roast_result.verdict == RoastVerdict.QUALITY or allow_low_volume_pass:
                 # Use refined version if MetaRalph improved it
+                # NOTE: Intentional direct add_insight() — pipeline already ran Meta-Ralph
+                # above, so routing through validate_and_store would double-roast.
                 final_text = roast_result.refined_version or insight_text
                 ok = bool(learner.add_insight(
                     category=category,
@@ -835,15 +837,11 @@ def store_deep_learnings(
                 f"tool_updates={tool_effectiveness.get('tools_tracked', 0)} "
                 f"errors={len(error_patterns.get('error_patterns', []))}"
             )
-            # For floor enforcement, bypass roast gate but still check noise filter.
-            # Cycle summaries like "Bash used 3 times (100% success)" are operational
-            # telemetry that should not be stored as cognitive insights.
-            if learner.is_noise_insight(fallback_insight):
-                skipped = debug.setdefault("skipped", {})
-                skipped["floor_noise_filtered"] = int(skipped.get("floor_noise_filtered", 0)) + 1
-            elif learner.add_insight(
+            # Floor enforcement now goes through unified validation (Meta-Ralph + noise filter).
+            from lib.validate_and_store import validate_and_store_insight
+            if validate_and_store_insight(
+                text=fallback_insight,
                 category=CognitiveCategory.META_LEARNING,
-                insight=fallback_insight,
                 context=context,
                 confidence=0.55,
                 source="pipeline_macro",

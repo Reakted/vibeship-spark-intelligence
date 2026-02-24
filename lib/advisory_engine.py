@@ -46,6 +46,12 @@ try:
     )
 except Exception:
     FALLBACK_RATE_GUARD_WINDOW = 80
+# Per-window budget cap for fallback emissions (complementary to ratio guard).
+# Max N fallback emits per WINDOW tool calls. Resets when window is exhausted.
+FALLBACK_BUDGET_CAP = int(os.getenv("SPARK_ADVISORY_FALLBACK_BUDGET_CAP", "1"))
+FALLBACK_BUDGET_WINDOW = int(os.getenv("SPARK_ADVISORY_FALLBACK_BUDGET_WINDOW", "5"))
+_fallback_budget: Dict[str, int] = {"calls": 0, "quick_emits": 0, "packet_emits": 0}
+
 MEMORY_SCOPE_DEFAULT = str(os.getenv("SPARK_MEMORY_SCOPE_DEFAULT", "session") or "session").strip() or "session"
 ACTIONABILITY_ENFORCE = os.getenv("SPARK_ADVISORY_REQUIRE_ACTION", "1") != "0"
 
@@ -84,27 +90,6 @@ ADVISORY_TEXT_REPEAT_COOLDOWN_S = float(
     os.getenv("SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S", "600")
 )
 
-# Cross-session spam guard: suppress repeated low-authority emissions (WHISPER/NOTE)
-# even when session_id churns. (Bench sessions bypass to keep eval stability.)
-LOW_AUTH_GLOBAL_DEDUPE_ENABLED = (
-    os.getenv(
-        "SPARK_ADVISORY_LOW_AUTH_GLOBAL_DEDUPE",
-        os.getenv("SPARK_ADVISORY_WHISPER_GLOBAL_DEDUPE", "1"),
-    )
-    != "0"
-)
-try:
-    LOW_AUTH_GLOBAL_COOLDOWN_S = float(
-        os.getenv(
-            "SPARK_ADVISORY_LOW_AUTH_GLOBAL_COOLDOWN_S",
-            os.getenv("SPARK_ADVISORY_WHISPER_GLOBAL_COOLDOWN_S", "600"),
-        )
-    )
-except Exception:
-    LOW_AUTH_GLOBAL_COOLDOWN_S = 600.0
-LOW_AUTH_DEDUPE_LOG = Path.home() / ".spark" / "advisory_low_auth_dedupe.jsonl"
-LOW_AUTH_DEDUPE_LOG_MAX = 2000
-
 # Cross-session dedupe for any emitted advice_id. This reduces high-frequency spam
 # like "Always Read..." when session_id churns and per-session cooldowns can't help.
 GLOBAL_DEDUPE_ENABLED = os.getenv("SPARK_ADVISORY_GLOBAL_DEDUPE", "1") != "0"
@@ -119,6 +104,37 @@ GLOBAL_DEDUPE_LOG_MAX = 5000
 GLOBAL_DEDUPE_SCOPE = str(os.getenv("SPARK_ADVISORY_GLOBAL_DEDUPE_SCOPE", "global") or "global").strip().lower()
 
 # (pytest hygiene handled in *_recently_emitted helpers)
+
+# ── Rejection telemetry ──────────────────────────────────────────────
+# Lightweight in-memory counters for each early-exit / rejection path.
+# Flushed to disk every 50 increments to avoid hot-path I/O.
+REJECTION_TELEMETRY_FILE = Path.home() / ".spark" / "advisory_rejection_telemetry.json"
+_rejection_counts: Dict[str, int] = {}
+_rejection_flush_interval = 50
+_rejection_flush_counter = 0
+
+
+def _record_rejection(reason: str) -> None:
+    """Increment a rejection reason counter. Flushes to disk periodically."""
+    global _rejection_flush_counter
+    _rejection_counts[reason] = _rejection_counts.get(reason, 0) + 1
+    _rejection_flush_counter += 1
+    if _rejection_flush_counter >= _rejection_flush_interval:
+        _rejection_flush_counter = 0
+        try:
+            existing: Dict[str, int] = {}
+            if REJECTION_TELEMETRY_FILE.exists():
+                existing = json.loads(REJECTION_TELEMETRY_FILE.read_text(encoding="utf-8"))
+            for k, v in _rejection_counts.items():
+                existing[k] = existing.get(k, 0) + v
+            existing["_last_flush"] = time.time()
+            REJECTION_TELEMETRY_FILE.write_text(
+                json.dumps(existing, indent=2), encoding="utf-8"
+            )
+            _rejection_counts.clear()
+        except Exception:
+            pass
+
 
 try:
     INLINE_PREFETCH_MAX_JOBS = max(
@@ -210,53 +226,6 @@ def _emit_advisory_compat(
             raise
         # Backward-compatible call shape used by older tests/helpers.
         return bool(emit_fn(gate_result, synthesized_text, advice_items))
-
-
-def _low_auth_recently_emitted(
-    *,
-    tool_name: str,
-    advice_id: str,
-    authority: str,
-    now_ts: float,
-    cooldown_s: float,
-) -> Optional[Dict[str, Any]]:
-    # Keep tests hermetic: don't consult the user's real ~/.spark dedupe logs.
-    # (Allow tests that monkeypatch the log path to still exercise the logic.)
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        try:
-            default_log = (Path.home() / ".spark" / "advisory_low_auth_dedupe.jsonl").resolve()
-            if LOW_AUTH_DEDUPE_LOG.resolve() == default_log:
-                return None
-        except Exception:
-            return None
-    if not advice_id or cooldown_s <= 0:
-        return None
-    rows = _tail_jsonl(LOW_AUTH_DEDUPE_LOG, 250)
-    tool_lower = str(tool_name or "").strip().lower()
-    auth_lower = str(authority or "").strip().lower()
-    for row in reversed(rows):
-        if str(row.get("advice_id") or "") != advice_id:
-            continue
-        prev_auth = str(row.get("authority") or "").strip().lower()
-        if prev_auth and auth_lower and prev_auth != auth_lower:
-            continue
-        prev_tool = str(row.get("tool") or "").strip().lower()
-        if prev_tool and tool_lower and prev_tool != tool_lower:
-            continue
-        ts = 0.0
-        try:
-            ts = float(row.get("ts") or 0.0)
-        except Exception:
-            ts = 0.0
-        if ts <= 0:
-            continue
-        age = max(0.0, now_ts - ts)
-        if age < cooldown_s:
-            out = dict(row)
-            out["age_s"] = age
-            out["cooldown_s"] = cooldown_s
-            return out
-    return None
 
 
 def _global_recently_emitted(
@@ -399,6 +368,8 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     global FALLBACK_RATE_GUARD_ENABLED
     global FALLBACK_RATE_GUARD_MAX_RATIO
     global FALLBACK_RATE_GUARD_WINDOW
+    global FALLBACK_BUDGET_CAP
+    global FALLBACK_BUDGET_WINDOW
     global INLINE_PREFETCH_MAX_JOBS
     global ACTIONABILITY_ENFORCE
     global DELIVERY_STALE_SECONDS
@@ -489,6 +460,22 @@ def apply_engine_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
             applied.append("fallback_rate_window")
         except Exception:
             warnings.append("invalid_fallback_rate_window")
+
+    if "fallback_budget_cap" in cfg:
+        try:
+            raw = cfg["fallback_budget_cap"]
+            FALLBACK_BUDGET_CAP = max(0, int(raw if raw is not None else FALLBACK_BUDGET_CAP))
+            applied.append("fallback_budget_cap")
+        except Exception:
+            warnings.append("invalid_fallback_budget_cap")
+
+    if "fallback_budget_window" in cfg:
+        try:
+            raw = cfg["fallback_budget_window"]
+            FALLBACK_BUDGET_WINDOW = max(1, int(raw if raw is not None else FALLBACK_BUDGET_WINDOW))
+            applied.append("fallback_budget_window")
+        except Exception:
+            warnings.append("invalid_fallback_budget_window")
 
     if "prefetch_inline_max_jobs" in cfg:
         try:
@@ -586,6 +573,8 @@ def get_engine_config() -> Dict[str, Any]:
         "fallback_rate_guard_enabled": bool(FALLBACK_RATE_GUARD_ENABLED),
         "fallback_rate_max_ratio": float(FALLBACK_RATE_GUARD_MAX_RATIO),
         "fallback_rate_window": int(FALLBACK_RATE_GUARD_WINDOW),
+        "fallback_budget_cap": int(FALLBACK_BUDGET_CAP),
+        "fallback_budget_window": int(FALLBACK_BUDGET_WINDOW),
         "prefetch_inline_max_jobs": int(INLINE_PREFETCH_MAX_JOBS),
         "actionability_enforce": bool(ACTIONABILITY_ENFORCE),
         "force_programmatic_synth": bool(FORCE_PROGRAMMATIC_SYNTH),
@@ -602,6 +591,13 @@ def get_engine_config() -> Dict[str, Any]:
 _BOOT_ENGINE_CFG = _load_engine_config()
 if _BOOT_ENGINE_CFG:
     apply_engine_config(_BOOT_ENGINE_CFG)
+
+# Register for hot-reload so tuneables.json changes apply without restart
+try:
+    from .tuneables_reload import register_reload as _engine_register
+    _engine_register("advisory_engine", apply_engine_config, label="advisory_engine.apply_config")
+except Exception:
+    pass
 
 
 def _project_key() -> str:
@@ -1374,18 +1370,8 @@ def _fallback_guard_allows() -> Dict[str, Any]:
     fallback_count = 0
     emitted_count = 0
     try:
-        if ENGINE_LOG.exists():
-            lines = ENGINE_LOG.read_text(encoding="utf-8").splitlines()[-FALLBACK_RATE_GUARD_WINDOW:]
-        else:
-            lines = []
-        for line in lines:
-            raw = (line or "").strip()
-            if not raw:
-                continue
-            try:
-                row = json.loads(raw)
-            except Exception:
-                continue
+        rows = _tail_jsonl(ENGINE_LOG, FALLBACK_RATE_GUARD_WINDOW)
+        for row in rows:
             event = str(row.get("event") or "")
             if event == "fallback_emit":
                 fallback_count += 1
@@ -1423,6 +1409,40 @@ def _fallback_guard_allows() -> Dict[str, Any]:
         "delivered_recent": int(delivered),
         "window": int(FALLBACK_RATE_GUARD_WINDOW),
     }
+
+
+def _fallback_budget_allows(kind: str) -> bool:
+    """Check if a fallback emission is allowed under the per-window budget cap.
+
+    Resets counters when FALLBACK_BUDGET_WINDOW tool calls are exhausted.
+    ``kind`` should be ``"quick"`` or ``"packet"``.
+    """
+    if FALLBACK_BUDGET_CAP <= 0:
+        return True  # 0 = unlimited (old behaviour)
+    key = f"{kind}_emits"
+    if _fallback_budget.get(key, 0) < FALLBACK_BUDGET_CAP:
+        return True
+    return False
+
+
+def _fallback_budget_record(kind: str) -> None:
+    """Record a fallback emission against the per-window budget."""
+    key = f"{kind}_emits"
+    _fallback_budget[key] = _fallback_budget.get(key, 0) + 1
+
+
+def _fallback_budget_tick() -> None:
+    """Increment the call counter and reset the window when exhausted.
+
+    Window semantics: with FALLBACK_BUDGET_WINDOW=5, calls 1-5 are in one window.
+    Reset happens *after* the window is full (call > window), so the Nth call
+    is still inside the window it started in.
+    """
+    _fallback_budget["calls"] = _fallback_budget.get("calls", 0) + 1
+    if _fallback_budget["calls"] > FALLBACK_BUDGET_WINDOW:
+        _fallback_budget["calls"] = 1
+        _fallback_budget["quick_emits"] = 0
+        _fallback_budget["packet_emits"] = 0
 
 
 def on_pre_tool(
@@ -1505,6 +1525,43 @@ def on_pre_tool(
         intent_family = state.intent_family or "emergent_other"
         task_plane = state.task_plane or "build_delivery"
 
+        _fallback_budget_tick()
+
+        # Early-exit: if same tool+context as last emission and within cooldown,
+        # skip the entire retrieval → gate → synthesis path. (Batch 1 optimization.)
+        context_fp = _text_fingerprint(f"{tool_name}:{session_context_key}")
+        last_context_fp = str(getattr(state, "last_advisory_context_fingerprint", "") or "")
+        last_at = float(getattr(state, "last_advisory_at", 0.0) or 0.0)
+        if (
+            context_fp
+            and context_fp == last_context_fp
+            and last_at > 0
+            and (time.time() - last_at) < ADVISORY_TEXT_REPEAT_COOLDOWN_S
+        ):
+            _record_advisory_decision_ledger(
+                stage="early_exit_context_repeat",
+                outcome="blocked",
+                tool_name=tool_name,
+                intent_family=intent_family,
+                task_plane=task_plane,
+                route="none",
+                packet_id=None,
+                advice_items=None,
+                gate_result=None,
+                session_id=session_id,
+                trace_id=resolved_trace_id,
+                extras={
+                    "error_kind": "policy",
+                    "error_code": "AE_CONTEXT_REPEAT",
+                    "context_fp": context_fp,
+                    "age_s": round(time.time() - last_at, 1),
+                    "cooldown_s": float(ADVISORY_TEXT_REPEAT_COOLDOWN_S),
+                },
+            )
+            _record_rejection("early_exit_context_repeat")
+            save_state(state)
+            return None
+
         t_lookup = time.time() * 1000.0
         packet, packet_route = resolve_advisory_packet_for_context(
             project_key=project_key,
@@ -1528,7 +1585,9 @@ def on_pre_tool(
             # delivery (better than returning None due to slow paths).
             elapsed_ms_pre = (time.time() * 1000.0) - start_ms
             remaining_ms_pre = MAX_ENGINE_MS - elapsed_ms_pre
-            if LIVE_QUICK_FALLBACK_ENABLED and remaining_ms_pre < float(LIVE_QUICK_FALLBACK_MIN_REMAINING_MS):
+            if (LIVE_QUICK_FALLBACK_ENABLED
+                    and remaining_ms_pre < float(LIVE_QUICK_FALLBACK_MIN_REMAINING_MS)
+                    and _fallback_budget_allows("quick")):
                 try:
                     from .advisor import Advice, get_quick_advice
 
@@ -1547,19 +1606,21 @@ def on_pre_tool(
                         )
                     ]
                     route = "live_quick"
+                    _fallback_budget_record("quick")
                 except Exception:
+                    # Quick fallback failed — fall through to full retrieval below
                     t_live = time.time() * 1000.0
-                advice_items = advise_on_tool(
-                    tool_name,
-                    tool_input or {},
-                    context=state.user_intent,
-                    include_mind=INCLUDE_MIND_IN_MEMORY,
-                    track_retrieval=False,  # track retrieval only for *delivered* advice (after gating)
-                    log_recent=False,  # recent_advice should reflect *delivered* advice, not retrieval fanout
-                    trace_id=resolved_trace_id,
-                )
-                _mark("advisor_retrieval", t_live)
-                route = "live"
+                    advice_items = advise_on_tool(
+                        tool_name,
+                        tool_input or {},
+                        context=state.user_intent,
+                        include_mind=INCLUDE_MIND_IN_MEMORY,
+                        track_retrieval=False,
+                        log_recent=False,
+                        trace_id=resolved_trace_id,
+                    )
+                    _mark("advisor_retrieval", t_live)
+                    route = "live"
             else:
                 t_live = time.time() * 1000.0
                 advice_items = advise_on_tool(
@@ -1614,10 +1675,46 @@ def on_pre_tool(
                 "error_code": "AE_NO_ADVICE",
                 },
             )
+            _record_rejection("no_advice")
             return None
 
+        # Pre-read global dedupe log once so the gate can absorb advice_id dedupe
+        # (avoids per-item I/O in the post-gate dedupe pass).
+        recent_global_emissions: Dict[str, float] = {}
+        if (
+            GLOBAL_DEDUPE_ENABLED
+            and not str(session_id or "").startswith("advisory-bench-")
+        ):
+            try:
+                _dedupe_now = time.time()
+                _dedupe_cooldown = float(GLOBAL_DEDUPE_COOLDOWN_S)
+                _dedupe_scope = _dedupe_scope_key(session_id)
+                for row in reversed(_tail_jsonl(GLOBAL_DEDUPE_LOG, 400)):
+                    try:
+                        aid = str(row.get("advice_id") or "").strip()
+                        if not aid:
+                            continue
+                        ts = float(row.get("ts") or 0.0)
+                        if ts <= 0:
+                            continue
+                        age_s = _dedupe_now - ts
+                        if age_s < 0 or age_s >= _dedupe_cooldown:
+                            continue
+                        scope = str(row.get("scope_key") or "").strip()
+                        if _dedupe_scope and scope and scope != _dedupe_scope:
+                            continue
+                        if aid not in recent_global_emissions:
+                            recent_global_emissions[aid] = age_s
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
         t_gate = time.time() * 1000.0
-        gate_result = evaluate(advice_items, state, tool_name, tool_input)
+        gate_result = evaluate(
+            advice_items, state, tool_name, tool_input,
+            recent_global_emissions=recent_global_emissions or None,
+        )
         _mark("gate", t_gate)
         if not gate_result.emitted:
             if packet_id:
@@ -1636,13 +1733,17 @@ def on_pre_tool(
             # If the packet path failed the gate, try a bounded deterministic
             # fallback using baseline text for this intent family, instead of
             # returning None (which wastes the entire advisory opportunity).
+            # Budget-capped (Batch 3): max FALLBACK_BUDGET_CAP per window.
             fallback_text = ""
-            if PACKET_FALLBACK_EMIT_ENABLED and route and route.startswith("packet"):
+            if (PACKET_FALLBACK_EMIT_ENABLED
+                    and route and route.startswith("packet")
+                    and _fallback_budget_allows("packet")):
                 elapsed_fb = (time.time() * 1000.0) - start_ms
                 if elapsed_fb < MAX_ENGINE_MS - 200:  # only if budget remains
                     fallback_text = _baseline_text(intent_family).strip()
                     if fallback_text:
                         route = f"{route}_fallback"
+                        _fallback_budget_record("packet")
 
             if not fallback_text:
                 suppression_meta = _gate_suppression_metadata(gate_result)
@@ -1702,6 +1803,7 @@ def on_pre_tool(
                         **suppression_meta,
                     },
                 )
+                _record_rejection("gate_no_emit")
                 return None
 
             # Emit the fallback deterministic text
@@ -1772,6 +1874,7 @@ def on_pre_tool(
                         "fallback_window": fallback_guard.get("window"),
                     },
                 )
+                _record_rejection("fallback_rate_limit")
                 return None
             repeat_meta = _duplicate_repeat_state(state, fallback_text)
             if repeat_meta["repeat"]:
@@ -1843,6 +1946,16 @@ def on_pre_tool(
 
             fallback_emitted = False
             fallback_error: Optional[Dict[str, Any]] = None
+            # Safety check on fallback text before emit
+            try:
+                from .promoter import is_unsafe_insight as _is_unsafe
+                if fallback_text and _is_unsafe(fallback_text):
+                    log_debug("advisory_engine", f"SAFETY_BLOCK: unsafe fallback blocked for {tool_name}", None)
+                    _record_rejection("safety_blocked_fallback")
+                    save_state(state)
+                    return None
+            except Exception as _sfb_err:
+                log_debug("advisory_engine", "SAFETY_CHECK_FALLBACK_fail_open", _sfb_err)
             try:
                 from .advisory_emitter import emit_advisory
                 fallback_emitted = _emit_advisory_compat(
@@ -1856,7 +1969,13 @@ def on_pre_tool(
                     task_plane=task_plane,
                 )
                 if fallback_emitted:
+                    state.last_advisory_packet_id = ""
+                    state.last_advisory_route = str(route or "")
+                    state.last_advisory_tool = str(tool_name or "")
+                    state.last_advisory_advice_ids = []
+                    state.last_advisory_at = time.time()
                     state.last_advisory_text_fingerprint = repeat_meta["fingerprint"]
+                    state.last_advisory_context_fingerprint = context_fp
             except Exception as e:
                 log_debug("advisory_engine", "AE_FALLBACK_EMIT_FAILED", e)
                 fallback_error = build_error_fields(str(e), "AE_FALLBACK_EMIT_FAILED")
@@ -1874,6 +1993,7 @@ def on_pre_tool(
                     "packet_id": packet_id,
                     "stage_ms": stage_ms,
                     "delivery_mode": "fallback" if fallback_emitted else "none",
+                    "route_type": "fallback",
                     "emitted_text_preview": fallback_text[:220],
                     "advice_source_counts": advice_source_counts,
                     "actionability_added": bool(action_meta.get("added")),
@@ -1910,12 +2030,11 @@ def on_pre_tool(
             emitted_advice.append(item)
         emitted_advice_source_counts = _advice_source_counts(emitted_advice)
 
-        # Cross-session dedupe: single text_sig mechanism.
-        # Previously 3 overlapping layers (by advice_id, by text_sig, by low-auth ID).
-        # Consolidated to text_sig only — catches exact repeats AND rephrasings.
+        # Cross-session dedupe: text_sig only (advice_id dedupe absorbed into gate).
         try:
             if (
                 GLOBAL_DEDUPE_ENABLED
+                and GLOBAL_DEDUPE_TEXT_ENABLED
                 and gate_result.emitted
                 and not str(session_id or "").startswith("advisory-bench-")
             ):
@@ -1933,7 +2052,7 @@ def on_pre_tool(
                         sig = _text_fingerprint(str(getattr(item, "text", "") or "")) if item else ""
                     except Exception:
                         sig = ""
-                    if sig and GLOBAL_DEDUPE_TEXT_ENABLED:
+                    if sig:
                         hit_sig = _global_recently_emitted_text_sig(
                             text_sig=sig,
                             now_ts=now_ts,
@@ -1950,23 +2069,6 @@ def on_pre_tool(
                                 }
                             )
                             continue
-                    hit_id = _global_recently_emitted(
-                        tool_name=tool_name,
-                        advice_id=aid,
-                        now_ts=now_ts,
-                        cooldown_s=cooldown,
-                        scope_key=dedupe_scope,
-                    )
-                    if hit_id:
-                        suppressed.append(
-                            {
-                                "advice_id": aid,
-                                "reason": "advice_id",
-                                "repeat_age_s": round(float(hit_id.get("age_s") or 0.0), 2),
-                                "repeat_cooldown_s": round(float(hit_id.get("cooldown_s") or cooldown), 2),
-                            }
-                        )
-                        continue
                     kept.append(decision)
 
                 if suppressed:
@@ -2031,6 +2133,7 @@ def on_pre_tool(
                                 "dedupe_scope": dedupe_scope,
                             },
                         )
+                        _record_rejection("global_dedupe_suppressed")
                         return None
 
                     gate_result.emitted = kept
@@ -2187,7 +2290,37 @@ def on_pre_tool(
                     "actionability_command": action_meta.get("command"),
                 },
             )
+            _record_rejection("duplicate_suppressed")
             return None
+
+        # Safety gate: block unsafe content BEFORE emit (pre-emit position).
+        try:
+            from .promoter import is_unsafe_insight
+            if synth_text and is_unsafe_insight(synth_text):
+                log_debug("advisory_engine", f"SAFETY_BLOCK: unsafe content blocked for {tool_name}", None)
+                _record_advisory_decision_ledger(
+                    stage="safety_blocked",
+                    outcome="blocked",
+                    tool_name=tool_name,
+                    intent_family=intent_family,
+                    task_plane=task_plane,
+                    route=route,
+                    packet_id=packet_id,
+                    advice_items=advice_items,
+                    gate_result=gate_result,
+                    session_id=session_id,
+                    trace_id=resolved_trace_id,
+                    extras={
+                        "error_kind": "safety",
+                        "error_code": "AE_SAFETY_BLOCKED",
+                        "emitted_text_preview": (synth_text or "")[:140],
+                    },
+                )
+                _record_rejection("safety_blocked")
+                save_state(state)
+                return None
+        except Exception as safety_err:
+            log_debug("advisory_engine", "SAFETY_CHECK_EXCEPTION_fail_open", safety_err)
 
         t_emit = time.time() * 1000.0
         emitted = _emit_advisory_compat(
@@ -2212,6 +2345,7 @@ def on_pre_tool(
                 effective_text = " ".join(fragments)
         effective_action_meta = _ensure_actionability(effective_text, tool_name, task_plane) if emitted else {"text": effective_text, "added": False, "command": ""}
         effective_text = str(effective_action_meta.get("text") or effective_text)
+
         if emitted:
             shown_ids = [d.advice_id for d in gate_result.emitted]
             dedupe_scope = _dedupe_scope_key(session_id)
@@ -2222,7 +2356,13 @@ def on_pre_tool(
                 tool_name=tool_name,
                 task_phase=state.task_phase,
             )
-        suppress_tool_advice(state, tool_name, duration_s=get_tool_cooldown_s())
+        # Apply tool-family-aware cooldown: exploration tools get shorter suppression.
+        try:
+            from .advisory_gate import _tool_cooldown_scale
+            tool_cd_scale = _tool_cooldown_scale(tool_name)
+        except Exception:
+            tool_cd_scale = 1.0
+        suppress_tool_advice(state, tool_name, duration_s=get_tool_cooldown_s() * tool_cd_scale)
         # Track retrieval only for delivered advice items (strict attribution).
         try:
             from .meta_ralph import get_meta_ralph
@@ -2255,34 +2395,6 @@ def on_pre_tool(
                     for q in [getattr(adv, "advisory_quality", None) for adv in list(emitted_advice or [])[:4]]
                 ],
             )
-        except Exception:
-            pass
-
-        # Update global low-authority dedupe log on successful WHISPER/NOTE emission.
-        try:
-            top_decision = gate_result.emitted[0] if gate_result.emitted else None
-            top_authority = str(getattr(top_decision, "authority", "") or "")
-            top_advice_id = str(getattr(top_decision, "advice_id", "") or "")
-            if (
-                LOW_AUTH_GLOBAL_DEDUPE_ENABLED
-                and top_authority in {"whisper", "note"}
-                and top_advice_id
-                and not str(session_id or "").startswith("advisory-bench-")
-            ):
-                _append_jsonl_capped(
-                    LOW_AUTH_DEDUPE_LOG,
-                    {
-                        "ts": time.time(),
-                        "tool": tool_name,
-                        "advice_id": top_advice_id,
-                        "authority": top_authority,
-                        "trace_id": resolved_trace_id,
-                        "route": route,
-                        "scope_key": dedupe_scope,
-                        "session_kind": session_lineage.get("session_kind"),
-                    },
-                    max_lines=int(LOW_AUTH_DEDUPE_LOG_MAX),
-                )
         except Exception:
             pass
 
@@ -2373,6 +2485,7 @@ def on_pre_tool(
         state.last_advisory_advice_ids = list(shown_ids[:20])
         state.last_advisory_at = time.time()
         state.last_advisory_text_fingerprint = repeat_meta["fingerprint"]
+        state.last_advisory_context_fingerprint = context_fp
 
         if packet_id:
             try:
@@ -2438,16 +2551,6 @@ def on_pre_tool(
                 "emitted_text_preview": effective_text[:220],
             },
         )
-        # Safety gate: block unsafe content before delivery
-        if emitted and effective_text:
-            try:
-                from .promoter import is_unsafe_insight
-                if is_unsafe_insight(effective_text):
-                    log_debug("advisory_engine", f"SAFETY_BLOCK: unsafe content blocked for {tool_name}", None)
-                    return None
-            except Exception:
-                pass  # If safety check fails, allow delivery (fail-open for now)
-
         return effective_text if emitted else None
 
     except Exception as e:
@@ -2480,6 +2583,7 @@ def on_pre_tool(
                 **build_error_fields(str(e), "AE_ON_PRE_TOOL_FAILED"),
             },
         )
+        _record_rejection("engine_error")
         return None
 
 

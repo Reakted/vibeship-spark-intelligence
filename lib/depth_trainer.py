@@ -2055,6 +2055,10 @@ def _integrate_cognitive(result: TrainingResult) -> int:
     cog.begin_batch()
     stored = 0
 
+    # NOTE: Intentional direct add_insight() — depth_trainer runs in batch mode
+    # with begin_batch/end_batch for 66x speedup. Routing through validate_and_store
+    # would break batch optimization and double-roast training results.
+
     # 1. Store weak areas as self-awareness
     for step in result.steps:
         if step["score"] <= 3:

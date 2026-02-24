@@ -168,14 +168,46 @@ class AutoTuner:
     # How far from the "ideal" boost a source must be before we adjust
     TOLERANCE = 0.05
 
-    # Boost floor and ceiling
-    BOOST_MIN = 0.2
-    BOOST_MAX = 2.0
+    # Boost floor and ceiling (defaults; overridden by tuneable min_boost/max_boost)
+    # Tightened in Batch 5: prevent over-dampening (was 0.2) and runaway amplification (was 3.0)
+    BOOST_MIN = 0.8
+    BOOST_MAX = 1.1
 
     def __init__(self, tuneables_path: Path = TUNEABLES_PATH):
         self.tuneables_path = tuneables_path
         self._tuneables = _read_json(tuneables_path)
         self._config = self._tuneables.get("auto_tuner", {})
+        # Read tuneable bounds if present
+        try:
+            self.BOOST_MIN = max(0.0, float(self._config.get("min_boost", self.BOOST_MIN)))
+            self.BOOST_MAX = max(self.BOOST_MIN + 0.1, float(self._config.get("max_boost", self.BOOST_MAX)))
+        except (TypeError, ValueError):
+            pass
+        # Clamp any legacy out-of-bounds boosts immediately on load
+        self._clamp_existing_boosts()
+
+    def _clamp_existing_boosts(self) -> None:
+        """Clamp all stored boosts to [BOOST_MIN, BOOST_MAX] and persist if changed."""
+        boosts = self._config.get("source_boosts", {})
+        if not boosts:
+            return
+        changed = False
+        for src, val in list(boosts.items()):
+            try:
+                fval = float(val)
+                clamped = max(self.BOOST_MIN, min(self.BOOST_MAX, fval))
+                if clamped != fval:
+                    boosts[src] = round(clamped, 3)
+                    changed = True
+            except (TypeError, ValueError):
+                continue
+        if changed:
+            try:
+                self._config["source_boosts"] = boosts
+                self._tuneables["auto_tuner"] = self._config
+                _write_json_atomic(self.tuneables_path, self._tuneables)
+            except Exception:
+                pass
 
     @property
     def enabled(self) -> bool:
@@ -345,7 +377,7 @@ class AutoTuner:
 
         # --- Meta-Ralph quality threshold ---
         mr_cfg = tuneables.get("meta_ralph", {})
-        current_qt = int(mr_cfg.get("quality_threshold", 4))
+        current_qt = float(mr_cfg.get("quality_threshold", 4))
         if health.feedback_loop_closure < 0.3 and health.cognitive_growth > 50:
             recs.append(TuneRecommendation(
                 section="meta_ralph", key="quality_threshold",
@@ -483,6 +515,7 @@ class AutoTuner:
         # Read effectiveness data
         by_source = self.get_effectiveness_data()
         current_boosts = self._config.get("source_boosts", {})
+        # NOTE: Out-of-bounds boosts are already clamped on __init__ load.
 
         # Compute global average effectiveness (weighted by sample count)
         total_helpful = sum(s.get("helpful", 0) for s in by_source.values())

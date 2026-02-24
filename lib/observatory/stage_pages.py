@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Iterator
 
 from .linker import (
     stage_link_from_stage, flow_link, fmt_ts, fmt_ago, fmt_num, fmt_size, health_badge,
 )
+
+
+def _slug(text: str) -> str:
+    return "-".join(str(text or "").strip().lower().replace("/", " ").replace("_", " ").split())
 
 
 def generate_all_stage_pages(data: dict[int, dict[str, Any]]) -> Iterator[tuple[str, str]]:
@@ -48,7 +53,20 @@ def generate_all_stage_pages(data: dict[int, dict[str, Any]]) -> Iterator[tuple[
 
 def _header(num: int, name: str, purpose: str, upstream: list[int], downstream: list[int]) -> str:
     """Generate consistent page header with breadcrumbs."""
-    lines = [f"# Stage {num}: {name}\n"]
+    stage_tag = f"stage-{num:02d}"
+    lines = [
+        "---",
+        f"title: Stage {num} - {name}",
+        "tags:",
+        "  - observatory",
+        "  - stage",
+        f"  - {stage_tag}",
+        f"  - {_slug(name)}",
+        f"stage: {num}",
+        "---",
+        "",
+        f"# Stage {num}: {name}\n",
+    ]
     lines.append(f"> Part of the {flow_link()}")
 
     up_links = " | ".join(stage_link_from_stage(u) for u in upstream) if upstream else "External events"
@@ -174,7 +192,7 @@ def _gen_pipeline(d: dict, all_data: dict) -> str:
 # ── Stage 4: Memory Capture ─────────────────────────────────────────
 
 def _gen_memory_capture(d: dict, all_data: dict) -> str:
-    s = _header(4, "Memory Capture", "Scans events for high-signal user intent (explicit markers + importance scoring). Detects domain hints and categorizes memories.", [3], [5])
+    s = _header(4, "Memory Capture", "Scans events for high-signal user intent (explicit markers + importance scoring). Detects domain hints and categorizes memories. All writes route through `validate_and_store_insight()` (Batch 2).", [3], [5])
     s += _health_table([
         ("Pending memories", fmt_num(d.get("pending_count", 0)), "healthy"),
         ("Last capture", fmt_ago(d.get("last_capture_ts")), "healthy"),
@@ -209,7 +227,7 @@ def _gen_memory_capture(d: dict, all_data: dict) -> str:
 # ── Stage 5: Meta-Ralph ─────────────────────────────────────────────
 
 def _gen_meta_ralph(d: dict, all_data: dict) -> str:
-    s = _header(5, "Meta-Ralph", "Quality gate for ALL insights. Multi-dimensional scoring: actionability, novelty, reasoning, specificity, outcome-linkage, ethics. Detects primitives, tautologies, circular reasoning, and noise.", [4, 3], [6])
+    s = _header(5, "Meta-Ralph", "Quality gate for ALL insights via `validate_and_store_insight()`. Multi-dimensional scoring: actionability, novelty, reasoning, specificity, outcome-linkage, ethics. Detects primitives, tautologies, circular reasoning, and noise. Fail-open: on exception, quarantines AND stores.", [4, 3], [6])
 
     pass_rate = d.get("pass_rate", 0)
     pass_status = "healthy" if pass_rate > 30 else ("warning" if pass_rate > 15 else "critical")
@@ -291,10 +309,33 @@ def _gen_meta_ralph(d: dict, all_data: dict) -> str:
     s += "## Deep Dive\n\n"
     s += "- [[../explore/verdicts/_index|Browse Individual Verdicts]] — score breakdowns, input text, issues\n\n"
 
+    # Unified write path telemetry (validate_and_store)
+    try:
+        import json
+        vas_path = Path.home() / ".spark" / "validate_and_store_telemetry.json"
+        if vas_path.exists():
+            vas = json.loads(vas_path.read_text(encoding="utf-8"))
+            total = vas.get("total_attempted", 0)
+            stored = vas.get("stored", 0)
+            quarantined = vas.get("quarantined", 0)
+            rejected = vas.get("roast_primitive", 0) + vas.get("roast_duplicate", 0) + vas.get("noise_filtered", 0)
+            s += "## Unified Write Gate (`validate_and_store`)\n\n"
+            s += "| Metric | Value |\n"
+            s += "|--------|-------|\n"
+            s += f"| Total attempted | {fmt_num(total)} |\n"
+            s += f"| Stored | {fmt_num(stored)} |\n"
+            s += f"| Rejected (primitive+duplicate+noise) | {fmt_num(rejected)} |\n"
+            s += f"| Quarantined (Meta-Ralph exception) | {fmt_num(quarantined)} |\n"
+            if total > 0:
+                s += f"| Pass rate | {stored/total*100:.1f}% |\n"
+            s += "\n"
+    except Exception:
+        pass
+
     s += _source_files("lib/meta_ralph.py", [
         "meta_ralph/learnings_store.json",
         "meta_ralph/roast_history.json",
-        "meta_ralph/outcome_tracking.json",
+        "validate_and_store_telemetry.json",
     ])
     return s
 
@@ -308,7 +349,7 @@ def _score_bar(value: float, max_val: float) -> str:
 # ── Stage 6: Cognitive Learner ───────────────────────────────────────
 
 def _gen_cognitive(d: dict, all_data: dict) -> str:
-    s = _header(6, "Cognitive Learner", "Stores refined insights with reliability tracking, validation counts, and promotion status. Noise filter: 41 patterns. Deduplication via similarity threshold.", [5], [8, 9])
+    s = _header(6, "Cognitive Learner", "Stores refined insights with reliability tracking, validation counts, and promotion status. Noise filter: 41 patterns (shared via `noise_patterns.py`). Deduplication via similarity threshold. Canonical entry point: `validate_and_store_insight()`.", [5], [8, 9])
     s += _health_table([
         ("Total insights", fmt_num(d.get("total_insights", 0)), "healthy"),
         ("Categories", fmt_num(len(d.get("category_distribution", {}))), "healthy"),
@@ -454,7 +495,36 @@ def _gen_advisory(d: dict, all_data: dict) -> str:
                 s += f"   - [{src}] {txt[:120]}\n"
         s += "\n"
 
+    # Rejection telemetry (from advisory_rejection_telemetry.json)
+    try:
+        import json as _json
+        rej_path = Path.home() / ".spark" / "advisory_rejection_telemetry.json"
+        if rej_path.exists():
+            rej = _json.loads(rej_path.read_text(encoding="utf-8"))
+            if rej:
+                s += "## Rejection Telemetry\n\n"
+                s += "*Counters tracking why advice was suppressed at each stage of `on_pre_tool()`.*\n\n"
+                s += "| Reason | Count |\n"
+                s += "|--------|-------|\n"
+                for reason, count in sorted(rej.items(), key=lambda x: -x[1] if isinstance(x[1], (int, float)) else 0):
+                    if reason.startswith("_"):
+                        continue
+                    s += f"| {reason} | {fmt_num(count)} |\n"
+                s += "\n"
+    except Exception:
+        pass
+
+    # Fallback budget status
+    try:
+        from lib.advisory_engine import FALLBACK_BUDGET_CAP, FALLBACK_BUDGET_WINDOW
+        s += "## Fallback Budget\n\n"
+        s += f"- **Cap**: {FALLBACK_BUDGET_CAP} emissions per {FALLBACK_BUDGET_WINDOW}-call window\n"
+        s += "- 0 = unlimited (old behavior)\n\n"
+    except Exception:
+        pass
+
     s += "## Deep Dive\n\n"
+    s += "- [[../advisory_reverse_engineering|Advisory Reverse Engineering]] - full path map + suppression diagnostics\n"
     s += "- [[../explore/decisions/_index|Advisory Decision Ledger]] — emit/suppress/block decisions\n"
     s += "- [[../explore/feedback/_index|Implicit Feedback Loop]] — per-tool follow rates\n"
     s += "- [[../explore/advisory/_index|Advisory Effectiveness]] — source breakdown + recent advice\n"
@@ -628,6 +698,10 @@ def _gen_tuneables(d: dict, all_data: dict) -> str:
     s += f"- `eidos` — {stage_link_from_stage(7)}\n"
     s += f"- `observatory` — Observatory auto-sync\n"
     s += "\n"
+
+    s += "\n## Deep Dive\n\n"
+    s += "For comprehensive analysis including config drift, hot-reload coverage, cooldown redundancy, "
+    s += "auto-tuner activity, and recommendations, see [[Tuneables Deep Dive]].\n\n"
 
     s += _source_files("lib/tuneables_schema.py + lib/tuneables_reload.py", [
         "tuneables.json",

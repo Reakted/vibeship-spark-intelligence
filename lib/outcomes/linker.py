@@ -5,6 +5,7 @@ When we detect a success/failure signal, link it back to
 recent insights to validate or invalidate them.
 """
 
+import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -65,8 +66,8 @@ class OutcomeLinker:
             # Create link if relevant
             if recency > 0.2 or context_match > 0.5:
                 link = OutcomeLink(
-                    outcome_id=f"out_{hash(outcome.content)%100000}",
-                    insight_id=insight.get("id") or f"ins_{hash(str(insight))%100000}",
+                    outcome_id=f"out_{hashlib.sha1((outcome.content or '').encode('utf-8', errors='ignore')).hexdigest()[:10]}",
+                    insight_id=insight.get("id") or f"ins_{hashlib.sha1(str(insight).encode('utf-8', errors='ignore')).hexdigest()[:10]}",
                     outcome_type=outcome.type.value,
                     confidence=outcome.confidence * recency * max(0.5, context_match),
                     recency_weight=recency,
@@ -106,7 +107,7 @@ class OutcomeLinker:
         """Calculate how well outcome context matches insight."""
         score = 0.3  # Base
 
-        outcome_content = outcome.content.lower()
+        outcome_content = (outcome.content or "").lower()
         insight_content = str(insight.get("content", "")).lower()
         captured = insight.get("captured_data", {})
 
@@ -139,12 +140,25 @@ class OutcomeLinker:
         return min(1.0, score)
 
     def _save_links(self, links: List[OutcomeLink]):
-        """Persist links to disk."""
+        """Persist links via the canonical outcome_log writer.
+
+        Delegates to outcome_log.link_outcome_to_insight() to avoid a
+        dual-writer race condition on outcome_links.jsonl (Batch 4 fix).
+        """
         try:
-            LINKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(LINKS_FILE, 'a', encoding='utf-8') as f:
-                for link in links:
-                    f.write(json.dumps(link.to_dict()) + '\n')
+            from lib.outcome_log import link_outcome_to_insight
+
+            for link in links:
+                link_outcome_to_insight(
+                    outcome_id=link.outcome_id,
+                    insight_key=link.insight_id,
+                    confidence=link.confidence,
+                    notes=(
+                        f"type={link.outcome_type} "
+                        f"recency={link.recency_weight:.2f} "
+                        f"ctx_match={link.context_match:.2f}"
+                    ),
+                )
         except Exception as e:
             log.error(f"Failed to save outcome links: {e}")
 
@@ -170,16 +184,45 @@ class OutcomeLinker:
         return [l for l in self._links if l.insight_id == insight_id]
 
     def load_links(self):
-        """Load links from disk."""
+        """Load links from disk.
+
+        Handles both the old linker schema (insight_id) and the canonical
+        outcome_log schema (insight_key) for backward compatibility.
+        """
         if not LINKS_FILE.exists():
             return
 
         try:
             with open(LINKS_FILE, 'r', encoding='utf-8') as f:
                 for line in f:
-                    if line.strip():
+                    if not line.strip():
+                        continue
+                    try:
                         data = json.loads(line)
-                        self._links.append(OutcomeLink(**data))
+                        # Normalize: canonical schema uses insight_key, linker uses insight_id
+                        if "insight_id" not in data and "insight_key" in data:
+                            data["insight_id"] = data["insight_key"]
+                        if "outcome_type" not in data:
+                            data["outcome_type"] = "unknown"
+                        if "recency_weight" not in data:
+                            data["recency_weight"] = 0.5
+                        if "context_match" not in data:
+                            data["context_match"] = float(data.get("confidence", 0.5))
+                        if "timestamp" not in data:
+                            data["timestamp"] = datetime.fromtimestamp(
+                                data.get("created_at", 0)
+                            ).isoformat() if data.get("created_at") else ""
+                        self._links.append(OutcomeLink(
+                            outcome_id=data["outcome_id"],
+                            insight_id=data["insight_id"],
+                            outcome_type=data["outcome_type"],
+                            confidence=float(data.get("confidence", 0.5)),
+                            recency_weight=float(data["recency_weight"]),
+                            context_match=float(data["context_match"]),
+                            timestamp=str(data["timestamp"]),
+                        ))
+                    except Exception:
+                        pass  # Skip malformed rows
         except Exception as e:
             log.warning(f"Failed to load outcome links: {e}")
 
