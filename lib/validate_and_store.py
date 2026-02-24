@@ -42,6 +42,8 @@ def reset_enabled_cache() -> None:
     """Clear the cached enabled flag so next call re-reads tuneables."""
     global _ENABLED
     _ENABLED = None
+
+
 TELEMETRY_FILE = Path.home() / ".spark" / "validate_and_store_telemetry.json"
 
 # Telemetry counters (flushed periodically)
@@ -175,7 +177,7 @@ def validate_and_store_insight(
                 reason=f"meta_ralph_exception: {e}",
                 source=source,
                 stage="validate_and_store",
-                extra={"category": str(category), "confidence": confidence},
+                extras={"category": str(category), "confidence": confidence},
             )
         except Exception:
             pass

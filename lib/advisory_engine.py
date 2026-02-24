@@ -90,27 +90,6 @@ ADVISORY_TEXT_REPEAT_COOLDOWN_S = float(
     os.getenv("SPARK_ADVISORY_TEXT_REPEAT_COOLDOWN_S", "600")
 )
 
-# Cross-session spam guard: suppress repeated low-authority emissions (WHISPER/NOTE)
-# even when session_id churns. (Bench sessions bypass to keep eval stability.)
-LOW_AUTH_GLOBAL_DEDUPE_ENABLED = (
-    os.getenv(
-        "SPARK_ADVISORY_LOW_AUTH_GLOBAL_DEDUPE",
-        os.getenv("SPARK_ADVISORY_WHISPER_GLOBAL_DEDUPE", "1"),
-    )
-    != "0"
-)
-try:
-    LOW_AUTH_GLOBAL_COOLDOWN_S = float(
-        os.getenv(
-            "SPARK_ADVISORY_LOW_AUTH_GLOBAL_COOLDOWN_S",
-            os.getenv("SPARK_ADVISORY_WHISPER_GLOBAL_COOLDOWN_S", "600"),
-        )
-    )
-except Exception:
-    LOW_AUTH_GLOBAL_COOLDOWN_S = 600.0
-LOW_AUTH_DEDUPE_LOG = Path.home() / ".spark" / "advisory_low_auth_dedupe.jsonl"
-LOW_AUTH_DEDUPE_LOG_MAX = 2000
-
 # Cross-session dedupe for any emitted advice_id. This reduces high-frequency spam
 # like "Always Read..." when session_id churns and per-session cooldowns can't help.
 GLOBAL_DEDUPE_ENABLED = os.getenv("SPARK_ADVISORY_GLOBAL_DEDUPE", "1") != "0"
@@ -2360,8 +2339,8 @@ def on_pre_tool(
                     _record_rejection("safety_blocked")
                     save_state(state)
                     return None
-            except Exception:
-                pass  # If safety check fails, allow delivery (fail-open)
+            except Exception as safety_err:
+                log_debug("advisory_engine", "SAFETY_CHECK_EXCEPTION_fail_open", safety_err)
 
         if emitted:
             shown_ids = [d.advice_id for d in gate_result.emitted]

@@ -80,7 +80,7 @@ def test_on_pre_tool_global_dedupe_filters_emitted(monkeypatch, tmp_path):
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_LOG", tmp_path / "global.jsonl")
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_LOG_MAX", 200)
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_TEXT_ENABLED", True)
-    monkeypatch.setattr(advisory_engine, "LOW_AUTH_GLOBAL_DEDUPE_ENABLED", False)
+
 
     # Avoid writing state into the real ~/.spark folder.
     import lib.advisory_state as advisory_state
@@ -197,7 +197,7 @@ def test_on_pre_tool_global_dedupe_filters_by_text_sig(monkeypatch, tmp_path):
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_COOLDOWN_S", 600.0)
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_LOG", tmp_path / "global.jsonl")
     monkeypatch.setattr(advisory_engine, "GLOBAL_DEDUPE_LOG_MAX", 200)
-    monkeypatch.setattr(advisory_engine, "LOW_AUTH_GLOBAL_DEDUPE_ENABLED", False)
+
 
     import lib.advisory_state as advisory_state
 

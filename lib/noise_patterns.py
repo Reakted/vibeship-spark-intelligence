@@ -33,7 +33,7 @@ ARROW_RE = re.compile(r"(?:->|-->|\u2192)")
 
 TOOL_SEQUENCE_PATTERNS: Tuple[str, ...] = (
     r"\b(?:read|edit|write|bash|glob|grep)\b\s*->\s*\b(?:read|edit|write|bash|glob|grep)\b",
-    r"\b\w+\s*->\s*\w+\b",
+    r"\b(?:read|edit|write|bash|glob|grep)\b\s*(?:->|-->|\u2192)\s*\b\w+\b",
     r"tool sequence",
     r"pattern using \w+\.",
     r"sequence.*(?:work|pattern)",

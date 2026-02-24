@@ -94,42 +94,40 @@ def test_on_pre_tool_disabled():
 # ── Subsystem availability ────────────────────────────────────────────
 
 def test_on_pre_tool_returns_string_or_none():
-    """on_pre_tool should return either a string (advice) or None."""
+    """on_pre_tool should return either a string or None, never other types."""
     with patch("lib.advisory_engine.ENGINE_ENABLED", True):
         from lib.advisory_engine import on_pre_tool
         result = on_pre_tool("test_session", "Read", tool_input={"file_path": "/tmp/test.py"})
-        assert result is None or isinstance(result, str)
+        # Explicitly test it's not a bool, int, list, or exception
+        assert isinstance(result, (str, type(None))), f"Expected str or None, got {type(result).__name__}: {result!r}"
 
 
 # ── Error resilience ──────────────────────────────────────────────────
 
-def test_on_pre_tool_handles_import_error():
-    """on_pre_tool should not crash if subsystem imports fail."""
+def test_on_pre_tool_handles_unknown_tool():
+    """on_pre_tool should not crash for unknown tool names and returns None or advice."""
     with patch("lib.advisory_engine.ENGINE_ENABLED", True):
-        # Patch the inner imports to raise
-        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
         from lib.advisory_engine import on_pre_tool
 
-        # The method has its own try/except, so it should never raise
+        # Unknown tool should not raise — the engine handles gracefully
         result = on_pre_tool("test_session", "UnknownTool")
-        assert result is None or isinstance(result, str)
+        assert isinstance(result, (str, type(None))), f"Expected str or None, got {type(result).__name__}"
 
 
-def test_on_pre_tool_handles_state_load_error():
-    """on_pre_tool should handle state loading failures gracefully."""
+def test_on_pre_tool_handles_empty_session_id():
+    """on_pre_tool should handle empty session_id gracefully without crashing."""
     with patch("lib.advisory_engine.ENGINE_ENABLED", True):
         from lib.advisory_engine import on_pre_tool
-        # Even with corrupted state, should not crash
+        # Empty session_id should not crash
         result = on_pre_tool("", "Read")
-        assert result is None or isinstance(result, str)
+        assert isinstance(result, (str, type(None))), f"Expected str or None, got {type(result).__name__}"
 
 
 # ── Global dedupe function ────────────────────────────────────────────
 
-def test_global_recently_emitted_function_exists():
-    """Verify the global dedupe function exists and is callable."""
+def test_global_recently_emitted_returns_none_for_unseen():
+    """Global dedupe returns None for an advice_id never emitted before."""
     from lib.advisory_engine import _global_recently_emitted
-    # Returns Optional[Dict] — None means "not recently emitted" or test short-circuit
     result = _global_recently_emitted(
         tool_name="Read",
         advice_id="never_seen_advice_id_xyz123",
@@ -137,20 +135,22 @@ def test_global_recently_emitted_function_exists():
         cooldown_s=300.0,
         scope_key="test",
     )
-    assert result is None or isinstance(result, dict)
+    # An advice_id that was never emitted should return None (not recently emitted)
+    # or short-circuit to None in pytest environments
+    assert result is None, f"Expected None for unseen advice_id, got {result!r}"
 
 
-def test_global_recently_emitted_text_sig_function_exists():
-    """Verify the text signature dedupe function exists."""
+def test_global_recently_emitted_text_sig_returns_none_for_unseen():
+    """Text signature dedupe returns None for a text never emitted before."""
     from lib.advisory_engine import _global_recently_emitted_text_sig
-    # Param is text_sig, not text. Returns Optional[Dict].
     result = _global_recently_emitted_text_sig(
         text_sig="some unique advice text xyz123",
         now_ts=time.time(),
         cooldown_s=300.0,
         scope_key="test",
     )
-    assert result is None or isinstance(result, dict)
+    # A text_sig never emitted should return None or short-circuit in pytest
+    assert result is None, f"Expected None for unseen text_sig, got {result!r}"
 
 
 # ── Text repeat detection ─────────────────────────────────────────────
@@ -168,11 +168,15 @@ def test_duplicate_repeat_state_function():
 
 # ── Dead code removal verification ────────────────────────────────────
 
-def test_low_auth_recently_emitted_removed():
-    """Verify _low_auth_recently_emitted was removed (dead code, Batch 1)."""
+def test_low_auth_dead_code_removed():
+    """Verify LOW_AUTH_* dead code was removed (Batch 1 + review fixes)."""
     import lib.advisory_engine as ae
     assert not hasattr(ae, "_low_auth_recently_emitted"), \
         "_low_auth_recently_emitted should have been removed in Batch 1"
+    assert not hasattr(ae, "LOW_AUTH_GLOBAL_DEDUPE_ENABLED"), \
+        "LOW_AUTH_GLOBAL_DEDUPE_ENABLED should have been removed (dead code)"
+    assert not hasattr(ae, "LOW_AUTH_DEDUPE_LOG"), \
+        "LOW_AUTH_DEDUPE_LOG should have been removed (dead code)"
 
 
 # ── Rejection telemetry ────────────────────────────────────────────────
