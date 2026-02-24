@@ -46,7 +46,7 @@ def load_config() -> ObservatoryConfig:
         enabled=bool(section.get("enabled", True)),
         auto_sync=bool(section.get("auto_sync", True)),
         sync_cooldown_s=int(section.get("sync_cooldown_s", 120)),
-        vault_dir=str(section.get("vault_dir", _DEFAULT_VAULT)),
+        vault_dir=str(section.get("vault_dir") or _DEFAULT_VAULT),
         generate_canvas=bool(section.get("generate_canvas", True)),
         max_recent_items=int(section.get("max_recent_items", 20)),
         explore_cognitive_max=int(section.get("explore_cognitive_max", 200)),
