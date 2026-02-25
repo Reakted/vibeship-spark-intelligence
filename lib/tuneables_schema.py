@@ -448,13 +448,16 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
     "memory_capture": {
         "enabled": TuneableSpec("bool", True, None, None, "Enable memory capture"),
         "auto_save_threshold": TuneableSpec(
-            "float", 0.65, 0.1, 1.0, "Importance threshold for auto-save",
+            "float", 0.72, 0.1, 1.0, "Importance threshold for auto-save",
         ),
         "suggest_threshold": TuneableSpec(
-            "float", 0.55, 0.05, 0.99, "Importance threshold for suggestion queue",
+            "float", 0.6, 0.05, 0.99, "Importance threshold for suggestion queue",
         ),
         "max_capture_chars": TuneableSpec(
             "int", 2000, 200, 20000, "Max characters captured from source text",
+        ),
+        "context_capture_chars": TuneableSpec(
+            "int", 320, 80, 2000, "Max characters retained for capture context snippets",
         ),
     },
 

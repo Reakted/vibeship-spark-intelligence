@@ -139,6 +139,9 @@ sandbox/spark_sandbox_diff.json
 node_modules/
 _pw_smoke.js
 
+# Temporary: keep unfinished observability kanban project local
+projects/observability-kanban/
+
 # OSS launch hygiene (removed from public share)
 logs/
 dist/

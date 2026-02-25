@@ -42,6 +42,7 @@ PENDING_FILE = PENDING_DIR / "pending_memory.json"
 STATE_FILE = PENDING_DIR / "memory_capture_state.json"
 TUNEABLES_FILE = Path.home() / ".spark" / "tuneables.json"
 MAX_CAPTURE_CHARS = 2000
+CONTEXT_CAPTURE_CHARS = 320
 
 
 # -----------------------------
@@ -95,6 +96,74 @@ _DECISION_EXTRA = {
     "move forward",
 }
 
+_CAPTURE_NOISE_PATTERNS = (
+    re.compile(r"you are spark intelligence, observing a live coding session", re.I),
+    re.compile(r"system inventory \(what actually exists", re.I),
+    re.compile(r"<task-notification>|<task-id>|<output-file>|<status>|<summary>", re.I),
+    re.compile(r"\n\s*- services:\s", re.I),
+    re.compile(r"^#\s*provider prompt", re.I),
+    re.compile(r"\bmission id:\b|\bassigned tasks:\b|\bexecution expectations:\b", re.I),
+    re.compile(r"\bh70 skill loading\b|\bmission completion gate\b", re.I),
+    re.compile(r"\bcurl\s+-x\s+post\s+http://127\.0\.0\.1:\d+/api/events\b", re.I),
+    re.compile(r"^\s*evidence\s*:", re.I),
+)
+_INLINE_NOISE_FIELD_RE = re.compile(r"\b(event_type|tool_name|file_path|cwd)\s*:\s*\S+", re.I)
+
+_CAPTURE_META_LINE_RE = re.compile(
+    r"^\s*(mission|mission id|provider|model|role|strategy|priority|importance|task id|task name|"
+    r"source|progress|kpi|intent|mcp plan|execution expectations|verification)\s*[:=]",
+    re.I,
+)
+
+_SIGNAL_HINT_RE = re.compile(
+    r"\b(should|must|because|prefer|decision|fix|ship|regression|bug|test|quality|confidence)\b",
+    re.I,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\s*[;|]\s+")
+_SEMANTIC_SUMMARY_RE = re.compile(
+    r"\b(because|so that|therefore|hence|prefer|must|should|avoid|trade-?off|"
+    r"threshold|confidence|quality|latency|impact|decision)\b",
+    re.I,
+)
+
+
+def _is_noise_line(text: str) -> bool:
+    line = str(text or "").strip()
+    if not line:
+        return True
+    if _INLINE_NOISE_FIELD_RE.search(line):
+        residual = _INLINE_NOISE_FIELD_RE.sub(" ", line)
+        residual = re.sub(r"\s+", " ", residual).strip(" -:;|")
+        if len(residual) < 20:
+            return True
+    if _CAPTURE_META_LINE_RE.search(line):
+        return True
+    return any(rx.search(line) for rx in _CAPTURE_NOISE_PATTERNS)
+
+
+def _strip_inline_noise_tokens(text: str) -> str:
+    cleaned = _INLINE_NOISE_FIELD_RE.sub(" ", str(text or ""))
+    cleaned = re.sub(r"<task-notification>|<task-id>|<output-file>|<status>|<summary>", " ", cleaned, flags=re.I)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:;|")
+    return cleaned
+
+
+def _noise_line_stats(text: str) -> Tuple[int, int, int]:
+    total = 0
+    noise = 0
+    signal = 0
+    for raw in str(text or "").splitlines():
+        line = _strip_inline_noise_tokens(raw.strip())
+        if not line:
+            continue
+        total += 1
+        if _is_noise_line(line):
+            noise += 1
+            continue
+        if _SIGNAL_HINT_RE.search(line):
+            signal += 1
+    return noise, total, signal
+
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
@@ -109,6 +178,66 @@ def _is_decision_text(text: str) -> bool:
         if k in t:
             return True
     return False
+
+
+def _is_capture_noise(text: str) -> bool:
+    sample = str(text or "").strip()
+    if not sample:
+        return True
+    sample_clean = _strip_inline_noise_tokens(sample)
+    if not sample_clean:
+        return True
+    if any(rx.search(sample_clean) for rx in _CAPTURE_NOISE_PATTERNS):
+        return True
+    noise_lines, total_lines, signal_lines = _noise_line_stats(sample_clean)
+    if total_lines >= 4 and noise_lines / max(1, total_lines) >= 0.55 and signal_lines <= 1:
+        return True
+    if total_lines >= 8 and noise_lines >= 6:
+        return True
+    return False
+
+
+def _compact_context_snippet(text: str, *, max_chars: int) -> str:
+    """Keep semantically useful context while dropping noisy scaffolding."""
+    sample = str(text or "")
+    lines: List[str] = []
+    for raw in sample.splitlines():
+        line = _strip_inline_noise_tokens(raw.strip())
+        if not line:
+            continue
+        if _is_noise_line(line):
+            continue
+        lines.append(line)
+    if not lines:
+        return ""
+    compact = " ".join(lines)
+    compact = re.sub(r"\s+", " ", compact).strip()
+    if not compact:
+        return ""
+    parts = [p.strip() for p in _SENTENCE_SPLIT_RE.split(compact) if p.strip()]
+    if parts:
+        scored: List[Tuple[float, int, str]] = []
+        for idx, part in enumerate(parts):
+            score = 0.0
+            if _SEMANTIC_SUMMARY_RE.search(part):
+                score += 1.2
+            if _SIGNAL_HINT_RE.search(part):
+                score += 0.8
+            if re.search(r"\b\d+(\.\d+)?%?\b", part):
+                score += 0.4
+            if 24 <= len(part) <= 220:
+                score += 0.2
+            scored.append((score, idx, part))
+        keep_n = min(4, len(scored))
+        top = sorted(scored, key=lambda item: (item[0], -item[1]), reverse=True)[:keep_n]
+        top_idx = {idx for _, idx, _ in top}
+        summary_parts = [part for idx, part in enumerate(parts) if idx in top_idx]
+        if summary_parts:
+            compact = " ".join(summary_parts)
+    compact = re.sub(r"\s+", " ", compact).strip()
+    if len(compact) > max_chars:
+        compact = compact[:max_chars].rstrip()
+    return compact
 
 
 def infer_category(text: str) -> CognitiveCategory:
@@ -312,8 +441,8 @@ def _make_id(session_id: str, text: str) -> str:
 # Core processing
 # -----------------------------
 
-AUTO_SAVE_THRESHOLD = 0.65
-SUGGEST_THRESHOLD = 0.55
+AUTO_SAVE_THRESHOLD = 0.72
+SUGGEST_THRESHOLD = 0.60
 
 
 _REMEMBER_PREFIX_RE = re.compile(r"^\s*(remember this|note this|save this)\s*:\s*", re.IGNORECASE)
@@ -331,6 +460,7 @@ def _apply_memory_capture_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
     global AUTO_SAVE_THRESHOLD
     global SUGGEST_THRESHOLD
     global MAX_CAPTURE_CHARS
+    global CONTEXT_CAPTURE_CHARS
 
     applied: List[str] = []
     warnings: List[str] = []
@@ -358,6 +488,13 @@ def _apply_memory_capture_config(cfg: Dict[str, Any]) -> Dict[str, List[str]]:
         except Exception:
             warnings.append("invalid_max_capture_chars")
 
+    if "context_capture_chars" in cfg:
+        try:
+            CONTEXT_CAPTURE_CHARS = max(80, min(2000, int(cfg.get("context_capture_chars") or 80)))
+            applied.append("context_capture_chars")
+        except Exception:
+            warnings.append("invalid_context_capture_chars")
+
     if SUGGEST_THRESHOLD > AUTO_SAVE_THRESHOLD:
         SUGGEST_THRESHOLD = max(0.05, AUTO_SAVE_THRESHOLD - 0.05)
         warnings.append("suggest_threshold_auto_adjusted")
@@ -374,6 +511,7 @@ def get_memory_capture_config() -> Dict[str, Any]:
         "auto_save_threshold": float(AUTO_SAVE_THRESHOLD),
         "suggest_threshold": float(SUGGEST_THRESHOLD),
         "max_capture_chars": int(MAX_CAPTURE_CHARS),
+        "context_capture_chars": int(CONTEXT_CAPTURE_CHARS),
     }
 
 
@@ -417,8 +555,12 @@ def commit_learning(
             return False
         if len(clean) > MAX_CAPTURE_CHARS:
             clean = clean[:MAX_CAPTURE_CHARS].rstrip()
-        # Use a short context snippet so retrieval has something relevant.
-        ctx = (context or clean)[:100]
+        if _is_capture_noise(clean):
+            return False
+        # Use a compact context snippet so retrieval has useful grounding.
+        ctx = _compact_context_snippet((context or clean), max_chars=CONTEXT_CAPTURE_CHARS)
+        if not ctx:
+            ctx = clean[:CONTEXT_CAPTURE_CHARS]
         # Route through unified validation (Meta-Ralph + noise filter).
         from lib.validate_and_store import validate_and_store_insight
         validate_and_store_insight(
@@ -526,6 +668,8 @@ def process_recent_memory_events(limit: int = 50) -> Dict[str, Any]:
 
         txt = str(payload.get("text") or "").strip()
         if not txt:
+            continue
+        if _is_capture_noise(txt):
             continue
         if len(txt) > MAX_CAPTURE_CHARS:
             txt = txt[:MAX_CAPTURE_CHARS].rstrip()

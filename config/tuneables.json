@@ -546,9 +546,10 @@
   },
   "memory_capture": {
     "enabled": true,
-    "auto_save_threshold": 0.65,
-    "suggest_threshold": 0.55,
-    "max_capture_chars": 2000
+    "auto_save_threshold": 0.72,
+    "suggest_threshold": 0.6,
+    "max_capture_chars": 2000,
+    "context_capture_chars": 320
   },
   "request_tracker": {
     "max_pending": 50,
