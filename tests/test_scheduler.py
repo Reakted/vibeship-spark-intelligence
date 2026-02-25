@@ -406,5 +406,25 @@ class TestAdvisoryReviewTask(unittest.TestCase):
         self.assertEqual(out["status"], "ok")
         self.assertIn("Advisory self-review written", out["message"])
 
+    def test_advisory_review_runs_memory_observatory_when_due(self):
+        with patch.object(sched, "load_scheduler_config", return_value={"advisory_review_window_hours": 12}), \
+             patch("spark_scheduler.subprocess.run") as mock_run, \
+             patch("glob.glob", return_value=[]):
+            mock_run.side_effect = [
+                MagicMock(
+                    returncode=0,
+                    stdout="Advisory self-review written: docs/reports/x.md\n",
+                    stderr="",
+                ),
+                MagicMock(
+                    returncode=0,
+                    stdout="{\"grade\":{\"band\":\"YELLOW\"}}\n",
+                    stderr="",
+                ),
+            ]
+            out = sched.task_advisory_review({})
+        self.assertEqual(out["status"], "ok")
+        self.assertGreaterEqual(mock_run.call_count, 2)
+
 if __name__ == "__main__":
     unittest.main()

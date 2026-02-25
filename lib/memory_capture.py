@@ -141,7 +141,20 @@ def _is_noise_line(text: str) -> bool:
     return any(rx.search(line) for rx in _CAPTURE_NOISE_PATTERNS)
 
 
-def _strip_inline_noise_tokens(text: str) -> str:
+def _strip_inline_noise_tokens(text: str, *, preserve_newlines: bool = False) -> str:
+    if preserve_newlines:
+        lines: List[str] = []
+        for raw in str(text or "").splitlines():
+            cleaned_line = _INLINE_NOISE_FIELD_RE.sub(" ", raw)
+            cleaned_line = re.sub(
+                r"<task-notification>|<task-id>|<output-file>|<status>|<summary>",
+                " ",
+                cleaned_line,
+                flags=re.I,
+            )
+            cleaned_line = re.sub(r"\s+", " ", cleaned_line).strip(" -:;|")
+            lines.append(cleaned_line)
+        return "\n".join(lines)
     cleaned = _INLINE_NOISE_FIELD_RE.sub(" ", str(text or ""))
     cleaned = re.sub(r"<task-notification>|<task-id>|<output-file>|<status>|<summary>", " ", cleaned, flags=re.I)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:;|")
@@ -153,13 +166,14 @@ def _noise_line_stats(text: str) -> Tuple[int, int, int]:
     noise = 0
     signal = 0
     for raw in str(text or "").splitlines():
-        line = _strip_inline_noise_tokens(raw.strip())
-        if not line:
+        line_raw = str(raw or "").strip()
+        if not line_raw:
             continue
         total += 1
-        if _is_noise_line(line):
+        if _is_noise_line(line_raw):
             noise += 1
             continue
+        line = _strip_inline_noise_tokens(line_raw)
         if _SIGNAL_HINT_RE.search(line):
             signal += 1
     return noise, total, signal
@@ -184,15 +198,15 @@ def _is_capture_noise(text: str) -> bool:
     sample = str(text or "").strip()
     if not sample:
         return True
-    sample_clean = _strip_inline_noise_tokens(sample)
+    sample_clean = _strip_inline_noise_tokens(sample, preserve_newlines=True)
     if not sample_clean:
         return True
     if any(rx.search(sample_clean) for rx in _CAPTURE_NOISE_PATTERNS):
         return True
-    noise_lines, total_lines, signal_lines = _noise_line_stats(sample_clean)
+    noise_lines, total_lines, signal_lines = _noise_line_stats(sample)
     if total_lines >= 4 and noise_lines / max(1, total_lines) >= 0.55 and signal_lines <= 1:
         return True
-    if total_lines >= 8 and noise_lines >= 6:
+    if total_lines >= 8 and noise_lines >= 6 and signal_lines <= 2:
         return True
     return False
 
