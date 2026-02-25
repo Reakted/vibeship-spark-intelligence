@@ -274,7 +274,36 @@
     "max_time_seconds": 1200,
     "max_retries_per_error": 3,
     "max_file_touches": 5,
-    "no_evidence_limit": 6
+    "no_evidence_limit": 6,
+    "safety_guardrails_enabled": true,
+    "safety_allow_secrets": false,
+    "trace_strict": false,
+    "tool_distillation_enabled": true,
+    "llm_provider": "minimax"
+  },
+  "observe_hook": {
+    "eidos_enabled": true,
+    "outcome_checkin_min_s": 1800,
+    "advice_feedback_enabled": true,
+    "advice_feedback_prompt": true,
+    "advice_feedback_min_s": 600,
+    "pretool_budget_ms": 2500.0,
+    "eidos_enforce_block": false,
+    "hook_payload_text_limit": 3000,
+    "outcome_checkin_enabled": false,
+    "outcome_checkin_prompt": false
+  },
+  "chips_runtime": {
+    "observer_only": true,
+    "min_score": 0.35,
+    "min_confidence": 0.7,
+    "gate_mode": "balanced",
+    "min_learning_evidence": 1,
+    "blocked_ids": "",
+    "telemetry_observer_blocklist": "",
+    "max_active_per_event": 6,
+    "preferred_format": "multifile",
+    "schema_validation": "warn"
   },
   "sync": {
     "mode": "all",

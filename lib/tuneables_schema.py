@@ -320,6 +320,12 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "max_retries_per_error": TuneableSpec("int", 3, 1, 20, "Retry limit per error type"),
         "max_file_touches": TuneableSpec("int", 5, 1, 50, "Max times to modify same file"),
         "no_evidence_limit": TuneableSpec("int", 6, 1, 30, "Force DIAGNOSE after N steps without evidence"),
+        "safety_guardrails_enabled": TuneableSpec("bool", True, None, None, "Enable safety guardrails for tool use"),
+        "safety_allow_secrets": TuneableSpec("bool", False, None, None, "Allow reading secret/credential files"),
+        "trace_strict": TuneableSpec("bool", False, None, None, "Make missing trace_id blocking (vs warning)"),
+        "tool_distillation_enabled": TuneableSpec("bool", True, None, None, "Enable tool-pattern distillation"),
+        "llm_provider": TuneableSpec("str", "minimax", None, None, "LLM provider for distillation",
+                                      ["minimax", "ollama", "gemini", "openai", "anthropic"]),
     },
 
     # ---- auto_tuner: self-tuning engine ----
@@ -484,6 +490,37 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "advisory_disable_chips": TuneableSpec("bool", False, None, None, "Disable chips for advisory only"),
     },
 
+    # ---- observe_hook: Claude Code hook settings ----
+    "observe_hook": {
+        "eidos_enabled": TuneableSpec("bool", True, None, None, "Enable EIDOS episode tracking"),
+        "outcome_checkin_min_s": TuneableSpec("int", 1800, 60, 86400, "Min seconds between outcome check-ins"),
+        "advice_feedback_enabled": TuneableSpec("bool", True, None, None, "Enable advice feedback collection"),
+        "advice_feedback_prompt": TuneableSpec("bool", True, None, None, "Prompt user for advice feedback at session end"),
+        "advice_feedback_min_s": TuneableSpec("int", 600, 60, 86400, "Min seconds between feedback prompts"),
+        "pretool_budget_ms": TuneableSpec("float", 2500.0, 100.0, 10000.0, "Pre-tool advisory time budget (ms)"),
+        "eidos_enforce_block": TuneableSpec("bool", False, None, None, "Enforce EIDOS blocking on risky actions"),
+        "hook_payload_text_limit": TuneableSpec("int", 3000, 500, 50000, "Max text chars in hook payload"),
+        "outcome_checkin_enabled": TuneableSpec("bool", False, None, None, "Enable outcome check-in at session end"),
+        "outcome_checkin_prompt": TuneableSpec("bool", False, None, None, "Prompt user for outcome check-in"),
+    },
+
+    # ---- chips_runtime: chip execution settings ----
+    "chips_runtime": {
+        "observer_only": TuneableSpec("bool", True, None, None, "Run chips in observer-only mode"),
+        "min_score": TuneableSpec("float", 0.35, 0.0, 1.0, "Min insight score for chip output"),
+        "min_confidence": TuneableSpec("float", 0.7, 0.0, 1.0, "Min confidence for chip output"),
+        "gate_mode": TuneableSpec("str", "balanced", None, None, "Chip gate mode",
+                                   ["balanced", "strict", "permissive"]),
+        "min_learning_evidence": TuneableSpec("int", 1, 1, 50, "Min learning evidence count"),
+        "blocked_ids": TuneableSpec("str", "", None, None, "Comma-separated blocked chip IDs"),
+        "telemetry_observer_blocklist": TuneableSpec("str", "", None, None, "Comma-separated telemetry observer blocklist"),
+        "max_active_per_event": TuneableSpec("int", 6, 1, 20, "Max active chips per event"),
+        "preferred_format": TuneableSpec("str", "multifile", None, None, "Chip file format",
+                                          ["single", "multifile", "hybrid"]),
+        "schema_validation": TuneableSpec("str", "warn", None, None, "Schema validation mode",
+                                           ["warn", "block", "strict", "error", "off"]),
+    },
+
     # ---- opportunity_scanner: self-evolution scanner ----
     "opportunity_scanner": {
         "enabled": TuneableSpec("bool", True, None, None, "Enable opportunity scanner"),
@@ -554,7 +591,8 @@ SECTION_CONSUMERS: Dict[str, List[str]] = {
     "advisor": ["lib/advisor.py"],
     "retrieval": ["lib/advisor.py", "lib/semantic_retriever.py"],
     "meta_ralph": ["lib/meta_ralph.py"],
-    "eidos": ["lib/eidos/models.py"],
+    "eidos": ["lib/eidos/models.py", "lib/eidos/guardrails.py", "lib/eidos/control_plane.py",
+              "lib/eidos/elevated_control.py", "lib/pattern_detection/distiller.py", "lib/llm.py"],
     "auto_tuner": ["lib/auto_tuner.py"],
     "chip_merge": ["lib/chips/runtime.py", "lib/chip_merger.py"],
     "advisory_quality": ["lib/advisory_synthesizer.py"],
@@ -571,6 +609,8 @@ SECTION_CONSUMERS: Dict[str, List[str]] = {
     "feature_flags": ["lib/feature_flags.py", "lib/advisor.py", "lib/bridge_cycle.py",
                       "lib/cognitive_learner.py", "lib/chips/runtime.py"],
     "production_gates": ["lib/production_gates.py"],
+    "observe_hook": ["hooks/observe.py"],
+    "chips_runtime": ["lib/chips/runtime.py", "lib/chips/loader.py"],
     "opportunity_scanner": ["lib/opportunity_scanner.py"],
     "prediction": ["lib/prediction_loop.py"],
 }
