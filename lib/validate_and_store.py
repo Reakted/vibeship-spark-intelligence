@@ -114,6 +114,7 @@ def validate_and_store_insight(
     *,
     record_exposure: bool = True,
     return_details: bool = False,
+    roast_context: Optional[Dict[str, Any]] = None,
 ) -> StoreResult:
     """
     Validate an insight through Meta-Ralph and store in cognitive learner.
@@ -176,7 +177,7 @@ def validate_and_store_insight(
     try:
         from .meta_ralph import get_meta_ralph, RoastVerdict
         ralph = get_meta_ralph()
-        roast_result = ralph.roast(text, source=source)
+        roast_result = ralph.roast(text, source=source, context=roast_context)
         verdict = roast_result.verdict
 
         if verdict == RoastVerdict.PRIMITIVE:

@@ -693,10 +693,11 @@ def store_deep_learnings(
         learner = get_cognitive_learner()
         ralph = get_meta_ralph()
 
-        def _gate_and_store(insight_text: str, category, context: str, confidence: float, source: str = "pipeline") -> bool:
+        def _gate_and_store(insight_text: str, category, context: str, confidence: float,
+                            source: str = "pipeline", roast_context: dict = None) -> bool:
             """Run insight through MetaRalph quality gate, then store if it passes."""
             debug["attempted"] = int(debug.get("attempted", 0)) + 1
-            roast_result = ralph.roast(insight_text, source=source)
+            roast_result = ralph.roast(insight_text, source=source, context=roast_context)
             verdict_value = str(getattr(roast_result.verdict, "value", roast_result.verdict) or "gate_rejected").lower()
 
             # Keep strict default, but allow low-volume pipeline cycles to pass non-primitive verdicts.
@@ -736,6 +737,7 @@ def store_deep_learnings(
                 f"tool_effectiveness:{insight_data['tool']}",
                 0.7,
                 source="pipeline_tool_effectiveness",
+                roast_context={"tool_name": insight_data.get("tool", "")},
             ):
                 stored += 1
 
@@ -747,6 +749,10 @@ def store_deep_learnings(
                 f"error_pattern:{pattern['tool']}",
                 0.75,
                 source="pipeline_error_pattern",
+                roast_context={
+                    "tool_name": pattern.get("tool", ""),
+                    "error": pattern.get("error", ""),
+                },
             ):
                 stored += 1
 
