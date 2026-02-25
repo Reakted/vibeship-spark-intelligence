@@ -5442,24 +5442,6 @@ Output only JSON with `order` as a list of 0-based indices (descending by releva
         except Exception:
             pass  # Don't break outcome flow if tracking fails
 
-        # Route EIDOS-sourced outcomes back to EIDOS store
-        # This closes the distillation feedback loop — confidence evolves
-        try:
-            if ik and isinstance(ik, str) and ik.startswith("eidos:"):
-                # insight_key format: "eidos:{type}:{id_prefix}"
-                parts = ik.split(":", 2)
-                if len(parts) >= 3:
-                    id_prefix = parts[2]
-                    from .eidos.store import get_store
-                    eidos_store = get_store()
-                    full_id = eidos_store.find_distillation_by_prefix(id_prefix)
-                    if full_id:
-                        eidos_store.record_distillation_usage(
-                            full_id,
-                            helped=(was_helpful is True),
-                        )
-        except Exception:
-            pass  # Don't break outcome flow
 
         # Log outcome
         with open(ADVICE_LOG, "a", encoding="utf-8") as f:

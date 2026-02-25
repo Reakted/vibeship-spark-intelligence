@@ -859,10 +859,20 @@ class EidosStore:
                 )
                 pruned["low_success"] = len(low_ids)
 
-            # 3. Corrupted records (impossible counts)
+            # 3. Corrupted records (impossible counts) - repair instead of deleting.
             cur = conn.execute(
-                "DELETE FROM distillations WHERE times_retrieved > 1000000 "
-                "OR times_used > 1000000 OR times_helped > 1000000"
+                """
+                UPDATE distillations
+                SET times_retrieved = CASE WHEN times_retrieved > 1000000 OR times_retrieved < 0 THEN 0 ELSE times_retrieved END,
+                    times_used = CASE WHEN times_used > 1000000 OR times_used < 0 THEN 0 ELSE times_used END,
+                    times_helped = CASE WHEN times_helped > 1000000 OR times_helped < 0 THEN 0 ELSE times_helped END,
+                    validation_count = CASE WHEN validation_count > 1000000 OR validation_count < 0 THEN 0 ELSE validation_count END,
+                    contradiction_count = CASE WHEN contradiction_count > 1000000 OR contradiction_count < 0 THEN 0 ELSE contradiction_count END
+                WHERE times_retrieved > 1000000 OR times_used > 1000000 OR times_helped > 1000000
+                   OR validation_count > 1000000 OR contradiction_count > 1000000
+                   OR times_retrieved < 0 OR times_used < 0 OR times_helped < 0
+                   OR validation_count < 0 OR contradiction_count < 0
+                """
             )
             pruned["corrupted"] = cur.rowcount
 
