@@ -19,10 +19,12 @@ import os
 import time
 import hashlib
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 DEFAULT_SPARKD = os.environ.get("SPARKD_URL") or f"http://127.0.0.1:{os.environ.get('SPARKD_PORT', '8787')}"
 TOKEN_FILE = Path.home() / ".spark" / "sparkd.token"
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 STATE_DIR = Path.home() / ".spark" / "adapters"
@@ -67,6 +69,23 @@ def _resolve_token(cli_token: str | None) -> str | None:
     return token or None
 
 
+def _normalize_sparkd_base_url(raw_url: str, *, allow_remote: bool = False) -> str:
+    text = str(raw_url or "").strip()
+    if not text:
+        raise ValueError("missing sparkd URL")
+    if "://" not in text:
+        text = f"http://{text}"
+    parsed = urlparse(text)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("sparkd URL must use http/https")
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise ValueError("sparkd URL must include host")
+    if not allow_remote and host not in _LOCAL_HOSTS:
+        raise ValueError("remote sparkd host blocked by default; pass --allow-remote to override")
+    return text.rstrip("/")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sparkd", default=DEFAULT_SPARKD, help="sparkd base URL")
@@ -76,9 +95,11 @@ def main():
     ap.add_argument("--backfill", action="store_true", help="Backfill from the start of the transcript (DANGEROUS; default is tail-from-end)")
     ap.add_argument("--verbose", action="store_true", help="Log adapter activity")
     ap.add_argument("--token", default=None, help="sparkd auth token (or set SPARKD_TOKEN env, or use ~/.spark/sparkd.token)")
+    ap.add_argument("--allow-remote", action="store_true", help="allow non-local sparkd URL (disabled by default)")
     args = ap.parse_args()
 
     token = _resolve_token(args.token)
+    sparkd_base = _normalize_sparkd_base_url(args.sparkd, allow_remote=args.allow_remote)
 
     agent_dir = Path.home() / ".clawdbot" / "agents" / args.agent / "sessions"
     sessions_json = agent_dir / "sessions.json"
@@ -249,7 +270,7 @@ def main():
                         }
 
                 evt = _event(trace_id, session_id=session_key, source="clawdbot", kind=kind, ts=ts, payload=payload)
-                _post_json(args.sparkd.rstrip("/") + "/ingest", evt, token=token)
+                _post_json(sparkd_base + "/ingest", evt, token=token)
                 sent += 1
 
             state["offset"] = off + sent

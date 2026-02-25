@@ -18,10 +18,12 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 DEFAULT_SPARKD = os.environ.get("SPARKD_URL") or f"http://127.0.0.1:{os.environ.get('SPARKD_PORT', '8787')}"
 TOKEN_FILE = Path.home() / ".spark" / "sparkd.token"
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def _resolve_token(cli_token: str | None) -> str | None:
@@ -37,6 +39,23 @@ def _resolve_token(cli_token: str | None) -> str | None:
     return token or None
 
 
+def _normalize_sparkd_base_url(raw_url: str, *, allow_remote: bool = False) -> str:
+    text = str(raw_url or "").strip()
+    if not text:
+        raise ValueError("missing sparkd URL")
+    if "://" not in text:
+        text = f"http://{text}"
+    parsed = urlparse(text)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("sparkd URL must use http/https")
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise ValueError("sparkd URL must include host")
+    if not allow_remote and host not in _LOCAL_HOSTS:
+        raise ValueError("remote sparkd host blocked by default; pass --allow-remote to override")
+    return text.rstrip("/")
+
+
 def post(url: str, obj: dict, token: str = None):
     data = json.dumps(obj).encode("utf-8")
     headers = {"Content-Type": "application/json"}
@@ -50,10 +69,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sparkd", default=DEFAULT_SPARKD, help="sparkd base URL")
     ap.add_argument("--token", default=None, help="sparkd token (or set SPARKD_TOKEN env, or use ~/.spark/sparkd.token)")
+    ap.add_argument("--allow-remote", action="store_true", help="allow non-local sparkd URL (disabled by default)")
     args = ap.parse_args()
 
     token = _resolve_token(args.token)
-    ingest_url = args.sparkd.rstrip("/") + "/ingest"
+    sparkd_base = _normalize_sparkd_base_url(args.sparkd, allow_remote=args.allow_remote)
+    ingest_url = sparkd_base + "/ingest"
 
     ok = 0
     bad = 0

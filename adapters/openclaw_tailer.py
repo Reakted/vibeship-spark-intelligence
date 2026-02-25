@@ -25,10 +25,12 @@ import hashlib
 import os
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 DEFAULT_SPARKD = os.environ.get("SPARKD_URL") or f"http://127.0.0.1:{os.environ.get('SPARKD_PORT', '8787')}"
 TOKEN_FILE = Path.home() / ".spark" / "sparkd.token"
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 STATE_DIR = Path.home() / ".spark" / "adapters"
 
@@ -92,6 +94,23 @@ def _resolve_token(cli_token: str | None) -> str | None:
     except Exception:
         return None
     return token or None
+
+
+def _normalize_sparkd_base_url(raw_url: str, *, allow_remote: bool = False) -> str:
+    text = str(raw_url or "").strip()
+    if not text:
+        raise ValueError("missing sparkd URL")
+    if "://" not in text:
+        text = f"http://{text}"
+    parsed = urlparse(text)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("sparkd URL must use http/https")
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise ValueError("sparkd URL must include host")
+    if not allow_remote and host not in _LOCAL_HOSTS:
+        raise ValueError("remote sparkd host blocked by default; pass --allow-remote to override")
+    return text.rstrip("/")
 
 
 def _parse_ts(x):
@@ -663,6 +682,7 @@ def main():
     ap.add_argument("--backfill", action="store_true", help="Backfill from the start of the transcript (default is tail-from-end)")
     ap.add_argument("--verbose", action="store_true", help="Log adapter activity")
     ap.add_argument("--token", default=None, help="sparkd auth token (or set SPARKD_TOKEN env, or use ~/.spark/sparkd.token)")
+    ap.add_argument("--allow-remote", action="store_true", help="allow non-local sparkd URL (disabled by default)")
     ap.add_argument("--include-subagents", action="store_true", default=True,
                      help="Also tail subagent sessions (default: True)")
     ap.add_argument("--no-subagents", action="store_true", default=False,
@@ -691,7 +711,7 @@ def main():
     state_file = STATE_DIR / f"openclaw-{args.agent}.json"
     state = SessionState(state_file)
 
-    sparkd_url = args.sparkd
+    sparkd_url = _normalize_sparkd_base_url(args.sparkd, allow_remote=args.allow_remote)
 
     # Heartbeat state
     total_lines_sent = 0
