@@ -98,6 +98,8 @@ coverage.xml
 # Run artifacts (keep canonical summaries tracked; stash per-run outputs)
 docs/reports/_runs/
 docs/reports/
+docs/reports/*_memory_quality_observatory.md
+docs/reports/*_retrieval_guardrails.json
 dashboard_out.txt
 dashboard_err.txt
 reports/tune_replay_*.md
