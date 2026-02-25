@@ -89,6 +89,12 @@ def test_from_dict_ignores_unknown_keys():
     assert "unknown_key" not in restored.to_dict()
 
 
+def test_from_dict_corrupt_score_raises_valueerror():
+    """Document fail-fast behavior: corrupt JSONL data surfaces immediately."""
+    with pytest.raises(ValueError):
+        AdvisoryQuality.from_dict({"actionability": "not_a_number"})
+
+
 # ---------------------------------------------------------------------------
 # Dimension scoring contracts
 # ---------------------------------------------------------------------------
@@ -326,6 +332,49 @@ def test_should_not_suppress_high_quality_actionable_text():
     suppressed, reason = should_suppress(text, _dims(), _structure())
     assert suppressed is False
     assert reason == ""
+
+
+def test_should_suppress_verbatim_quote_without_action():
+    """Verbatim user quotes (e.g. 'Now, can we...') suppressed when no action extracted."""
+    suppressed, reason = should_suppress(
+        "Now, can we look at this later please",
+        _dims(unified_score=0.7),
+        _structure(action=None),
+    )
+    assert suppressed is True
+    assert reason == "verbatim_quote_no_action"
+
+
+def test_should_not_suppress_verbatim_quote_with_action():
+    """Same prefix passes if the text actually contains an extracted action."""
+    suppressed, reason = should_suppress(
+        "Now, can we validate inputs because it prevents injection attacks in auth flow",
+        _dims(),
+        _structure(action="validate inputs"),
+    )
+    assert suppressed is False
+
+
+def test_should_not_suppress_no_action_but_strong_outcome_and_specificity():
+    """Escape hatch: outcome-backed specific observations survive no-action filter."""
+    dims = _dims(actionability=0.0, reasoning=0.0, outcome_linked=0.5, specificity=0.5, unified_score=0.3)
+    suppressed, reason = should_suppress(
+        "The authentication token refresh resulted in fewer 401 errors",
+        dims,
+        _structure(action=None),
+    )
+    assert suppressed is False
+
+
+def test_should_not_suppress_no_action_but_high_novelty():
+    """Escape hatch: novel observations with quality signals survive no-action filter."""
+    dims = _dims(actionability=0.0, reasoning=0.0, outcome_linked=0.0, novelty=0.5, unified_score=0.3)
+    suppressed, reason = should_suppress(
+        "Data shows engagement consistently outperforms on surprise hooks",
+        dims,
+        _structure(action=None),
+    )
+    assert suppressed is False
 
 
 # ---------------------------------------------------------------------------
