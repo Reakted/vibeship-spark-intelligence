@@ -131,6 +131,7 @@ DEFAULT_CONFIG = {
     "niche_scan_enabled": True,
     "advisory_review_enabled": True,
     "advisory_review_window_hours": 12,
+    "memory_quality_observatory_enabled": True,
 }
 
 
@@ -859,6 +860,12 @@ def task_advisory_review(state: Dict[str, Any]) -> Dict[str, Any]:
     # Keep retrieval quality guardrails fresh at least daily.
     try:
         import glob as _glob
+
+        observatory_enabled = _safe_bool(cfg.get("memory_quality_observatory_enabled", True), True)
+        if not observatory_enabled:
+            logger.info("memory_quality_observatory: disabled by scheduler config")
+            logger.info("advisory_review: %s", msg or "ok")
+            return {"status": "ok", "message": msg}
 
         observatory_script = Path(__file__).resolve().parent / "scripts" / "memory_quality_observatory.py"
         if observatory_script.exists():
