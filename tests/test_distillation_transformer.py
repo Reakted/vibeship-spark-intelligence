@@ -367,6 +367,35 @@ def test_transform_for_advisory_external_signals_boost_moderate_score():
     assert 0.0 <= boosted.unified_score <= 1.0
 
 
+def test_transform_for_advisory_external_signals_can_reduce_very_high_score():
+    class Ralph:
+        actionability = 2
+        novelty = 2
+        reasoning = 2
+        specificity = 2
+        outcome_linked = 2
+
+    base = transform_for_advisory("Use strict schema checks", ralph_score=Ralph())
+    boosted = transform_for_advisory("Use strict schema checks", ralph_score=Ralph(), reliability=0.9, chip_quality=0.9)
+
+    expected = (0.80 * ((0.70 * base.unified_score) + (0.30 * 0.9))) + (0.20 * 0.9)
+    assert base.unified_score > 0.9
+    assert boosted.unified_score < base.unified_score
+    assert boosted.unified_score == pytest.approx(expected)
+
+
+def test_transform_for_advisory_quality_is_consumed_by_memory_fusion_readiness():
+    from lib.advisory_memory_fusion import _coerce_readiness
+
+    aq = transform_for_advisory(
+        "Use retries because it prevents transient failures and improves success rate"
+    )
+    readiness = _coerce_readiness({"advisory_quality": aq.to_dict()}, confidence=0.1)
+
+    assert readiness == pytest.approx(round(aq.unified_score, 3))
+    assert readiness > 0.1
+
+
 def test_transform_for_advisory_detects_domain_from_source():
     aq = transform_for_advisory("General sentence", source="depth_session")
     assert aq.domain == "code"
