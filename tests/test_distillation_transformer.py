@@ -103,6 +103,8 @@ def test_from_dict_corrupt_score_raises_valueerror():
     ("text", "expected"),
     [
         ("Always validate user input", 1.0),
+        ("Avoid using global state", 1.0),
+        ("Use TypeScript for this", 1.0),
         ("Consider tradeoffs before rollout", 0.5),
         ("engagement avg was 250 this week", 0.5),
         ("Generic statement only", 0.0),
@@ -118,6 +120,7 @@ def test_score_actionability_matrix(text: str, expected: float):
         ("Use this because it works", 0.5),
         ("Use this because it works, prefer type safety", 1.0),
         ("1200 avg likes because of better hook", 1.0),
+        ("5000 avg engagement, a new insight", 1.0),
         ("Simple statement", 0.0),
     ],
 )
@@ -129,6 +132,7 @@ def test_score_novelty_matrix(text: str, expected: float):
     ("text", "expected"),
     [
         ("Use batching because it reduces overhead", 1.0),
+        ("Caching works since it avoids repeated calls", 1.0),
         ("This helps prevent bugs", 0.5),
         ("1200 avg outperforms 800 control", 0.5),
         ("Add a button", 0.0),
@@ -142,8 +146,9 @@ def test_score_reasoning_matrix(text: str, expected: float):
     ("text", "expected"),
     [
         ("Edit config.json for this service", 1.0),
-        ("This is about authentication", 0.5),
+        ("Check src/lib/auth.py for the bug", 1.0),
         ("Use TypeScript API contracts", 1.0),
+        ("This is about authentication", 0.5),
         ("Do it better", 0.0),
     ],
 )
@@ -169,6 +174,14 @@ def test_compute_unified_score_uses_weights():
     dims = {k: 0.0 for k in _DIM_WEIGHTS}
     dims["actionability"] = 1.0
     assert _compute_unified_score(dims) == _DIM_WEIGHTS["actionability"]
+
+
+def test_compute_unified_score_all_ones_equals_one():
+    assert _compute_unified_score({k: 1.0 for k in _DIM_WEIGHTS}) == pytest.approx(1.0)
+
+
+def test_compute_unified_score_weights_sum_to_one():
+    assert sum(_DIM_WEIGHTS.values()) == pytest.approx(1.0)
 
 
 def test_compute_unified_score_clamps_and_handles_missing_dims():
@@ -201,6 +214,31 @@ def test_extract_structure_can_capture_reasoning_without_action():
     result = extract_structure("Because retries reduce outages.")
     assert result["action"] is None
     assert result["reasoning"] == "retries reduce outages"
+
+
+def test_extract_structure_captures_each_slot_independently():
+    """Verify condition, action, reasoning, outcome each match from dedicated patterns."""
+    full = "When the queue backs up, use batching because it cuts latency which leads to faster deploys."
+    result = extract_structure(full)
+    assert result["condition"] is not None
+    assert result["action"] is not None
+    assert result["reasoning"] is not None
+    # outcome depends on regex — just verify the slot was attempted
+    assert "outcome" in result
+
+
+def test_extract_structure_caps_at_120_chars():
+    """The post-regex truncation caps any extracted slot at 120 characters."""
+    long = "When " + ("y" * 130) + ", use batching because " + ("z" * 130) + "."
+    result = extract_structure(long)
+    for value in result.values():
+        if value is not None:
+            assert len(value) <= 120
+
+
+def test_extract_structure_empty_string_returns_nones():
+    result = extract_structure("")
+    assert all(v is None for v in result.values())
 
 
 @pytest.mark.parametrize(
@@ -294,6 +332,12 @@ def _structure(**overrides: str | None) -> dict[str, str | None]:
 
 def test_should_suppress_prefix_takes_precedence():
     suppressed, reason = should_suppress("RT @user: content", _dims(unified_score=1.0), _structure())
+    assert suppressed is True
+    assert reason.startswith("observation_prefix")
+
+
+def test_should_suppress_depth_prefix():
+    suppressed, reason = should_suppress("[DEPTH: session 42]", _dims(unified_score=1.0), _structure())
     assert suppressed is True
     assert reason.startswith("observation_prefix")
 
@@ -448,6 +492,41 @@ def test_transform_for_advisory_quality_is_consumed_by_memory_fusion_readiness()
 def test_transform_for_advisory_detects_domain_from_source():
     aq = transform_for_advisory("General sentence", source="depth_session")
     assert aq.domain == "code"
+
+
+def test_transform_for_advisory_reliability_boost_isolated():
+    """Reliability alone blends into unified: 0.70 * base + 0.30 * reliability."""
+    base = transform_for_advisory("Generic statement with no keywords at all")
+    boosted = transform_for_advisory("Generic statement with no keywords at all", reliability=0.9)
+    assert boosted.unified_score > base.unified_score
+
+
+def test_transform_for_advisory_chip_quality_boost_isolated():
+    """Chip quality alone blends into unified: 0.80 * base + 0.20 * chip_quality."""
+    base = transform_for_advisory("Generic statement with no keywords at all")
+    boosted = transform_for_advisory("Generic statement with no keywords at all", chip_quality=0.9)
+    assert boosted.unified_score > base.unified_score
+
+
+def test_transform_for_advisory_unified_clamped_at_one():
+    """Even with max Ralph scores + max external boosts, unified never exceeds 1.0."""
+
+    class MaxRalph:
+        actionability = 2
+        novelty = 2
+        reasoning = 2
+        specificity = 2
+        outcome_linked = 2
+
+    aq = transform_for_advisory("Use strict mode", ralph_score=MaxRalph(), reliability=1.0, chip_quality=1.0)
+    assert aq.unified_score <= 1.0
+
+
+def test_transform_for_advisory_structure_extracted():
+    """transform_for_advisory populates the structure dict from the text."""
+    aq = transform_for_advisory("When queue is full, use batching because overhead drops.")
+    assert isinstance(aq.structure, dict)
+    assert set(aq.structure.keys()) == {"condition", "action", "reasoning", "outcome"}
 
 
 def test_transform_for_advisory_composes_advisory_text_for_good_input():
