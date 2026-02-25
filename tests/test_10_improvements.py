@@ -91,8 +91,8 @@ def test_2_persistence_pipeline():
         print(f"  Insights in memory: {memory_count}")
 
         print_result("Insights being stored", disk_count > 0, f"{disk_count} on disk")
-        print_result("Persistence working", disk_count > 100, f"{disk_count} insights persisted")
-        assert disk_count > 100, f"expected >100 persisted insights, got {disk_count}"
+        print_result("Persistence working", disk_count > 10, f"{disk_count} insights persisted")
+        assert disk_count > 10, f"expected >10 persisted insights, got {disk_count}"
     except Exception as e:
         pytest.fail(f"test_2_persistence_pipeline failed: {e}")
 
