@@ -323,17 +323,120 @@ def read_eidos() -> dict[str, Any]:
                 d["recent_distillations"] = [dict(r) for r in rows]
             except Exception:
                 d["recent_distillations"] = []
+
+            # Advisory quality + feedback observability.
+            d["advisory_quality_histogram"] = []
+            d["feedback_loop"] = {
+                "used_distillations": 0,
+                "total_uses": 0,
+                "total_helped": 0,
+                "effectiveness_pct": 0.0,
+            }
+            d["suppression_breakdown"] = {
+                "pass_transformer": 0,
+                "fail_suppressed": 0,
+                "fail_score_floor": 0,
+                "unknown_quality": 0,
+                "archived_suppressed": 0,
+                "archived_score_floor": 0,
+            }
+            try:
+                cur.execute(
+                    "SELECT advisory_quality, times_used, times_helped FROM distillations"
+                )
+                all_rows = cur.fetchall()
+
+                used_distillations = 0
+                total_uses = 0
+                total_helped = 0
+                scores: list[float] = []
+
+                for row in all_rows:
+                    times_used = int(row["times_used"] or 0)
+                    times_helped = int(row["times_helped"] or 0)
+                    if times_used > 0:
+                        used_distillations += 1
+                    total_uses += times_used
+                    total_helped += times_helped
+
+                    aq_raw = row["advisory_quality"]
+                    aq = None
+                    if isinstance(aq_raw, str) and aq_raw.strip():
+                        try:
+                            aq = json.loads(aq_raw)
+                        except Exception:
+                            aq = None
+                    elif isinstance(aq_raw, dict):
+                        aq = aq_raw
+
+                    if not isinstance(aq, dict):
+                        d["suppression_breakdown"]["unknown_quality"] += 1
+                        continue
+
+                    unified = float(aq.get("unified_score", 0.0) or 0.0)
+                    suppressed = bool(aq.get("suppressed", False))
+                    scores.append(unified)
+
+                    if suppressed:
+                        d["suppression_breakdown"]["fail_suppressed"] += 1
+                    elif unified < 0.35:
+                        d["suppression_breakdown"]["fail_score_floor"] += 1
+                    else:
+                        d["suppression_breakdown"]["pass_transformer"] += 1
+
+                bins = [
+                    ("0.0-0.2", 0.0, 0.2),
+                    ("0.2-0.4", 0.2, 0.4),
+                    ("0.4-0.6", 0.4, 0.6),
+                    ("0.6-0.8", 0.6, 0.8),
+                    ("0.8-1.0", 0.8, 1.01),
+                ]
+                histogram = []
+                for label, lo, hi in bins:
+                    count = sum(1 for s in scores if lo <= s < hi)
+                    histogram.append({"bucket": label, "count": count})
+                d["advisory_quality_histogram"] = histogram
+
+                effectiveness = (100.0 * total_helped / max(total_uses, 1)) if total_uses else 0.0
+                d["feedback_loop"] = {
+                    "used_distillations": used_distillations,
+                    "total_uses": total_uses,
+                    "total_helped": total_helped,
+                    "effectiveness_pct": round(effectiveness, 1),
+                }
+            except Exception:
+                pass
+
+            try:
+                cur.execute(
+                    "SELECT archive_reason, COUNT(*) AS c FROM distillations_archive GROUP BY archive_reason"
+                )
+                for row in cur.fetchall():
+                    reason = str(row["archive_reason"] or "")
+                    count = int(row["c"] or 0)
+                    if reason.startswith("suppressed:"):
+                        d["suppression_breakdown"]["archived_suppressed"] += count
+                    elif reason.startswith("unified_score_below_floor:"):
+                        d["suppression_breakdown"]["archived_score_floor"] += count
+            except Exception:
+                pass
             conn.close()
         except Exception:
             d["episodes"] = 0
             d["steps"] = 0
             d["distillations"] = 0
             d["recent_distillations"] = []
+            d["advisory_quality_histogram"] = []
+            d["feedback_loop"] = {}
+            d["suppression_breakdown"] = {}
     else:
         d["episodes"] = 0
         d["steps"] = 0
         d["distillations"] = 0
         d["recent_distillations"] = []
+        d["advisory_quality_histogram"] = []
+        d["feedback_loop"] = {}
+        d["suppression_breakdown"] = {}
     # Active episodes/steps
     ae = _load_json(_SD / "eidos_active_episodes.json") or {}
     d["active_episodes"] = len(ae) if isinstance(ae, dict) else 0

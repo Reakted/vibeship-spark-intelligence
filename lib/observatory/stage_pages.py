@@ -399,6 +399,42 @@ def _gen_eidos(d: dict, all_data: dict) -> str:
         ("Active steps", fmt_num(d.get("active_steps", 0)), "healthy"),
     ])
 
+    # Advisory quality distribution for distillations.
+    quality_hist = d.get("advisory_quality_histogram", [])
+    if quality_hist:
+        s += "## Advisory Quality Distribution\n\n"
+        s += "| Unified Score Bucket | Distillations |\n"
+        s += "|----------------------|---------------|\n"
+        for item in quality_hist:
+            s += f"| {item.get('bucket', '?')} | {fmt_num(item.get('count', 0))} |\n"
+        s += "\n"
+
+    # Feedback loop status (uses/helpfulness).
+    feedback = d.get("feedback_loop", {}) or {}
+    if feedback:
+        s += "## Feedback Loop Status\n\n"
+        s += "| Metric | Value |\n"
+        s += "|--------|-------|\n"
+        s += f"| Distillations with usage | {fmt_num(feedback.get('used_distillations', 0))} |\n"
+        s += f"| Total uses | {fmt_num(feedback.get('total_uses', 0))} |\n"
+        s += f"| Total helped | {fmt_num(feedback.get('total_helped', 0))} |\n"
+        s += f"| Effectiveness | {feedback.get('effectiveness_pct', 0)}% |\n"
+        s += "\n"
+
+    # Transformer suppression / floor failures.
+    suppression = d.get("suppression_breakdown", {}) or {}
+    if suppression:
+        s += "## Suppression Breakdown\n\n"
+        s += "| Category | Count |\n"
+        s += "|----------|-------|\n"
+        s += f"| Pass transformer | {fmt_num(suppression.get('pass_transformer', 0))} |\n"
+        s += f"| Suppressed by transformer | {fmt_num(suppression.get('fail_suppressed', 0))} |\n"
+        s += f"| Below score floor (<0.35) | {fmt_num(suppression.get('fail_score_floor', 0))} |\n"
+        s += f"| Missing quality metadata | {fmt_num(suppression.get('unknown_quality', 0))} |\n"
+        s += f"| Archived (suppressed) | {fmt_num(suppression.get('archived_suppressed', 0))} |\n"
+        s += f"| Archived (score floor) | {fmt_num(suppression.get('archived_score_floor', 0))} |\n"
+        s += "\n"
+
     # Recent distillations
     recent = d.get("recent_distillations", [])
     if recent:
