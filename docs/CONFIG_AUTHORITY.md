@@ -47,6 +47,14 @@ Notes:
 - `lib/chips/runtime.py` (via `feature_flags`)
 - `lib/opportunity_scanner.py` (`opportunity_scanner.*`)
 - `lib/prediction_loop.py` (`prediction.*`)
+- `hooks/observe.py` (`observe_hook.*`)
+- `lib/eidos/guardrails.py` (`eidos.safety_*`)
+- `lib/eidos/control_plane.py` (`eidos.trace_strict`)
+- `lib/eidos/elevated_control.py` (`eidos.trace_strict`)
+- `lib/pattern_detection/distiller.py` (`eidos.tool_distillation_enabled`)
+- `lib/llm.py` (`eidos.llm_provider`)
+- `lib/chips/runtime.py` (`chips_runtime.*`)
+- `lib/chips/loader.py` (`chips_runtime.preferred_format`, `chips_runtime.schema_validation`)
 
 Resolver implementation:
 - `lib/config_authority.py`
@@ -262,6 +270,43 @@ Only keys with explicit `env_overrides` mappings respond to env vars. All others
 | `SPARK_PREDICTION_AUTO_LINK_INTERVAL_S` | `auto_link_interval_s` | float |
 | `SPARK_PREDICTION_AUTO_LINK_LIMIT` | `auto_link_limit` | int |
 | `SPARK_PREDICTION_AUTO_LINK_MIN_SIM` | `auto_link_min_sim` | float |
+
+### Observe Hook (`observe_hook`)
+| Env Var | Key | Type |
+|---------|-----|------|
+| `SPARK_EIDOS_ENABLED` | `eidos_enabled` | bool |
+| `SPARK_OUTCOME_CHECKIN_MIN_S` | `outcome_checkin_min_s` | int |
+| `SPARK_ADVICE_FEEDBACK` | `advice_feedback_enabled` | bool |
+| `SPARK_ADVICE_FEEDBACK_PROMPT` | `advice_feedback_prompt` | bool |
+| `SPARK_ADVICE_FEEDBACK_MIN_S` | `advice_feedback_min_s` | int |
+| `SPARK_OBSERVE_PRETOOL_BUDGET_MS` | `pretool_budget_ms` | float |
+| `SPARK_EIDOS_ENFORCE_BLOCK` | `eidos_enforce_block` | bool |
+| `SPARK_HOOK_PAYLOAD_TEXT_LIMIT` | `hook_payload_text_limit` | int |
+| `SPARK_OUTCOME_CHECKIN` | `outcome_checkin_enabled` | bool |
+| `SPARK_OUTCOME_CHECKIN_PROMPT` | `outcome_checkin_prompt` | bool |
+
+### EIDOS Extended (`eidos`)
+| Env Var | Key | Type |
+|---------|-----|------|
+| `SPARK_SAFETY_GUARDRAILS` | `safety_guardrails_enabled` | bool |
+| `SPARK_SAFETY_ALLOW_SECRETS` | `safety_allow_secrets` | bool |
+| `SPARK_TRACE_STRICT` | `trace_strict` | bool |
+| `SPARK_ENABLE_TOOL_DISTILLATION` | `tool_distillation_enabled` | bool |
+| `SPARK_EIDOS_PROVIDER` | `llm_provider` | str |
+
+### Chips Runtime (`chips_runtime`)
+| Env Var | Key | Type |
+|---------|-----|------|
+| `SPARK_CHIP_OBSERVER_ONLY` | `observer_only` | bool |
+| `SPARK_CHIP_MIN_SCORE` | `min_score` | float |
+| `SPARK_CHIP_MIN_CONFIDENCE` | `min_confidence` | float |
+| `SPARK_CHIP_GATE_MODE` | `gate_mode` | str |
+| `SPARK_CHIP_MIN_LEARNING_EVIDENCE` | `min_learning_evidence` | int |
+| `SPARK_CHIP_BLOCKED_IDS` | `blocked_ids` | str |
+| `SPARK_CHIP_TELEMETRY_OBSERVERS` | `telemetry_observer_blocklist` | str |
+| `SPARK_CHIP_EVENT_ACTIVE_LIMIT` | `max_active_per_event` | int |
+| `SPARK_CHIP_PREFERRED_FORMAT` | `preferred_format` | str |
+| `SPARK_CHIP_SCHEMA_VALIDATION` | `schema_validation` | str |
 
 ## Hot-Reload Status
 
