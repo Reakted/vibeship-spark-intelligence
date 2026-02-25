@@ -76,6 +76,19 @@ def test_from_dict_none_returns_defaults():
     assert restored == AdvisoryQuality()
 
 
+def test_from_dict_ignores_unknown_keys():
+    restored = AdvisoryQuality.from_dict(
+        {
+            "actionability": 0.5,
+            "structure": {"action": "use retries"},
+            "unknown_key": "ignored",
+        }
+    )
+    assert restored.actionability == 0.5
+    assert restored.structure == {"action": "use retries"}
+    assert "unknown_key" not in restored.to_dict()
+
+
 # ---------------------------------------------------------------------------
 # Dimension scoring contracts
 # ---------------------------------------------------------------------------
@@ -137,6 +150,7 @@ def test_score_specificity_matrix(text: str, expected: float):
     [
         ("This approach fixed the bug", 1.0),
         ("It improves retention", 0.5),
+        ("Use retries to reduce incidents", 0.0),
         ("1000 avg conversion rate", 0.5),
         ("Add a button", 0.0),
     ],
@@ -170,11 +184,17 @@ def test_extract_structure_short_text_returns_nones():
     assert all(v is None for v in result.values())
 
 
-def test_extract_structure_caps_captured_segments_to_120_chars():
-    long_text = "Always use " + ("x" * 200) + " because it helps"
+def test_extract_structure_action_capture_respects_action_pattern_limit():
+    long_text = "Always use " + ("x" * 96) + " because it helps"
     result = extract_structure(long_text)
-    if result["action"] is not None:
-        assert len(result["action"]) <= 120
+    assert result["action"] is not None
+    assert len(result["action"]) == 100
+
+
+def test_extract_structure_can_capture_reasoning_without_action():
+    result = extract_structure("Because retries reduce outages.")
+    assert result["action"] is None
+    assert result["reasoning"] == "retries reduce outages"
 
 
 @pytest.mark.parametrize(
@@ -288,7 +308,7 @@ def test_should_suppress_no_action_no_reasoning():
 
 def test_should_suppress_tautology_before_unified_floor():
     dims = _dims(reasoning=0.0, outcome_linked=0.0, specificity=0.0, novelty=0.0, unified_score=0.05)
-    suppressed, reason = should_suppress("Always validate input", dims, _structure(condition=None, action="validate input"))
+    suppressed, reason = should_suppress("Always validate input", dims, _structure())
     assert suppressed is True
     assert reason == "tautology_no_context"
 
@@ -332,11 +352,18 @@ def test_transform_for_advisory_normalizes_ralph_scores():
     assert aq.reasoning == 1.0
 
 
-def test_transform_for_advisory_external_signals_do_not_reduce_score():
-    text = "Use retries because they reduce transient failure impact"
-    base = transform_for_advisory(text)
-    boosted = transform_for_advisory(text, reliability=0.9, chip_quality=0.9)
-    assert boosted.unified_score >= base.unified_score
+def test_transform_for_advisory_external_signals_boost_moderate_score():
+    class Ralph:
+        actionability = 0
+        novelty = 1
+        reasoning = 0
+        specificity = 1
+        outcome_linked = 0
+
+    base = transform_for_advisory("Generic statement", ralph_score=Ralph())
+    boosted = transform_for_advisory("Generic statement", ralph_score=Ralph(), reliability=0.9, chip_quality=0.9)
+    assert base.unified_score < 0.9
+    assert boosted.unified_score > base.unified_score
     assert 0.0 <= boosted.unified_score <= 1.0
 
 
