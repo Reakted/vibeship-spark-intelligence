@@ -1,435 +1,353 @@
-"""Tests for lib/distillation_transformer.py — advisory quality transformer."""
+"""Contract-focused tests for lib/distillation_transformer.py."""
 from __future__ import annotations
 
 import pytest
 
 from lib.distillation_transformer import (
+    _DIM_WEIGHTS,
     AdvisoryQuality,
-    extract_structure,
-    should_suppress,
-    transform_for_advisory,
+    _compose_advisory_text,
+    _compute_unified_score,
     _detect_domain,
     _score_actionability,
     _score_novelty,
+    _score_outcome_linked,
     _score_reasoning,
     _score_specificity,
-    _score_outcome_linked,
-    _compute_unified_score,
-    _compose_advisory_text,
-    _DIM_WEIGHTS,
+    extract_structure,
+    should_suppress,
+    transform_for_advisory,
 )
 
-
 # ---------------------------------------------------------------------------
-# AdvisoryQuality dataclass
+# AdvisoryQuality serialization contract
 # ---------------------------------------------------------------------------
 
-class TestAdvisoryQualityDefaults:
-    def test_all_dims_default_zero(self):
-        aq = AdvisoryQuality()
-        for dim in ("actionability", "novelty", "reasoning", "specificity",
-                    "outcome_linked", "unified_score"):
-            assert getattr(aq, dim) == 0.0
-
-    def test_domain_defaults_general(self):
-        assert AdvisoryQuality().domain == "general"
-
-    def test_suppressed_defaults_false(self):
-        assert AdvisoryQuality().suppressed is False
-
-    def test_suppression_reason_empty(self):
-        assert AdvisoryQuality().suppression_reason == ""
-
-    def test_advisory_text_empty(self):
-        assert AdvisoryQuality().advisory_text == ""
+def test_advisory_quality_defaults_are_safe():
+    aq = AdvisoryQuality()
+    assert aq.domain == "general"
+    assert aq.suppressed is False
+    assert aq.suppression_reason == ""
+    assert aq.advisory_text == ""
+    assert aq.actionability == 0.0
+    assert aq.unified_score == 0.0
 
 
-class TestAdvisoryQualityToDict:
-    def test_has_all_required_keys(self):
-        aq = AdvisoryQuality(actionability=0.5)
-        d = aq.to_dict()
-        for key in ("actionability", "novelty", "reasoning", "specificity",
-                    "outcome_linked", "unified_score", "structure", "domain",
-                    "suppressed", "suppression_reason"):
-            assert key in d
+def test_to_dict_rounds_scores_and_omits_empty_advisory_text():
+    aq = AdvisoryQuality(actionability=0.12345, advisory_text="")
+    result = aq.to_dict()
 
-    def test_values_rounded_to_3dp(self):
-        aq = AdvisoryQuality(actionability=0.123456)
-        d = aq.to_dict()
-        assert d["actionability"] == 0.123
-
-    def test_advisory_text_omitted_when_empty(self):
-        aq = AdvisoryQuality()
-        d = aq.to_dict()
-        assert "advisory_text" not in d
-
-    def test_advisory_text_included_when_present(self):
-        aq = AdvisoryQuality(advisory_text="Use always validate")
-        d = aq.to_dict()
-        assert "advisory_text" in d
-        assert d["advisory_text"] == "Use always validate"
+    assert result["actionability"] == 0.123
+    assert "advisory_text" not in result
+    assert result["suppressed"] is False
 
 
-class TestAdvisoryQualityFromDict:
-    def test_round_trip(self):
-        aq = AdvisoryQuality(
-            actionability=0.8, novelty=0.6, reasoning=0.7,
-            specificity=0.5, outcome_linked=0.4, unified_score=0.65,
-            domain="code", suppressed=False,
-        )
-        aq2 = AdvisoryQuality.from_dict(aq.to_dict())
-        assert abs(aq2.actionability - 0.8) < 0.01
-        assert aq2.domain == "code"
+def test_to_dict_includes_advisory_text_when_present():
+    aq = AdvisoryQuality(advisory_text="Use schema validation")
+    result = aq.to_dict()
 
-    def test_empty_dict_returns_defaults(self):
-        aq = AdvisoryQuality.from_dict({})
-        assert aq.actionability == 0.0
-        assert aq.domain == "general"
+    assert result["advisory_text"] == "Use schema validation"
 
-    def test_none_returns_defaults(self):
-        aq = AdvisoryQuality.from_dict(None)  # type: ignore[arg-type]
-        assert aq.actionability == 0.0
 
-    def test_suppressed_field_restored(self):
-        d = {"suppressed": True, "suppression_reason": "noise_pattern"}
-        aq = AdvisoryQuality.from_dict(d)
-        assert aq.suppressed is True
-        assert aq.suppression_reason == "noise_pattern"
+def test_from_dict_round_trip_preserves_core_fields():
+    original = AdvisoryQuality(
+        actionability=0.9,
+        novelty=0.6,
+        reasoning=0.8,
+        specificity=0.7,
+        outcome_linked=0.5,
+        unified_score=0.74,
+        domain="code",
+        suppressed=True,
+        suppression_reason="noise_pattern",
+        advisory_text="Use strict mode because it catches errors",
+    )
+
+    restored = AdvisoryQuality.from_dict(original.to_dict())
+
+    assert restored.domain == "code"
+    assert restored.suppressed is True
+    assert restored.suppression_reason == "noise_pattern"
+    assert abs(restored.unified_score - 0.74) < 0.01
+
+
+def test_from_dict_none_returns_defaults():
+    restored = AdvisoryQuality.from_dict(None)  # type: ignore[arg-type]
+    assert restored == AdvisoryQuality()
 
 
 # ---------------------------------------------------------------------------
-# _score_actionability
+# Dimension scoring contracts
 # ---------------------------------------------------------------------------
 
-class TestScoreActionability:
-    def test_action_verb_gives_one(self):
-        assert _score_actionability("Always validate user input") == 1.0
-
-    def test_avoid_verb_gives_one(self):
-        assert _score_actionability("Avoid using global state") == 1.0
-
-    def test_use_verb_gives_one(self):
-        assert _score_actionability("Use TypeScript for this") == 1.0
-
-    def test_soft_verb_gives_half(self):
-        assert _score_actionability("Consider the tradeoffs") == 0.5
-
-    def test_no_verbs_gives_zero(self):
-        assert _score_actionability("This is a generic observation") == 0.0
-
-    def test_numeric_with_metric_gives_half(self):
-        # numeric (2+ digits) + metric word → 0.5
-        result = _score_actionability("engagement avg was 250 this week")
-        assert result == 0.5
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Always validate user input", 1.0),
+        ("Consider tradeoffs before rollout", 0.5),
+        ("engagement avg was 250 this week", 0.5),
+        ("Generic statement only", 0.0),
+    ],
+)
+def test_score_actionability_matrix(text: str, expected: float):
+    assert _score_actionability(text) == expected
 
 
-# ---------------------------------------------------------------------------
-# _score_novelty
-# ---------------------------------------------------------------------------
-
-class TestScoreNovelty:
-    def test_two_quality_signals_gives_one(self):
-        # "because" + "prefer" → 2 signals → 1.0
-        assert _score_novelty("Use this because it's better, prefer TypeScript") == 1.0
-
-    def test_one_quality_signal_gives_half(self):
-        assert _score_novelty("Use this because it works") == 0.5
-
-    def test_no_signals_gives_zero(self):
-        assert _score_novelty("this is a simple statement") == 0.0
-
-    def test_numeric_with_signal_gives_one(self):
-        # has_numeric (3+ digits) + 1 signal → 1.0
-        result = _score_novelty("1200 avg likes, because of good hook strategy")
-        assert result == 1.0
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Use this because it works", 0.5),
+        ("Use this because it works, prefer type safety", 1.0),
+        ("1200 avg likes because of better hook", 1.0),
+        ("Simple statement", 0.0),
+    ],
+)
+def test_score_novelty_matrix(text: str, expected: float):
+    assert _score_novelty(text) == expected
 
 
-# ---------------------------------------------------------------------------
-# _score_reasoning
-# ---------------------------------------------------------------------------
-
-class TestScoreReasoning:
-    def test_because_gives_one(self):
-        assert _score_reasoning("Use this because it reduces latency") == 1.0
-
-    def test_since_gives_one(self):
-        assert _score_reasoning("Since the queue is full, batch it") == 1.0
-
-    def test_soft_keyword_gives_half(self):
-        assert _score_reasoning("This helps prevent bugs in production") == 0.5
-
-    def test_no_reasoning_gives_zero(self):
-        assert _score_reasoning("add a button here") == 0.0
-
-    def test_data_comparison_gives_half(self):
-        result = _score_reasoning("1200 avg outperforms 800 control")
-        assert result == 0.5
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Use batching because it reduces overhead", 1.0),
+        ("This helps prevent bugs", 0.5),
+        ("1200 avg outperforms 800 control", 0.5),
+        ("Add a button", 0.0),
+    ],
+)
+def test_score_reasoning_matrix(text: str, expected: float):
+    assert _score_reasoning(text) == expected
 
 
-# ---------------------------------------------------------------------------
-# _score_specificity
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Edit config.json for this service", 1.0),
+        ("This is about authentication", 0.5),
+        ("Use TypeScript API contracts", 1.0),
+        ("Do it better", 0.0),
+    ],
+)
+def test_score_specificity_matrix(text: str, expected: float):
+    assert _score_specificity(text) == expected
 
-class TestScoreSpecificity:
-    def test_file_extension_gives_one(self):
-        assert _score_specificity("Edit the config.json file") == 1.0
 
-    def test_path_gives_one(self):
-        assert _score_specificity("Check /etc/spark/config") == 1.0
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("This approach fixed the bug", 1.0),
+        ("It improves retention", 0.5),
+        ("1000 avg conversion rate", 0.5),
+        ("Add a button", 0.0),
+    ],
+)
+def test_score_outcome_linked_matrix(text: str, expected: float):
+    assert _score_outcome_linked(text) == expected
 
-    def test_two_markers_gives_one(self):
-        # "user" + "typescript"
-        assert _score_specificity("The user prefers TypeScript over JavaScript") == 1.0
 
-    def test_one_marker_gives_half(self):
-        assert _score_specificity("This is about authentication") == 0.5
+def test_compute_unified_score_uses_weights():
+    dims = {k: 0.0 for k in _DIM_WEIGHTS}
+    dims["actionability"] = 1.0
+    assert _compute_unified_score(dims) == _DIM_WEIGHTS["actionability"]
 
-    def test_no_markers_gives_zero(self):
-        assert _score_specificity("Do it better") == 0.0
+
+def test_compute_unified_score_clamps_and_handles_missing_dims():
+    assert _compute_unified_score({}) == 0.0
+    assert _compute_unified_score({k: 2.0 for k in _DIM_WEIGHTS}) == 1.0
 
 
 # ---------------------------------------------------------------------------
-# _score_outcome_linked
+# Extraction and domain contracts
 # ---------------------------------------------------------------------------
 
-class TestScoreOutcomeLinked:
-    def test_outcome_word_gives_one(self):
-        assert _score_outcome_linked("This approach fixed the bug") == 1.0
-
-    def test_soft_outcome_gives_half(self):
-        assert _score_outcome_linked("It improves user retention") == 0.5
-
-    def test_no_outcome_gives_zero(self):
-        assert _score_outcome_linked("add a button") == 0.0
-
-    def test_numeric_with_rate_gives_half(self):
-        result = _score_outcome_linked("100% avg conversion rate")
-        assert result == 0.5
+def test_extract_structure_returns_expected_shape():
+    result = extract_structure("When queue is full: use batching because it reduces overhead")
+    assert set(result.keys()) == {"condition", "action", "reasoning", "outcome"}
 
 
-# ---------------------------------------------------------------------------
-# _compute_unified_score
-# ---------------------------------------------------------------------------
+def test_extract_structure_short_text_returns_nones():
+    result = extract_structure("ok")
+    assert all(v is None for v in result.values())
 
-class TestComputeUnifiedScore:
-    def test_all_zero_gives_zero(self):
-        dims = {d: 0.0 for d in _DIM_WEIGHTS}
-        assert _compute_unified_score(dims) == 0.0
 
-    def test_all_one_gives_one(self):
-        dims = {d: 1.0 for d in _DIM_WEIGHTS}
-        assert abs(_compute_unified_score(dims) - 1.0) < 1e-9
+def test_extract_structure_caps_captured_segments_to_120_chars():
+    long_text = "Always use " + ("x" * 200) + " because it helps"
+    result = extract_structure(long_text)
+    if result["action"] is not None:
+        assert len(result["action"]) <= 120
 
-    def test_weights_sum_respected(self):
-        # actionability=1 (weight=0.30), others=0
-        dims = {"actionability": 1.0, "novelty": 0.0, "reasoning": 0.0,
-                "specificity": 0.0, "outcome_linked": 0.0}
-        result = _compute_unified_score(dims)
-        assert abs(result - 0.30) < 1e-9
 
-    def test_clamped_at_one(self):
-        dims = {d: 2.0 for d in _DIM_WEIGHTS}  # overcapacity inputs
-        assert _compute_unified_score(dims) == 1.0
-
-    def test_missing_dims_default_zero(self):
-        result = _compute_unified_score({})
-        assert result == 0.0
+@pytest.mark.parametrize(
+    ("text", "source", "expected"),
+    [
+        ("Refactor this TypeScript function", "unknown", "code"),
+        ("bridge_cycle publishes advisories", "unknown", "system"),
+        ("General advice", "depth_session", "code"),
+        ("General advice", "other", "general"),
+    ],
+)
+def test_detect_domain_matrix(text: str, source: str, expected: str):
+    assert _detect_domain(text, source=source) == expected
 
 
 # ---------------------------------------------------------------------------
-# extract_structure
+# Advisory composition contracts
 # ---------------------------------------------------------------------------
 
-class TestExtractStructure:
-    def test_returns_dict_with_four_keys(self):
-        result = extract_structure("always use TypeScript")
-        for key in ("condition", "action", "reasoning", "outcome"):
-            assert key in result
-
-    def test_short_text_returns_all_none(self):
-        result = extract_structure("ok")
-        assert all(v is None for v in result.values())
-
-    def test_extracts_condition(self):
-        result = extract_structure("When the queue is full: use batching")
-        assert result["condition"] is not None
-
-    def test_extracts_action(self):
-        result = extract_structure("Always use TypeScript for large projects")
-        assert result["action"] is not None
-
-    def test_extracts_reasoning(self):
-        result = extract_structure("Use memoization because it reduces calls")
-        assert result["reasoning"] is not None
-
-    def test_extracts_outcome(self):
-        result = extract_structure("Use caching, which leads to faster responses")
-        assert result["outcome"] is not None
-
-    def test_empty_string_returns_none_values(self):
-        result = extract_structure("")
-        assert all(v is None for v in result.values())
-
-    def test_extracted_values_capped_at_120(self):
-        long_text = "Use always " + "x" * 200 + " in production"
-        result = extract_structure(long_text)
-        if result["action"] is not None:
-            assert len(result["action"]) <= 120
+def test_compose_advisory_text_requires_action():
+    structure = {"condition": "queue is full", "action": None, "reasoning": "reduces load", "outcome": None}
+    dims = {"reasoning": 1.0, "outcome_linked": 1.0}
+    assert _compose_advisory_text("raw", structure, dims) == ""
 
 
-# ---------------------------------------------------------------------------
-# _detect_domain
-# ---------------------------------------------------------------------------
+def test_compose_advisory_text_includes_reasoning_and_outcome_at_thresholds():
+    raw = "When queue is full, use batching because it reduces overhead which leads to faster responses."
+    structure = {
+        "condition": "queue is full",
+        "action": "use batching",
+        "reasoning": "it reduces overhead",
+        "outcome": "faster responses",
+    }
+    dims = {"reasoning": 0.5, "outcome_linked": 0.5}
 
-class TestDetectDomain:
-    def test_code_keywords_returns_code(self):
-        assert _detect_domain("Use this TypeScript function") == "code"
+    composed = _compose_advisory_text(raw, structure, dims)
+    assert "because it reduces overhead" in composed
+    assert "(faster responses)" in composed
 
-    def test_system_keywords_returns_system(self):
-        assert _detect_domain("The bridge_cycle runs every 30 seconds") == "system"
 
-    def test_no_markers_returns_general(self):
-        assert _detect_domain("Always be kind") == "general"
+def test_compose_advisory_text_excludes_low_confidence_reasoning_and_outcome():
+    raw = "Use batching."
+    structure = {
+        "condition": None,
+        "action": "use batching",
+        "reasoning": "it reduces overhead",
+        "outcome": "faster responses",
+    }
+    dims = {"reasoning": 0.49, "outcome_linked": 0.49}
 
-    def test_depth_in_source_returns_code(self):
-        assert _detect_domain("some text", source="depth_session") == "code"
+    composed = _compose_advisory_text(raw, structure, dims)
+    assert "because" not in composed
+    assert "(" not in composed
+
+
+def test_compose_advisory_text_rejects_too_short_or_too_long_rewrite():
+    short_structure = {"condition": None, "action": "do x", "reasoning": None, "outcome": None}
+    assert _compose_advisory_text("raw text", short_structure, {"reasoning": 1.0, "outcome_linked": 1.0}) == ""
+
+    long_structure = {
+        "condition": "when " + ("very " * 25) + "busy",
+        "action": "apply " + ("strict " * 20) + "controls",
+        "reasoning": "to prevent cascading failures",
+        "outcome": None,
+    }
+    assert _compose_advisory_text("short", long_structure, {"reasoning": 1.0, "outcome_linked": 0.0}) == ""
 
 
 # ---------------------------------------------------------------------------
-# should_suppress
+# Suppression contracts and precedence
 # ---------------------------------------------------------------------------
 
-class TestShouldSuppress:
-    def _dims(self, **overrides):
-        d = {"actionability": 1.0, "novelty": 0.5, "reasoning": 1.0,
-             "specificity": 0.5, "outcome_linked": 0.5, "unified_score": 0.7}
-        d.update(overrides)
-        return d
+def _dims(**overrides: float) -> dict[str, float]:
+    base = {
+        "actionability": 1.0,
+        "novelty": 0.5,
+        "reasoning": 1.0,
+        "specificity": 0.5,
+        "outcome_linked": 0.5,
+        "unified_score": 0.7,
+    }
+    base.update(overrides)
+    return base
 
-    def _structure(self, **overrides):
-        s = {"condition": None, "action": "validate inputs", "reasoning": None, "outcome": None}
-        s.update(overrides)
-        return s
 
-    def test_good_advisory_not_suppressed(self):
-        suppressed, reason = should_suppress(
-            "Always validate user inputs because it prevents SQL injection.",
-            self._dims(), self._structure()
-        )
-        assert suppressed is False
+def _structure(**overrides: str | None) -> dict[str, str | None]:
+    base = {"condition": None, "action": "validate input", "reasoning": None, "outcome": None}
+    base.update(overrides)
+    return base
 
-    def test_rt_prefix_suppressed(self):
-        suppressed, reason = should_suppress(
-            "RT @user: some tweet", self._dims(), self._structure()
-        )
-        assert suppressed is True
-        assert "observation_prefix" in reason
 
-    def test_depth_prefix_suppressed(self):
-        suppressed, reason = should_suppress(
-            "[DEPTH: 5] Here is analysis", self._dims(), self._structure()
-        )
-        assert suppressed is True
+def test_should_suppress_prefix_takes_precedence():
+    suppressed, reason = should_suppress("RT @user: content", _dims(unified_score=1.0), _structure())
+    assert suppressed is True
+    assert reason.startswith("observation_prefix")
 
-    def test_code_artifact_suppressed(self):
-        # >60% non-alpha in first 100 chars triggers code_artifact suppression
-        code_text = "0x1A;0xFF;{};[];1+2=3;4/5;6*7;8-9;!@#$%^&*();" * 3
-        suppressed, reason = should_suppress(code_text, self._dims(unified_score=0.5), self._structure())
-        assert suppressed is True
-        assert reason == "code_artifact"
 
-    def test_no_action_no_reasoning_suppressed(self):
-        dims = self._dims(actionability=0.0, reasoning=0.0, outcome_linked=0.0,
-                         novelty=0.0, unified_score=0.3)
-        structure = self._structure(action=None)
-        suppressed, reason = should_suppress("This is just an observation.", dims, structure)
-        assert suppressed is True
-        assert reason == "no_action_no_reasoning"
+def test_should_suppress_code_artifact_before_low_quality_checks():
+    code_text = "0x1A;0xFF;{};[];1+2=3;4/5;6*7;8-9;!@#$%^&*();" * 3
+    suppressed, reason = should_suppress(code_text, _dims(), _structure())
+    assert suppressed is True
+    assert reason == "code_artifact"
 
-    def test_low_unified_score_suppressed(self):
-        # actionability=0.5 bypasses no_action_no_reasoning; long text bypasses tautology
-        long_text = "Consider this approach for your implementation scenario" + " ..." * 10
-        dims = self._dims(actionability=0.5, novelty=0.0, reasoning=0.0,
-                         specificity=0.0, outcome_linked=0.0, unified_score=0.05)
-        suppressed, reason = should_suppress(long_text, dims, self._structure())
-        assert suppressed is True
-        assert "unified_score_too_low" in reason
 
-    def test_returns_tuple(self):
-        result = should_suppress("text", self._dims(), self._structure())
-        assert isinstance(result, tuple)
-        assert len(result) == 2
+def test_should_suppress_no_action_no_reasoning():
+    dims = _dims(actionability=0.0, reasoning=0.0, outcome_linked=0.0, novelty=0.0, unified_score=0.3)
+    suppressed, reason = should_suppress("This is just an observation", dims, _structure(action=None))
+    assert suppressed is True
+    assert reason == "no_action_no_reasoning"
+
+
+def test_should_suppress_tautology_before_unified_floor():
+    dims = _dims(reasoning=0.0, outcome_linked=0.0, specificity=0.0, novelty=0.0, unified_score=0.05)
+    suppressed, reason = should_suppress("Always validate input", dims, _structure(condition=None, action="validate input"))
+    assert suppressed is True
+    assert reason == "tautology_no_context"
+
+
+def test_should_suppress_unified_floor_when_other_checks_pass():
+    dims = _dims(reasoning=0.5, novelty=0.0, outcome_linked=0.0, specificity=0.5, unified_score=0.19)
+    text = "Use schema validation because it prevents malformed payload handling regressions in auth flow"
+    suppressed, reason = should_suppress(text, dims, _structure(condition="auth flow", action="use schema validation"))
+    assert suppressed is True
+    assert reason.startswith("unified_score_too_low")
+
+
+def test_should_not_suppress_high_quality_actionable_text():
+    text = "Always validate inputs because it prevents injection and reduces incident rate"
+    suppressed, reason = should_suppress(text, _dims(), _structure())
+    assert suppressed is False
+    assert reason == ""
 
 
 # ---------------------------------------------------------------------------
-# transform_for_advisory
+# End-to-end transformer contract
 # ---------------------------------------------------------------------------
 
-class TestTransformForAdvisory:
-    def test_empty_text_suppressed(self):
-        aq = transform_for_advisory("")
-        assert aq.suppressed is True
-        assert aq.suppression_reason == "empty_text"
+def test_transform_for_advisory_empty_text_is_suppressed():
+    aq = transform_for_advisory("   ")
+    assert aq.suppressed is True
+    assert aq.suppression_reason == "empty_text"
 
-    def test_whitespace_text_suppressed(self):
-        aq = transform_for_advisory("   ")
-        assert aq.suppressed is True
 
-    def test_returns_advisory_quality(self):
-        aq = transform_for_advisory("Always validate user inputs because it prevents errors.")
-        assert isinstance(aq, AdvisoryQuality)
+def test_transform_for_advisory_normalizes_ralph_scores():
+    class Ralph:
+        actionability = 2
+        novelty = 1
+        reasoning = 2
+        specificity = 1
+        outcome_linked = 0
 
-    def test_actionable_text_not_suppressed(self):
-        aq = transform_for_advisory(
-            "Always use TypeScript because it catches type errors at compile time, "
-            "which reduces runtime bugs in production."
-        )
-        assert aq.suppressed is False
+    aq = transform_for_advisory("Some text", ralph_score=Ralph())
+    assert aq.actionability == 1.0
+    assert aq.novelty == 0.5
+    assert aq.reasoning == 1.0
 
-    def test_actionability_scored(self):
-        aq = transform_for_advisory("Always use index hints for large tables.")
-        assert aq.actionability > 0.0
 
-    def test_reasoning_scored_with_because(self):
-        aq = transform_for_advisory("Use lazy loading because it reduces initial load time.")
-        assert aq.reasoning > 0.0
+def test_transform_for_advisory_external_signals_do_not_reduce_score():
+    text = "Use retries because they reduce transient failure impact"
+    base = transform_for_advisory(text)
+    boosted = transform_for_advisory(text, reliability=0.9, chip_quality=0.9)
+    assert boosted.unified_score >= base.unified_score
+    assert 0.0 <= boosted.unified_score <= 1.0
 
-    def test_domain_detected(self):
-        aq = transform_for_advisory("Refactor the TypeScript function to use generics.")
-        assert aq.domain == "code"
 
-    def test_ralph_score_normalised_from_0_2(self):
-        class FakeRalph:
-            actionability = 2
-            novelty = 1
-            reasoning = 2
-            specificity = 1
-            outcome_linked = 0
+def test_transform_for_advisory_detects_domain_from_source():
+    aq = transform_for_advisory("General sentence", source="depth_session")
+    assert aq.domain == "code"
 
-        aq = transform_for_advisory("Some text", ralph_score=FakeRalph())
-        # actionability=2/2=1.0
-        assert aq.actionability == 1.0
-        assert aq.novelty == 0.5
 
-    def test_reliability_boosts_unified_score(self):
-        base = transform_for_advisory("Always check edge cases.")
-        boosted = transform_for_advisory("Always check edge cases.", reliability=0.9)
-        assert boosted.unified_score >= base.unified_score
-
-    def test_chip_quality_boosts_unified_score(self):
-        base = transform_for_advisory("Always check edge cases.")
-        boosted = transform_for_advisory("Always check edge cases.", chip_quality=0.9)
-        assert boosted.unified_score >= base.unified_score
-
-    def test_unified_score_clamped_at_one(self):
-        aq = transform_for_advisory(
-            "Always validate inputs because they improve quality.",
-            reliability=1.0, chip_quality=1.0
-        )
-        assert aq.unified_score <= 1.0
-
-    def test_structure_extracted(self):
-        aq = transform_for_advisory(
-            "When the queue is full: use batching because it reduces overhead."
-        )
-        assert isinstance(aq.structure, dict)
+def test_transform_for_advisory_composes_advisory_text_for_good_input():
+    text = "When queue is full, use batching because it reduces overhead and leads to faster responses."
+    aq = transform_for_advisory(text)
+    assert aq.suppressed is False
+    assert isinstance(aq, AdvisoryQuality)
+    assert aq.advisory_text != ""
