@@ -341,6 +341,7 @@ class MetaRalph:
         self.primitive_rejected = 0
         self.duplicates_caught = 0
         self.refinements_made = 0
+        self.elevations_made = 0
 
         # Deferred save support - avoids writing 3 files on every roast
         self._dirty = False
@@ -746,7 +747,7 @@ class MetaRalph:
         final_learning = learning
 
         if score.verdict == RoastVerdict.NEEDS_WORK:
-            refined_version = self._attempt_refinement(learning, issues_found)
+            refined_version = self._attempt_refinement(learning, issues_found, context)
             if refined_version:
                 # Re-score the refined version
                 refined_score = self._score_learning(refined_version, context)
@@ -1143,18 +1144,20 @@ class MetaRalph:
 
         return suggestions
 
-    def _attempt_refinement(self, learning: str, issues: List[str]) -> Optional[str]:
+    def _attempt_refinement(self, learning: str, issues: List[str],
+                            context: Optional[Dict] = None) -> Optional[str]:
         """Attempt to auto-refine a learning that needs work.
 
-        Only performs structural cleanup (whitespace, prefix dedup).
-        Does NOT add fake reasoning or boilerplate — if the original
-        learning lacks reasoning, it should score low honestly rather
-        than get synthetic text appended.
+        Two-stage refinement:
+        1. Structural cleanup (whitespace, prefix dedup)
+        2. Elevation transforms (graduated from System 28 training)
+           — 12 proven transforms for hedge removal, passive restructure,
+           reasoning injection, etc. Never fabricates info.
         """
         refined = learning.strip()
         made_changes = False
 
-        # Structural fix: collapse excessive whitespace
+        # Stage 1: Structural fixes
         import re as _re
         collapsed = _re.sub(r"\s{2,}", " ", refined)
         if collapsed != refined:
@@ -1169,6 +1172,18 @@ class MetaRalph:
                 refined = f"{prefix} {refined[len(double):].strip()}"
                 made_changes = True
                 break
+
+        # Stage 2: Elevation transforms (from System 28 training)
+        try:
+            from .elevation import elevate
+            source_text = refined if made_changes else learning
+            elevated = elevate(source_text, context or {})
+            if elevated != source_text:
+                refined = elevated
+                made_changes = True
+                self.elevations_made += 1
+        except ImportError:
+            pass
 
         return refined if made_changes else None
 
@@ -1872,6 +1887,7 @@ class MetaRalph:
             "primitive_rejected": self.primitive_rejected,
             "duplicates_caught": self.duplicates_caught,
             "refinements_made": self.refinements_made,
+            "elevations_made": self.elevations_made,
             "pass_rate": quality_rate_all_time,
             # Used by production loop gates: windowed, excludes synthetic pipeline test pollution.
             "quality_rate": quality_rate_window,
