@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..distillation_transformer import transform_for_advisory
 from .models import (
     Episode, Step, Distillation, Policy,
     Budget, Phase, Outcome, Evaluation, DistillationType, ActionType
@@ -164,7 +165,33 @@ class EidosStore:
                     times_helped INTEGER DEFAULT 0,
 
                     created_at REAL DEFAULT (strftime('%s', 'now')),
-                    revalidate_by REAL
+                    revalidate_by REAL,
+                    refined_statement TEXT,
+                    advisory_quality TEXT
+                );
+
+                -- Archived distillations (reversible purge history)
+                CREATE TABLE IF NOT EXISTS distillations_archive (
+                    archive_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    distillation_id TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    statement TEXT NOT NULL,
+                    domains TEXT,
+                    triggers TEXT,
+                    anti_triggers TEXT,
+                    source_steps TEXT,
+                    validation_count INTEGER DEFAULT 0,
+                    contradiction_count INTEGER DEFAULT 0,
+                    confidence REAL DEFAULT 0.5,
+                    times_retrieved INTEGER DEFAULT 0,
+                    times_used INTEGER DEFAULT 0,
+                    times_helped INTEGER DEFAULT 0,
+                    created_at REAL,
+                    revalidate_by REAL,
+                    refined_statement TEXT,
+                    archive_reason TEXT NOT NULL,
+                    advisory_quality TEXT,
+                    archived_at REAL DEFAULT (strftime('%s', 'now'))
                 );
 
                 -- Policies (operating constraints)
@@ -183,6 +210,7 @@ class EidosStore:
                 CREATE INDEX IF NOT EXISTS idx_steps_trace ON steps(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_distillations_type ON distillations(type);
                 CREATE INDEX IF NOT EXISTS idx_distillations_confidence ON distillations(confidence DESC);
+                CREATE INDEX IF NOT EXISTS idx_distillations_archive_dist_id ON distillations_archive(distillation_id);
                 CREATE INDEX IF NOT EXISTS idx_policies_scope ON policies(scope);
                 CREATE INDEX IF NOT EXISTS idx_policies_priority ON policies(priority DESC);
             """)
@@ -190,6 +218,14 @@ class EidosStore:
             try:
                 if not self._column_exists(conn, "steps", "trace_id"):
                     conn.execute("ALTER TABLE steps ADD COLUMN trace_id TEXT")
+                if not self._column_exists(conn, "distillations", "refined_statement"):
+                    conn.execute("ALTER TABLE distillations ADD COLUMN refined_statement TEXT")
+                if not self._column_exists(conn, "distillations", "advisory_quality"):
+                    conn.execute("ALTER TABLE distillations ADD COLUMN advisory_quality TEXT")
+                if not self._column_exists(conn, "distillations_archive", "refined_statement"):
+                    conn.execute("ALTER TABLE distillations_archive ADD COLUMN refined_statement TEXT")
+                if not self._column_exists(conn, "distillations_archive", "advisory_quality"):
+                    conn.execute("ALTER TABLE distillations_archive ADD COLUMN advisory_quality TEXT")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_steps_trace ON steps(trace_id)")
             except Exception:
                 pass
@@ -467,6 +503,16 @@ class EidosStore:
 
     def save_distillation(self, distillation: Distillation) -> str:
         """Save a distillation to the database with duplicate-statement collapsing."""
+        def _quality_score(payload: Any) -> float:
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {}
+            if isinstance(payload, dict):
+                return float(payload.get("unified_score", 0.0) or 0.0)
+            return 0.0
+
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             target_norm = _normalize_distillation_statement(distillation.statement)
@@ -515,12 +561,25 @@ class EidosStore:
                 else:
                     merged_revalidate = max(float(existing_revalidate), float(distillation.revalidate_by))
 
+                existing_q = existing["advisory_quality"] if "advisory_quality" in existing.keys() else None
+                incoming_q = distillation.advisory_quality or {}
+                merged_quality = incoming_q if _quality_score(incoming_q) >= _quality_score(existing_q) else (
+                    json.loads(existing_q) if isinstance(existing_q, str) and existing_q else (
+                        existing_q if isinstance(existing_q, dict) else {}
+                    )
+                )
+                merged_refined = str(
+                    distillation.refined_statement
+                    or (existing["refined_statement"] if "refined_statement" in existing.keys() else "")
+                    or ""
+                )
+
                 conn.execute(
                     """UPDATE distillations
                        SET statement = ?, domains = ?, triggers = ?, anti_triggers = ?,
                            source_steps = ?, validation_count = ?, contradiction_count = ?,
                            confidence = ?, times_retrieved = ?, times_used = ?, times_helped = ?,
-                           created_at = ?, revalidate_by = ?
+                           created_at = ?, revalidate_by = ?, refined_statement = ?, advisory_quality = ?
                        WHERE distillation_id = ?""",
                     (
                         str(existing["statement"] or distillation.statement),
@@ -536,6 +595,8 @@ class EidosStore:
                         merged_helped,
                         merged_created,
                         merged_revalidate,
+                        merged_refined,
+                        json.dumps(merged_quality),
                         str(existing["distillation_id"]),
                     ),
                 )
@@ -547,8 +608,9 @@ class EidosStore:
                 INSERT OR REPLACE INTO distillations (
                     distillation_id, type, statement, domains, triggers, anti_triggers,
                     source_steps, validation_count, contradiction_count, confidence,
-                    times_retrieved, times_used, times_helped, created_at, revalidate_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    times_retrieved, times_used, times_helped, created_at, revalidate_by,
+                    refined_statement, advisory_quality
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     distillation.distillation_id,
@@ -566,6 +628,8 @@ class EidosStore:
                     distillation.times_helped,
                     distillation.created_at,
                     distillation.revalidate_by,
+                    distillation.refined_statement,
+                    json.dumps(distillation.advisory_quality or {}),
                 ),
             )
             conn.commit()
@@ -776,6 +840,21 @@ class EidosStore:
 
     def _row_to_distillation(self, row: sqlite3.Row) -> Distillation:
         """Convert a database row to Distillation object."""
+        advisory_quality = {}
+        if "advisory_quality" in row.keys():
+            raw_quality = row["advisory_quality"]
+            if isinstance(raw_quality, str) and raw_quality:
+                try:
+                    advisory_quality = json.loads(raw_quality)
+                except Exception:
+                    advisory_quality = {}
+            elif isinstance(raw_quality, dict):
+                advisory_quality = raw_quality
+
+        refined_statement = ""
+        if "refined_statement" in row.keys():
+            refined_statement = row["refined_statement"] or ""
+
         return Distillation(
             distillation_id=row["distillation_id"],
             type=DistillationType(row["type"]),
@@ -791,7 +870,9 @@ class EidosStore:
             times_used=row["times_used"],
             times_helped=row["times_helped"],
             created_at=row["created_at"],
-            revalidate_by=row["revalidate_by"]
+            revalidate_by=row["revalidate_by"],
+            refined_statement=refined_statement,
+            advisory_quality=advisory_quality,
         )
 
     def prune_distillations(self) -> dict:
@@ -834,16 +915,115 @@ class EidosStore:
                 )
                 pruned["low_success"] = len(low_ids)
 
-            # 3. Corrupted records (impossible counts)
+            # 3. Corrupted records (impossible counts) - repair instead of deleting.
             cur = conn.execute(
-                "DELETE FROM distillations WHERE times_retrieved > 1000000 "
-                "OR times_used > 1000000 OR times_helped > 1000000"
+                """
+                UPDATE distillations
+                SET times_retrieved = CASE WHEN times_retrieved > 1000000 OR times_retrieved < 0 THEN 0 ELSE times_retrieved END,
+                    times_used = CASE WHEN times_used > 1000000 OR times_used < 0 THEN 0 ELSE times_used END,
+                    times_helped = CASE WHEN times_helped > 1000000 OR times_helped < 0 THEN 0 ELSE times_helped END,
+                    validation_count = CASE WHEN validation_count > 1000000 OR validation_count < 0 THEN 0 ELSE validation_count END,
+                    contradiction_count = CASE WHEN contradiction_count > 1000000 OR contradiction_count < 0 THEN 0 ELSE contradiction_count END
+                WHERE times_retrieved > 1000000 OR times_used > 1000000 OR times_helped > 1000000
+                   OR validation_count > 1000000 OR contradiction_count > 1000000
+                   OR times_retrieved < 0 OR times_used < 0 OR times_helped < 0
+                   OR validation_count < 0 OR contradiction_count < 0
+                """
             )
             pruned["corrupted"] = cur.rowcount
 
             conn.commit()
 
         return pruned
+
+    def archive_and_purge_low_quality_distillations(
+        self,
+        unified_floor: float = 0.35,
+        dry_run: bool = False,
+        max_preview: int = 20,
+    ) -> Dict[str, Any]:
+        """Archive and purge distillations that fail advisory quality gates."""
+        preview: List[Dict[str, Any]] = []
+        purge_ids: List[str] = []
+        archive_rows: List[Dict[str, Any]] = []
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM distillations").fetchall()
+            scanned = len(rows)
+            for row in rows:
+                statement = (row["statement"] or "").strip()
+                aq = transform_for_advisory(statement, source="eidos")
+                reason = ""
+                if aq.suppressed:
+                    detail = aq.suppression_reason or "suppressed"
+                    reason = f"suppressed:{detail}"
+                elif aq.unified_score < unified_floor:
+                    reason = f"unified_score_below_floor:{aq.unified_score:.3f}"
+
+                if not reason:
+                    continue
+
+                purge_ids.append(row["distillation_id"])
+                archive_row = dict(row)
+                archive_row["archive_reason"] = reason
+                archive_row["advisory_quality"] = json.dumps(aq.to_dict())
+                archive_rows.append(archive_row)
+
+                if len(preview) < max_preview:
+                    preview.append(
+                        {
+                            "distillation_id": row["distillation_id"],
+                            "reason": reason,
+                            "statement": statement[:200],
+                        }
+                    )
+
+            if not dry_run and archive_rows:
+                for row in archive_rows:
+                    conn.execute(
+                        """
+                        INSERT INTO distillations_archive (
+                            distillation_id, type, statement, domains, triggers, anti_triggers,
+                            source_steps, validation_count, contradiction_count, confidence,
+                            times_retrieved, times_used, times_helped, created_at, revalidate_by,
+                            refined_statement, archive_reason, advisory_quality
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            row["distillation_id"],
+                            row["type"],
+                            row["statement"],
+                            row["domains"],
+                            row["triggers"],
+                            row["anti_triggers"],
+                            row["source_steps"],
+                            row["validation_count"],
+                            row["contradiction_count"],
+                            row["confidence"],
+                            row["times_retrieved"],
+                            row["times_used"],
+                            row["times_helped"],
+                            row["created_at"],
+                            row["revalidate_by"],
+                            row.get("refined_statement", ""),
+                            row["archive_reason"],
+                            row["advisory_quality"],
+                        ),
+                    )
+                conn.executemany(
+                    "DELETE FROM distillations WHERE distillation_id = ?",
+                    [(did,) for did in purge_ids],
+                )
+                conn.commit()
+
+        return {
+            "scanned": scanned,
+            "archived": len(purge_ids),
+            "dry_run": dry_run,
+            "unified_floor": unified_floor,
+            "preview": preview,
+        }
 
     # ==================== Policy Operations ====================
 

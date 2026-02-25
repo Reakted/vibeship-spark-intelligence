@@ -1443,8 +1443,8 @@ class MetaRalph:
         ik = (record.insight_key or "").strip()
         if ik.startswith("eidos:"):
             try:
-                from lib.eidos.store import EidosStore
-                store = EidosStore()
+                from lib.eidos.store import get_store
+                store = get_store()
                 parts = ik.split(":")
                 if len(parts) >= 3:
                     id_prefix = parts[2]

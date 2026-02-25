@@ -1192,6 +1192,7 @@ def _append_eidos_update(update: str) -> None:
                 "schema": structured.get("schema") or "spark.eidos.v1",
                 "insights": kept[:3],
                 "distillation_summary": " | ".join(summary_parts)[:1200],
+                "refined_statement": adv_quality_dict.get("advisory_text") or " | ".join(summary_parts)[:1200],
                 "advisory_quality": adv_quality_dict,
                 "advisory_readiness": round(min(max(advisory_readiness, 0.0), 1.0), 4),
             }
@@ -1199,9 +1200,35 @@ def _append_eidos_update(update: str) -> None:
             entry = {
                 "timestamp": datetime.now().isoformat(),
                 "distillation": update,
+                "refined_statement": adv_quality_dict.get("advisory_text") or update,
                 "advisory_quality": adv_quality_dict,
                 "advisory_readiness": round(min(max(advisory_readiness, 0.0), 1.0), 4),
             }
+
+        def _sig(item: dict) -> str:
+            txt = str(
+                item.get("refined_statement")
+                or item.get("distillation_summary")
+                or item.get("distillation")
+                or ""
+            ).strip().lower()
+            return " ".join(txt.split())
+
+        # Skip duplicate distillations emitted from repeated chip summaries.
+        new_sig = _sig(entry)
+        if new_sig and eidos_file.exists():
+            try:
+                tail = eidos_file.read_text(encoding="utf-8", errors="replace").splitlines()[-120:]
+                for line in reversed(tail):
+                    try:
+                        prev = json.loads(line)
+                    except Exception:
+                        continue
+                    if _sig(prev) == new_sig:
+                        log_debug("bridge_worker", "Skipped duplicate EIDOS distillation append", None)
+                        return
+            except Exception:
+                pass
 
         with open(eidos_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")

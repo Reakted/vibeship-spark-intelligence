@@ -3906,16 +3906,29 @@ class SparkAdvisor:
             for d in distillations[:5]:
                 # Determine advice type label based on distillation type
                 type_label = d.type.value.upper() if hasattr(d.type, 'value') else str(d.type)
+                advisory_quality = {}
+                base_statement = (getattr(d, "refined_statement", "") or d.statement or "").strip()
+                stored_quality = getattr(d, "advisory_quality", None) or {}
+                advice_text = base_statement or d.statement
 
-                # Transform raw statement into advisory-ready text
-                try:
-                    aq = _transform_distillation(d.statement, source="eidos")
-                    if aq.suppressed:
-                        continue  # Skip distillations that fail advisory quality
-                    # Prefer composed advisory text over raw template
-                    advice_text = aq.advisory_text or d.statement
-                except Exception:
-                    advice_text = d.statement
+                # Prefer persisted advisory quality from EIDOS store.
+                if isinstance(stored_quality, dict) and stored_quality:
+                    if stored_quality.get("suppressed"):
+                        continue
+                    if float(stored_quality.get("unified_score", 0.0) or 0.0) < 0.35:
+                        continue
+                    advisory_quality = stored_quality
+                    advice_text = str(stored_quality.get("advisory_text") or advice_text or d.statement)
+                else:
+                    # Fallback for legacy rows without persisted quality metadata.
+                    try:
+                        aq = _transform_distillation(advice_text or d.statement, source="eidos")
+                        if aq.suppressed:
+                            continue  # Skip distillations that fail advisory quality
+                        advice_text = aq.advisory_text or advice_text or d.statement
+                        advisory_quality = aq.to_dict()
+                    except Exception:
+                        advice_text = advice_text or d.statement
 
                 # Add reason from distillation confidence and proven effectiveness
                 reason = f"Confidence: {d.confidence:.0%}"
@@ -3930,7 +3943,7 @@ class SparkAdvisor:
                 # Bridge emotional priority: try exact match on action text,
                 # else try substring match on statement
                 ep = 0.0
-                stmt_lower = (d.statement or "").strip().lower()
+                stmt_lower = (advice_text or d.statement or "").strip().lower()
                 if stmt_lower in priority_map:
                     ep = priority_map[stmt_lower]
                 else:
@@ -3956,6 +3969,7 @@ class SparkAdvisor:
                     context_match=eidos_match,
                     reason=reason,
                     emotional_priority=ep,
+                    advisory_quality=advisory_quality,
                 ))
                 # Usage tracking now handled by meta_ralph outcome feedback loop
                 # (see _apply_outcome_to_cognitive in meta_ralph.py)
@@ -5439,24 +5453,6 @@ Output only JSON with `order` as a list of 0-based indices (descending by releva
         except Exception:
             pass  # Don't break outcome flow if tracking fails
 
-        # Route EIDOS-sourced outcomes back to EIDOS store
-        # This closes the distillation feedback loop — confidence evolves
-        try:
-            if ik and isinstance(ik, str) and ik.startswith("eidos:"):
-                # insight_key format: "eidos:{type}:{id_prefix}"
-                parts = ik.split(":", 2)
-                if len(parts) >= 3:
-                    id_prefix = parts[2]
-                    from .eidos.store import get_store
-                    eidos_store = get_store()
-                    full_id = eidos_store.find_distillation_by_prefix(id_prefix)
-                    if full_id:
-                        eidos_store.record_distillation_usage(
-                            full_id,
-                            helped=(was_helpful is True),
-                        )
-        except Exception:
-            pass  # Don't break outcome flow
 
         # Log outcome
         with open(ADVICE_LOG, "a", encoding="utf-8") as f:
