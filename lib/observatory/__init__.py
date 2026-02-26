@@ -170,6 +170,7 @@ def generate_observatory(*, force: bool = False, verbose: bool = False) -> dict:
     from .stage_pages import generate_all_stage_pages
     from .system_flow_comprehensive import generate_system_flow_comprehensive
     from .system_flow_operator_playbook import generate_system_flow_operator_playbook
+    from .recovery_metrics import generate_recovery_metrics
     from .tuneables_deep_dive import generate_tuneables_deep_dive
 
     t0 = time.time()
@@ -259,8 +260,13 @@ def generate_observatory(*, force: bool = False, verbose: bool = False) -> dict:
         (obs_dir / filename).write_text(content, encoding="utf-8")
     save_snapshot(obs_dir, current_snapshot)
 
+    # Generate recovery effectiveness metrics page (Phase D)
+    recovery_path = obs_dir / "recovery_effectiveness.md"
+    recovery_content = generate_recovery_metrics(data)
+    recovery_path.write_text(recovery_content, encoding="utf-8")
+
     # Generate stage pages
-    files_written = 11  # flow + reverse + tuneables_dive + llm_areas + comprehensive + playbook + 5 readability pages
+    files_written = 12  # flow + reverse + tuneables_dive + llm_areas + comprehensive + playbook + recovery + 5 readability pages
     if curriculum_summary.get("written"):
         files_written += 1  # eidos_curriculum.md
     for filename, content in generate_all_stage_pages(data):

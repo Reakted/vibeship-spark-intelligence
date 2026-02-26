@@ -577,6 +577,13 @@
     "workflow_summary_enabled": true,
     "workflow_summary_min_interval_s": 120
   },
+  "workflow_evidence": {
+    "max_summaries_per_provider": 10,
+    "max_age_s": 3600,
+    "min_tool_failures_for_advisory": 1,
+    "recovery_boost": 0.20,
+    "source_quality": 0.82
+  },
   "request_tracker": {
     "max_pending": 50,
     "max_completed": 200,

@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import lib.advisor as advisor_mod
+import lib.workflow_evidence as workflow_evidence_mod
 from lib.advisor import Advice, AdviceOutcome, SparkAdvisor
 
 
@@ -99,6 +100,12 @@ def _patch_advisor(monkeypatch, tmp_path):
     monkeypatch.setattr(advisor_mod, "HAS_EIDOS", False)
     monkeypatch.setattr(advisor_mod, "AUTO_TUNER_SOURCE_BOOSTS", {})
     monkeypatch.setattr("lib.feedback_effectiveness_cache.get_feedback_cache", lambda: _DummyFeedbackCache())
+    # Isolate workflow evidence from live data
+    monkeypatch.setattr(workflow_evidence_mod, "WORKFLOW_REPORT_DIRS", {
+        "claude": tmp_path / "_wf_claude",
+        "codex": tmp_path / "_wf_codex",
+        "openclaw": tmp_path / "_wf_openclaw",
+    })
     # Stub singleton so tests are isolated
     monkeypatch.setattr(advisor_mod, "_advisor", None)
 

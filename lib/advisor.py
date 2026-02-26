@@ -2618,6 +2618,9 @@ class SparkAdvisor:
             )
         )
 
+        # 13. Workflow evidence (tool failure/recovery from workflow summaries)
+        advice_list.extend(self._get_workflow_advice(tool_name, context))
+
         # Global domain guard: do not let X-social specific learnings leak
         # into non-social tasks from non-semantic sources (chip/mind/cognitive/etc.).
         advice_list = self._filter_cross_domain_advice(advice_list, context)
@@ -4522,6 +4525,52 @@ class SparkAdvisor:
             )
         ]
 
+    def _get_workflow_advice(
+        self, tool_name: str, context: str
+    ) -> List[Advice]:
+        """Source #13: Workflow evidence from tool failure/recovery patterns (Phase D).
+
+        Reads recent workflow_summary reports from claude/codex/openclaw and
+        converts high-signal items (recovery tools, failure rates) into advisory.
+        """
+        try:
+            from .workflow_evidence import summaries_to_advisory_evidence
+        except ImportError:
+            return []
+
+        try:
+            items = summaries_to_advisory_evidence()
+        except Exception:
+            return []
+
+        advice: List[Advice] = []
+        for item in items:
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            cm = self._calculate_context_match(text, context)
+            # Boost context match for recovery items matching current tool
+            if item.get("signal_type") == "recovery":
+                item_tool = str(item.get("tool_name") or "").lower()
+                if item_tool and item_tool in tool_name.lower():
+                    cm = max(cm, 0.70)
+            advice.append(
+                Advice(
+                    advice_id=self._generate_advice_id(
+                        text[:80],
+                        insight_key=str(item.get("insight_key") or ""),
+                        source="workflow",
+                    ),
+                    insight_key=str(item.get("insight_key") or ""),
+                    text=text,
+                    confidence=float(item.get("confidence") or 0.70),
+                    source="workflow",
+                    context_match=cm,
+                    reason=f"Workflow evidence from {item.get('provider', 'unknown')} ({item.get('signal_type', 'general')})",
+                )
+            )
+        return advice
+
     def _is_metadata_pattern(self, text: str) -> bool:
         """Detect metadata patterns that aren't actionable advice.
 
@@ -4835,6 +4884,7 @@ class SparkAdvisor:
         "semantic": 0.55,         # Semantic retrieval of cognitive insights
         "cognitive": 0.50,        # Standard cognitive insights
         "bank": 0.35,             # Memory banks (less curated, noisiest source per benchmark)
+        "workflow": 0.82,         # Workflow summaries: tool failures/recoveries (Phase D)
     }
 
     def _rank_score(self, a: Advice) -> float:
