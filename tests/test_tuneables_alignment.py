@@ -25,6 +25,7 @@ def test_critical_defaults_align_schema_and_config():
         ("memory_capture", "auto_save_threshold"),
         ("memory_capture", "suggest_threshold"),
         ("memory_capture", "context_capture_chars"),
+        ("openclaw_tailer", "max_tool_result_chars"),
         ("synthesizer", "mode"),
         ("semantic", "enabled"),
         ("triggers", "enabled"),

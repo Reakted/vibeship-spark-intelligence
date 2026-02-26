@@ -116,6 +116,29 @@ python3 adapters/codex_hook_bridge.py --mode shadow --poll 2 --max-per-tick 200
 Telemetry is written to:
 - `~/.spark/logs/codex_hook_bridge_telemetry.jsonl`
 
+### 5) OpenClaw tailer capture policy tuneables
+
+File: `adapters/openclaw_tailer.py`
+
+Capture/skip behavior is configurable via the `openclaw_tailer` tuneables section:
+
+- `skip_successful_tool_results` (default: `true`)
+- `skip_read_only_tool_calls` (default: `true`)
+- `max_tool_result_chars` (default: `4000`)
+- `keep_large_tool_results_on_error_only` (default: `true`)
+- `min_tool_result_chars_for_capture` (default: `0`)
+
+Runtime override example (`~/.spark/tuneables.json`):
+
+```json
+{
+  "openclaw_tailer": {
+    "skip_successful_tool_results": true,
+    "max_tool_result_chars": 6000
+  }
+}
+```
+
 ## Cursor / VS Code integration (recommended approach)
 
 Cursor and VS Code are best integrated using either:
