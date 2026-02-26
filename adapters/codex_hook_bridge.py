@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 STATE_DIR = Path.home() / ".spark" / "adapters"
 DEFAULT_STATE_FILE = STATE_DIR / "codex_hook_bridge_state.json"
 DEFAULT_TELEMETRY_FILE = Path.home() / ".spark" / "logs" / "codex_hook_bridge_telemetry.jsonl"
+DEFAULT_LOCK_FILE = STATE_DIR / "codex_hook_bridge.lock"
 DEFAULT_CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
 DEFAULT_OBSERVE_PATH = Path(__file__).resolve().parent.parent / "hooks" / "observe.py"
 
@@ -62,6 +63,86 @@ def _append_jsonl(path: Path, row: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _is_pid_running(pid: int) -> bool:
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _acquire_singleton_lock(lock_file: Path, *, mode: str) -> None:
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    my_pid = int(os.getpid())
+
+    if lock_file.exists():
+        owner: Dict[str, Any] = {}
+        try:
+            owner = json.loads(lock_file.read_text(encoding="utf-8"))
+        except Exception:
+            owner = {}
+        owner_pid = owner.get("pid")
+        try:
+            owner_pid = int(owner_pid)
+        except Exception:
+            owner_pid = 0
+        if owner_pid and owner_pid != my_pid and _is_pid_running(owner_pid):
+            raise SystemExit(
+                f"codex_hook_bridge already running (pid={owner_pid}) lock={lock_file}"
+            )
+        try:
+            lock_file.unlink()
+        except Exception:
+            pass
+
+    payload = {"pid": my_pid, "mode": str(mode), "ts": _now()}
+    lock_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _release_singleton_lock(lock_file: Path) -> None:
+    if not lock_file.exists():
+        return
+    my_pid = int(os.getpid())
+    try:
+        owner = json.loads(lock_file.read_text(encoding="utf-8"))
+    except Exception:
+        owner = {}
+    owner_pid = owner.get("pid")
+    try:
+        owner_pid = int(owner_pid)
+    except Exception:
+        owner_pid = 0
+    if owner_pid in (0, my_pid):
+        try:
+            lock_file.unlink()
+        except Exception:
+            pass
+
+
+def _emit_shadow_mode_warning(
+    *,
+    telemetry_file: Path,
+    sessions_root: Path,
+) -> None:
+    row = {
+        "ts": _now(),
+        "adapter": "codex_hook_bridge",
+        "event": "startup_warning",
+        "warning_code": "shadow_mode_active",
+        "warning": "Bridge is running in shadow mode; events are not forwarded to hooks/observe.py",
+        "mode": "shadow",
+        "observe_forwarding_enabled": False,
+        "sessions_root": str(sessions_root),
+    }
+    _append_jsonl(telemetry_file, row)
 
 
 def _extract_message_text(content: Any) -> str:
@@ -538,11 +619,15 @@ def _write_telemetry_snapshot(
     mode: str,
     runtime: BridgeRuntime,
     active_files: int,
+    observe_forwarding_enabled: bool,
+    shadow_mode_warning_emitted: bool,
 ) -> None:
     row = {
         "ts": _now(),
         "adapter": "codex_hook_bridge",
         "mode": mode,
+        "observe_forwarding_enabled": bool(observe_forwarding_enabled),
+        "shadow_mode_warning_emitted": bool(shadow_mode_warning_emitted),
         "active_files": int(active_files),
         "pending_calls": len(runtime.pending_calls),
         "metrics": runtime.metrics.as_dict(),
@@ -555,6 +640,7 @@ def run_bridge(args: argparse.Namespace) -> int:
     state_file = Path(args.state_file).expanduser()
     telemetry_file = Path(args.telemetry_file).expanduser()
     observe_path = Path(args.observe_path).expanduser()
+    lock_file = Path(args.lock_file).expanduser()
 
     if not sessions_root.exists():
         raise SystemExit(f"No Codex sessions root at {sessions_root}")
@@ -564,73 +650,90 @@ def run_bridge(args: argparse.Namespace) -> int:
     mode = str(args.mode or "shadow").strip().lower()
     if mode not in ("shadow", "observe"):
         raise SystemExit(f"Unsupported mode: {mode}")
+    observe_forwarding_enabled = mode == "observe"
+    shadow_mode_warning_emitted = False
 
-    while True:
-        files = discover_session_files(sessions_root)
-        for session_file in files:
-            file_key = str(session_file)
-            try:
-                lines = session_file.read_text(encoding="utf-8").splitlines()
-            except Exception:
-                continue
+    _acquire_singleton_lock(lock_file, mode=mode)
+    try:
+        if mode == "shadow" and not args.once:
+            _emit_shadow_mode_warning(telemetry_file=telemetry_file, sessions_root=sessions_root)
+            shadow_mode_warning_emitted = True
+            if args.verbose:
+                print(
+                    "[codex_hook_bridge] WARNING: shadow mode active; observe forwarding disabled",
+                    flush=True,
+                )
 
-            if state.is_new_file(file_key):
-                initial_offset = 0 if args.backfill else len(lines)
-                state.register_file(file_key, initial_offset)
-                state.save()
-                if args.verbose:
-                    print(f"[codex_hook_bridge] tracking {session_file} offset={initial_offset}", flush=True)
-                if not args.backfill:
-                    continue
-
-            off = state.get_offset(file_key)
-            new_lines = lines[off:]
-            if not new_lines:
-                continue
-
-            session_id = _session_key(sessions_root, session_file)
-            consumed = 0
-            batch = new_lines[: max(1, int(args.max_per_tick))]
-            for line in batch:
-                consumed += 1
+        while True:
+            files = discover_session_files(sessions_root)
+            for session_file in files:
+                file_key = str(session_file)
                 try:
-                    row = json.loads(line)
+                    lines = session_file.read_text(encoding="utf-8").splitlines()
                 except Exception:
-                    runtime.metrics.json_decode_errors += 1
                     continue
 
-                events = map_codex_row(row, session_id=session_id, runtime=runtime)
-                if not events:
+                if state.is_new_file(file_key):
+                    initial_offset = 0 if args.backfill else len(lines)
+                    state.register_file(file_key, initial_offset)
+                    state.save()
+                    if args.verbose:
+                        print(f"[codex_hook_bridge] tracking {session_file} offset={initial_offset}", flush=True)
+                    if not args.backfill:
+                        continue
+
+                off = state.get_offset(file_key)
+                new_lines = lines[off:]
+                if not new_lines:
                     continue
 
-                if mode == "observe":
-                    for event in events:
-                        runtime.metrics.observe_calls += 1
-                        ok, elapsed_ms, err = _invoke_observe(observe_path, event, timeout_s=float(args.observe_timeout_s))
-                        runtime.metrics.observe_latency_ms.append(elapsed_ms)
-                        if ok:
-                            runtime.metrics.observe_success += 1
-                        else:
-                            runtime.metrics.observe_failures += 1
-                            if args.verbose:
-                                print(f"[codex_hook_bridge] observe failed: {err}", flush=True)
+                session_id = _session_key(sessions_root, session_file)
+                consumed = 0
+                batch = new_lines[: max(1, int(args.max_per_tick))]
+                for line in batch:
+                    consumed += 1
+                    try:
+                        row = json.loads(line)
+                    except Exception:
+                        runtime.metrics.json_decode_errors += 1
+                        continue
 
-            state.set_offset(file_key, off + consumed)
-            state.save()
+                    events = map_codex_row(row, session_id=session_id, runtime=runtime)
+                    if not events:
+                        continue
 
-        runtime.prune_pending_calls()
-        _write_telemetry_snapshot(
-            telemetry_file=telemetry_file,
-            mode=mode,
-            runtime=runtime,
-            active_files=len(files),
-        )
+                    if mode == "observe":
+                        for event in events:
+                            runtime.metrics.observe_calls += 1
+                            ok, elapsed_ms, err = _invoke_observe(observe_path, event, timeout_s=float(args.observe_timeout_s))
+                            runtime.metrics.observe_latency_ms.append(elapsed_ms)
+                            if ok:
+                                runtime.metrics.observe_success += 1
+                            else:
+                                runtime.metrics.observe_failures += 1
+                                if args.verbose:
+                                    print(f"[codex_hook_bridge] observe failed: {err}", flush=True)
 
-        if args.once:
-            print(json.dumps({"mode": mode, "metrics": runtime.metrics.as_dict()}, indent=2))
-            return 0
+                state.set_offset(file_key, off + consumed)
+                state.save()
 
-        time.sleep(max(0.25, float(args.poll)))
+            runtime.prune_pending_calls()
+            _write_telemetry_snapshot(
+                telemetry_file=telemetry_file,
+                mode=mode,
+                runtime=runtime,
+                active_files=len(files),
+                observe_forwarding_enabled=observe_forwarding_enabled,
+                shadow_mode_warning_emitted=shadow_mode_warning_emitted,
+            )
+
+            if args.once:
+                print(json.dumps({"mode": mode, "metrics": runtime.metrics.as_dict()}, indent=2))
+                return 0
+
+            time.sleep(max(0.25, float(args.poll)))
+    finally:
+        _release_singleton_lock(lock_file)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -642,6 +745,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--observe-path", default=str(DEFAULT_OBSERVE_PATH), help="Path to hooks/observe.py")
     ap.add_argument("--observe-timeout-s", type=float, default=8.0, help="observe.py timeout per event")
     ap.add_argument("--unknown-exit-policy", default="success", choices=["success", "failure", "skip"], help="How to classify outputs when exit code is unknown")
+    ap.add_argument("--lock-file", default=str(DEFAULT_LOCK_FILE), help="Singleton lock file path")
     ap.add_argument("--poll", type=float, default=2.0, help="Poll interval in seconds")
     ap.add_argument("--max-per-tick", type=int, default=200, help="Max new lines per file per tick")
     ap.add_argument("--backfill", action="store_true", help="Start at offset 0 for new files")
