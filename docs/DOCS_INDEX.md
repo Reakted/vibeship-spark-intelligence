@@ -16,6 +16,7 @@ Canonical navigation hub. Start here.
 - `docs/GETTING_STARTED_5_MIN.md`
 - `docs/QUICKSTART.md`
 - `CONTRIBUTING.md`
+- `REPO_HYGIENE.md`
 - `CODE_OF_CONDUCT.md`
 - `CHANGELOG.md`
 

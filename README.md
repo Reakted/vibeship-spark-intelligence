@@ -309,6 +309,7 @@ Full guide: [`docs/OBSIDIAN_OBSERVATORY_GUIDE.md`](docs/OBSIDIAN_OBSERVATORY_GUI
 - **CLI + operations quickstart**: `docs/QUICKSTART.md`
 - **Obsidian Observatory**: `docs/OBSIDIAN_OBSERVATORY_GUIDE.md`
 - **Docs index**: `docs/DOCS_INDEX.md`
+- **Repo hygiene policy**: `REPO_HYGIENE.md`
 - **Website**: [spark.vibeship.co](https://spark.vibeship.co)
 - **Contributing**: `CONTRIBUTING.md` (local setup, PR flow, and safety expectations)
 
