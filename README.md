@@ -130,6 +130,7 @@ Spark works with any coding agent that supports hooks or event capture.
 | Agent | Integration | Guide |
 |-------|------------|-------|
 | **Claude Code** | Hooks (PreToolUse, PostToolUse, UserPromptSubmit) | `docs/claude_code.md` |
+| **Codex** | Session JSONL hook bridge (shadow/observe rollout) | `docs/CODEX_HOOK_BRIDGE_ROLLOUT.md` |
 | **Cursor / VS Code** | tasks.json + emit_event | `docs/cursor.md` |
 | **OpenClaw** | Session JSONL tailer | `docs/openclaw/` |
 

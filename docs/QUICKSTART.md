@@ -139,6 +139,16 @@ Port overrides:
 Tip: `spark up` starts core services + Pulse by default. Use `--no-pulse` for debugging.
 Tip: `spark up --lite` skips Pulse and watchdog to reduce background load.
 
+### Runtime LLM Assist Setup (Optional)
+
+```bash
+# Show current runtime LLM preference state
+python scripts/intelligence_llm_setup.py --show
+
+# Enable all runtime LLM assists with one provider
+python scripts/intelligence_llm_setup.py --enable-all --provider minimax
+```
+
 ### Production Hardening Defaults
 
 - `sparkd` auth: all mutating `POST` endpoints require `Authorization: Bearer <token>` (token auto-resolves from `SPARKD_TOKEN` or `~/.spark/sparkd.token`).
@@ -578,6 +588,27 @@ If status still reports missing Codex sync, confirm:
 - the command runs in the same shell/environment where `SPARK_CODEX_CMD` or `CODEX_CMD` is set
 - `python -m spark.cli sync-context` is completing successfully
 - `SPARK_SYNC_TARGETS` is not overridden to exclude `codex`
+
+Codex hook lifecycle capture (shadow-first rollout):
+
+```bash
+# Single-pass mapping validation
+python adapters/codex_hook_bridge.py --mode shadow --backfill --once
+
+# Continuous shadow canary
+python adapters/codex_hook_bridge.py --mode shadow --poll 2 --max-per-tick 200
+
+# Promote to live forwarding only after gates pass
+python adapters/codex_hook_bridge.py --mode observe --poll 2 --max-per-tick 200
+```
+
+Codex observability report:
+
+```bash
+python scripts/codex_hooks_observatory.py --window-minutes 60
+```
+
+Reference: `docs/CODEX_HOOK_BRIDGE_ROLLOUT.md`
 
 ## Directory Structure
 

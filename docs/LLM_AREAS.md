@@ -51,6 +51,21 @@ for area_id, cfg in configs.items():
 
 Or view the Observatory page: `_observatory/llm_areas_status.md` in your Obsidian vault.
 
+### Runtime setup helper (CLI)
+
+Use the helper script for fast runtime toggles:
+
+```bash
+# Show current runtime preferences
+python scripts/intelligence_llm_setup.py --show
+
+# Enable all runtime assists with a provider override
+python scripts/intelligence_llm_setup.py --enable-all --provider minimax
+
+# Disable all runtime assists
+python scripts/intelligence_llm_setup.py --disable-all
+```
+
 ---
 
 ## Architecture

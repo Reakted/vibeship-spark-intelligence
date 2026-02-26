@@ -57,6 +57,7 @@ Canonical navigation hub. Start here.
 
 ## Integrations
 - `docs/claude_code.md`
+- `docs/CODEX_HOOK_BRIDGE_ROLLOUT.md`
 - `docs/cursor.md`
 - `docs/adapters.md`
 - `docs/LEARNING_SYSTEMS_NEW_SPARK_INTEGRATION_MAP.md`

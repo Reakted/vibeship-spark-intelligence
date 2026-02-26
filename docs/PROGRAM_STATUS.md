@@ -1,9 +1,19 @@
 # Program Status
 
-Updated: 2026-02-12
+Updated: 2026-02-26
 Navigation hub: `docs/GLOSSARY.md`
 
 This file consolidates status from older roadmap and integration plan docs.
+
+## Recent 24h shipped updates (2026-02-26)
+
+- Advisory dedupe now supports contextual scope mode (`global_dedupe_scope=contextual`) with rejection telemetry flush improvements.
+- Codex hook bridge is available in shadow-first rollout mode, with optional observe forwarding into `hooks/observe.py`.
+- Codex rollout observability is available via `scripts/codex_hooks_observatory.py` and the `codex_hooks` observatory page.
+- Runtime LLM preference operations now have a dedicated setup CLI (`scripts/intelligence_llm_setup.py`).
+- EIDOS curriculum build/export path is available via `scripts/build_eidos_curriculum.py` with Observatory integration/test coverage.
+- Memory quality guardrails were tightened across capture/retrieval, and scheduler integration added a dedicated memory observatory toggle.
+- CI/security workflow stack and GitHub Actions versions were refreshed across main workflows.
 
 ## Current State
 

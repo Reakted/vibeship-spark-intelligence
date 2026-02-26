@@ -4,6 +4,18 @@ All notable changes to Spark Intelligence are documented here.
 
 ---
 
+## [Platform and Integration Sync] - 2026-02-26
+
+### Theme: Workflow capture parity, advisory dedupe hardening, and operator tooling
+
+- Added contextual global dedupe mode for advisory emissions with telemetry flush updates (`lib/advisory_engine.py`, `tests/test_advisory_engine_dedupe.py`, `tests/test_advisory_engine_evidence.py`).
+- Added Codex hook bridge (shadow-first, optional observe forwarding) and wrapper launchers (`adapters/codex_hook_bridge.py`, `scripts/spark-codex-bridge.*`, `tests/test_codex_hook_bridge.py`).
+- Added Codex hook observability report generator and rollout guide (`scripts/codex_hooks_observatory.py`, `docs/CODEX_HOOK_BRIDGE_ROLLOUT.md`, `tests/test_codex_hooks_observatory.py`).
+- Added runtime LLM setup helper CLI for bulk enable/disable/provider overrides (`scripts/intelligence_llm_setup.py`, runtime LLM coverage tests).
+- Added EIDOS curriculum builder script plus Observatory curriculum-related test coverage (`scripts/build_eidos_curriculum.py`, observatory/eidos test suite updates).
+- Tightened memory quality capture/retrieval guardrails and scheduler integration for daily memory observatory refresh (`lib/memory_capture.py`, `scripts/memory_quality_observatory.py`, `spark_scheduler.py`, tuneables schema/config updates).
+- Updated CI workflow and dependency action versions for security and maintenance (`.github/workflows/*`, dependabot updates).
+
 ## [Launch Readiness Updates] - 2026-02-15
 
 ### Theme: Public Alpha Readiness
