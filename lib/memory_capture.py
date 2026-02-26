@@ -433,6 +433,19 @@ def importance_score(text: str) -> Tuple[float, Dict[str, float]]:
         breakdown["actionable"] = action_score
         semantic_sum += action_score
 
+    # Workflow context: tool failure/recovery patterns are high-signal learning
+    workflow_score = 0.0
+    if re.search(r"\b(fail(?:ed|ure|s|ing)?|error|crash(?:ed|es)?|broke(?:n)?|exception)\b", t) and \
+       re.search(r"\b(recover(?:y|ed|s|ing)?|fix(?:ed|es)?|resolv(?:ed|es)|retry|workaround|fallback)\b", t):
+        workflow_score = 0.30  # both failure + recovery language = high signal
+    elif re.search(r"\btool\s+(?:fail(?:ed|ure|s)?|error|crash)\b", t):
+        workflow_score = 0.20  # tool failure specifically
+    elif re.search(r"\b(fail(?:ed|ure|s|ing)?)\b.*\b(then|after|later|subsequently)\b.*\b(succeed|success|work(?:ed|s)|pass(?:ed)?)\b", t):
+        workflow_score = 0.25  # failure-then-success narrative
+    if workflow_score:
+        breakdown["workflow_context"] = workflow_score
+        semantic_sum += workflow_score
+
     # Apply semantic sum (signals stack additively)
     if semantic_sum > 0:
         score = max(score, min(1.0, semantic_sum))
