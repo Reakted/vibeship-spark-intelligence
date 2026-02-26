@@ -17,13 +17,17 @@ cd vibeship-spark-intelligence
 2. Create a branch:
 
 ```bash
-git checkout -b feat/your-change
+git checkout -b <type>/<short-change-name>
 ```
 
 Allowed branch prefixes:
 - `feat/`
 - `fix/`
 - `docs/`
+Examples:
+- `feat/contextual-dedupe-hardening`
+- `fix/advisory-scope-fallback`
+- `docs/repo-hygiene-policy`
 
 3. Install dependencies:
 
@@ -54,6 +58,7 @@ python -m pip install -e .[dev]
 - Use `vibeship-spark-intelligence` as the primary active local root.
 - Keep `main` clean and synced with `origin/main`.
 - Keep open PRs per stream at `<= 5`; park extra work as local branches.
+  A stream is a focused work lane (for example: advisory, observability, integrations, docs).
 - Delete merged branches promptly.
 - Use weekly hygiene: `git fetch --prune`, prune merged branches, remove stale worktrees.
 

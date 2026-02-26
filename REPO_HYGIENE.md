@@ -1,7 +1,7 @@
 # Repo Hygiene
 
 ## Active Root
-- Primary working repo: `C:/Users/USER/Desktop/vibeship-spark-intelligence`
+- Primary working repo: this cloned `vibeship-spark-intelligence` repository root.
 - Keep this as the only active build root unless a temporary recovery worktree is explicitly needed.
 
 ## Branch Rules
@@ -12,6 +12,7 @@
 
 ## PR Rules
 - Keep open PRs per stream at `<= 5`.
+  A stream is a focused work lane (for example: advisory, observability, integrations, docs).
 - Park extra work as local branches, not open PRs.
 - Keep PRs small and reviewable; avoid mixed concerns.
 
