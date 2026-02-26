@@ -47,6 +47,10 @@ Operational guardrails:
 - singleton lock prevents multiple bridge processes (`--lock-file`, default `~/.spark/adapters/codex_hook_bridge.lock`)
 - startup warning row is emitted when running long-lived shadow mode (`event=startup_warning`)
 
+Default payload capture limits (relaxed for context retention):
+- input/tool args: `6000` chars (`SPARK_CODEX_HOOK_INPUT_TEXT_LIMIT`)
+- tool output: `12000` chars (`SPARK_CODEX_HOOK_OUTPUT_TEXT_LIMIT`)
+
 ## Hypothesis Gates
 
 Gate A (shadow stability), run across multiple sessions:

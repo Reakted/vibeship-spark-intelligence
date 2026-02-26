@@ -32,8 +32,19 @@ DEFAULT_LOCK_FILE = STATE_DIR / "codex_hook_bridge.lock"
 DEFAULT_CODEX_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
 DEFAULT_OBSERVE_PATH = Path(__file__).resolve().parent.parent / "hooks" / "observe.py"
 
-HOOK_INPUT_TEXT_LIMIT = 3000
-HOOK_OUTPUT_TEXT_LIMIT = 4000
+def _env_int(name: str, default: int, lo: int, hi: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return int(default)
+    try:
+        value = int(raw)
+    except Exception:
+        return int(default)
+    return max(int(lo), min(int(hi), value))
+
+
+HOOK_INPUT_TEXT_LIMIT = _env_int("SPARK_CODEX_HOOK_INPUT_TEXT_LIMIT", 6000, 500, 50000)
+HOOK_OUTPUT_TEXT_LIMIT = _env_int("SPARK_CODEX_HOOK_OUTPUT_TEXT_LIMIT", 12000, 500, 100000)
 PENDING_CALL_TTL_S = 1800
 
 

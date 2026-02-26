@@ -306,7 +306,7 @@
     "advice_feedback_min_s": 600,
     "pretool_budget_ms": 2500.0,
     "eidos_enforce_block": false,
-    "hook_payload_text_limit": 3000,
+    "hook_payload_text_limit": 6000,
     "outcome_checkin_enabled": false,
     "outcome_checkin_prompt": false
   },

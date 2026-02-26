@@ -565,7 +565,7 @@ SCHEMA: Dict[str, Dict[str, TuneableSpec]] = {
         "advice_feedback_min_s": TuneableSpec("int", 600, 60, 86400, "Min seconds between feedback prompts"),
         "pretool_budget_ms": TuneableSpec("float", 2500.0, 100.0, 10000.0, "Pre-tool advisory time budget (ms)"),
         "eidos_enforce_block": TuneableSpec("bool", False, None, None, "Enforce EIDOS blocking on risky actions"),
-        "hook_payload_text_limit": TuneableSpec("int", 3000, 500, 50000, "Max text chars in hook payload"),
+        "hook_payload_text_limit": TuneableSpec("int", 6000, 500, 50000, "Max text chars in hook payload"),
         "outcome_checkin_enabled": TuneableSpec("bool", False, None, None, "Enable outcome check-in at session end"),
         "outcome_checkin_prompt": TuneableSpec("bool", False, None, None, "Prompt user for outcome check-in"),
     },
