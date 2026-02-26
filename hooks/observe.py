@@ -91,7 +91,7 @@ ADVICE_FEEDBACK_PROMPT = bool(_hook_cfg.get("advice_feedback_prompt", True))
 ADVICE_FEEDBACK_MIN_S = int(_hook_cfg.get("advice_feedback_min_s", 600))
 PRETOOL_BUDGET_MS = float(_hook_cfg.get("pretool_budget_ms", 2500.0))
 EIDOS_ENFORCE_BLOCK = bool(_hook_cfg.get("eidos_enforce_block", False))
-HOOK_PAYLOAD_TEXT_LIMIT = int(_hook_cfg.get("hook_payload_text_limit", 3000))
+HOOK_PAYLOAD_TEXT_LIMIT = int(_hook_cfg.get("hook_payload_text_limit", 6000))
 _OUTCOME_CHECKIN_ENABLED = bool(_hook_cfg.get("outcome_checkin_enabled", False))
 _OUTCOME_CHECKIN_PROMPT = bool(_hook_cfg.get("outcome_checkin_prompt", False))
 

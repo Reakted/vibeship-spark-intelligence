@@ -3,6 +3,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 _BRIDGE_PATH = Path(__file__).resolve().parents[1] / "adapters" / "codex_hook_bridge.py"
 _SPEC = importlib.util.spec_from_file_location("codex_hook_bridge", _BRIDGE_PATH)
@@ -214,3 +216,67 @@ def test_pending_call_pairing_is_session_scoped():
     assert post_a["tool_input"]["cmd"] == "echo a"
     assert post_b["tool_input"]["cmd"] == "echo b"
     assert runtime.metrics.post_unmatched_call_id == 0
+
+
+def test_singleton_lock_replaces_stale_owner(tmp_path, monkeypatch):
+    lock_file = tmp_path / "bridge.lock"
+    lock_file.write_text(json.dumps({"pid": 4567, "mode": "shadow"}), encoding="utf-8")
+
+    monkeypatch.setattr(bridge, "_is_pid_running", lambda pid: False)
+    monkeypatch.setattr(bridge.os, "getpid", lambda: 2222)
+
+    bridge._acquire_singleton_lock(lock_file, mode="observe")
+    payload = json.loads(lock_file.read_text(encoding="utf-8"))
+    assert payload["pid"] == 2222
+    assert payload["mode"] == "observe"
+
+    bridge._release_singleton_lock(lock_file)
+    assert not lock_file.exists()
+
+
+def test_singleton_lock_blocks_active_owner(tmp_path, monkeypatch):
+    lock_file = tmp_path / "bridge.lock"
+    lock_file.write_text(json.dumps({"pid": 9999, "mode": "observe"}), encoding="utf-8")
+
+    monkeypatch.setattr(bridge.os, "getpid", lambda: 1111)
+    monkeypatch.setattr(bridge, "_is_pid_running", lambda pid: pid == 9999)
+
+    with pytest.raises(SystemExit):
+        bridge._acquire_singleton_lock(lock_file, mode="shadow")
+
+
+def test_telemetry_snapshot_includes_forwarding_flags(tmp_path):
+    telemetry_file = tmp_path / "telemetry.jsonl"
+    runtime = bridge.BridgeRuntime()
+
+    bridge._write_telemetry_snapshot(
+        telemetry_file=telemetry_file,
+        mode="observe",
+        runtime=runtime,
+        active_files=3,
+        observe_forwarding_enabled=True,
+        shadow_mode_warning_emitted=False,
+    )
+
+    rows = telemetry_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(rows) == 1
+    payload = json.loads(rows[0])
+    assert payload["mode"] == "observe"
+    assert payload["observe_forwarding_enabled"] is True
+    assert payload["shadow_mode_warning_emitted"] is False
+
+
+def test_emit_shadow_mode_warning_writes_event(tmp_path):
+    telemetry_file = tmp_path / "telemetry.jsonl"
+
+    bridge._emit_shadow_mode_warning(
+        telemetry_file=telemetry_file,
+        sessions_root=Path.home() / ".codex" / "sessions",
+    )
+
+    rows = telemetry_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(rows) == 1
+    payload = json.loads(rows[0])
+    assert payload["event"] == "startup_warning"
+    assert payload["warning_code"] == "shadow_mode_active"
+    assert payload["observe_forwarding_enabled"] is False

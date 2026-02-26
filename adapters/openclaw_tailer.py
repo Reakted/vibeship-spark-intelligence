@@ -27,6 +27,8 @@ import time
 from pathlib import Path
 from urllib.request import Request, urlopen
 
+from lib.config_authority import resolve_section, env_bool, env_int
+
 from adapters._common import (
     DEFAULT_SPARKD,
     TOKEN_FILE,
@@ -35,8 +37,13 @@ from adapters._common import (
 )
 
 STATE_DIR = Path.home() / ".spark" / "adapters"
+TUNEABLES_FILE = Path.home() / ".spark" / "tuneables.json"
 
 MAX_TOOL_RESULT_CHARS = 4000
+SKIP_SUCCESSFUL_TOOL_RESULTS = True
+SKIP_READ_ONLY_TOOL_CALLS = True
+KEEP_LARGE_TOOL_RESULTS_ON_ERROR_ONLY = True
+MIN_TOOL_RESULT_CHARS_FOR_CAPTURE = 0
 
 DEFAULT_REPORT_DIR = Path.home() / ".openclaw" / "workspace" / "spark_reports"
 DEFAULT_HOOK_EVENTS_FILE = Path(
@@ -51,6 +58,88 @@ HEARTBEAT_PATH = Path(
     os.environ.get("SPARK_OPENCLAW_HEARTBEAT_PATH")
     or (Path.home() / ".spark" / "logs" / "openclaw_tailer_heartbeat.jsonl")
 )
+
+
+def _as_bool(value, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in ("1", "true", "yes", "on"):
+        return True
+    if text in ("0", "false", "no", "off"):
+        return False
+    return bool(default)
+
+
+def _load_openclaw_tailer_config() -> dict:
+    resolved = resolve_section(
+        "openclaw_tailer",
+        runtime_path=TUNEABLES_FILE,
+        env_overrides={
+            "skip_successful_tool_results": env_bool("SPARK_OPENCLAW_SKIP_SUCCESSFUL_TOOL_RESULTS"),
+            "skip_read_only_tool_calls": env_bool("SPARK_OPENCLAW_SKIP_READ_ONLY_TOOL_CALLS"),
+            "max_tool_result_chars": env_int("SPARK_OPENCLAW_MAX_TOOL_RESULT_CHARS", lo=200, hi=50000),
+            "keep_large_tool_results_on_error_only": env_bool("SPARK_OPENCLAW_KEEP_LARGE_ON_ERROR_ONLY"),
+            "min_tool_result_chars_for_capture": env_int("SPARK_OPENCLAW_MIN_TOOL_RESULT_CHARS", lo=0, hi=20000),
+        },
+    )
+    return dict(resolved.data or {})
+
+
+def _apply_openclaw_tailer_config(cfg: dict) -> dict:
+    global MAX_TOOL_RESULT_CHARS
+    global SKIP_SUCCESSFUL_TOOL_RESULTS
+    global SKIP_READ_ONLY_TOOL_CALLS
+    global KEEP_LARGE_TOOL_RESULTS_ON_ERROR_ONLY
+    global MIN_TOOL_RESULT_CHARS_FOR_CAPTURE
+
+    applied = []
+    warnings = []
+    if not isinstance(cfg, dict):
+        return {"applied": applied, "warnings": warnings}
+
+    if "skip_successful_tool_results" in cfg:
+        SKIP_SUCCESSFUL_TOOL_RESULTS = _as_bool(cfg.get("skip_successful_tool_results"), True)
+        applied.append("skip_successful_tool_results")
+    if "skip_read_only_tool_calls" in cfg:
+        SKIP_READ_ONLY_TOOL_CALLS = _as_bool(cfg.get("skip_read_only_tool_calls"), True)
+        applied.append("skip_read_only_tool_calls")
+    if "keep_large_tool_results_on_error_only" in cfg:
+        KEEP_LARGE_TOOL_RESULTS_ON_ERROR_ONLY = _as_bool(cfg.get("keep_large_tool_results_on_error_only"), True)
+        applied.append("keep_large_tool_results_on_error_only")
+    if "max_tool_result_chars" in cfg:
+        try:
+            MAX_TOOL_RESULT_CHARS = max(200, min(50000, int(cfg.get("max_tool_result_chars") or 4000)))
+            applied.append("max_tool_result_chars")
+        except Exception:
+            warnings.append("invalid_max_tool_result_chars")
+    if "min_tool_result_chars_for_capture" in cfg:
+        try:
+            MIN_TOOL_RESULT_CHARS_FOR_CAPTURE = max(0, min(20000, int(cfg.get("min_tool_result_chars_for_capture") or 0)))
+            applied.append("min_tool_result_chars_for_capture")
+        except Exception:
+            warnings.append("invalid_min_tool_result_chars_for_capture")
+
+    if MIN_TOOL_RESULT_CHARS_FOR_CAPTURE > MAX_TOOL_RESULT_CHARS:
+        MIN_TOOL_RESULT_CHARS_FOR_CAPTURE = MAX_TOOL_RESULT_CHARS
+        warnings.append("min_tool_result_chars_for_capture_clamped_to_max")
+
+    return {"applied": applied, "warnings": warnings}
+
+
+def get_openclaw_tailer_config() -> dict:
+    return {
+        "skip_successful_tool_results": bool(SKIP_SUCCESSFUL_TOOL_RESULTS),
+        "skip_read_only_tool_calls": bool(SKIP_READ_ONLY_TOOL_CALLS),
+        "max_tool_result_chars": int(MAX_TOOL_RESULT_CHARS),
+        "keep_large_tool_results_on_error_only": bool(KEEP_LARGE_TOOL_RESULTS_ON_ERROR_ONLY),
+        "min_tool_result_chars_for_capture": int(MIN_TOOL_RESULT_CHARS_FOR_CAPTURE),
+    }
+
+
+_apply_openclaw_tailer_config(_load_openclaw_tailer_config())
 
 
 def _append_jsonl(path: Path, row: dict):
@@ -100,10 +189,9 @@ def _parse_ts(x):
     return time.time()
 
 
-def _truncate_content(content) -> str:
-    """Extract text from content blocks and truncate to MAX_TOOL_RESULT_CHARS."""
+def _extract_content_text(content) -> str:
     if isinstance(content, str):
-        text = content
+        return content
     elif isinstance(content, list):
         parts = []
         for block in content:
@@ -111,9 +199,13 @@ def _truncate_content(content) -> str:
                 parts.append(block.get("text", ""))
             elif isinstance(block, str):
                 parts.append(block)
-        text = "\n".join(parts)
-    else:
-        text = str(content) if content else ""
+        return "\n".join(parts)
+    return str(content) if content else ""
+
+
+def _truncate_content(content) -> str:
+    """Extract text from content blocks and truncate to MAX_TOOL_RESULT_CHARS."""
+    text = _extract_content_text(content)
     if len(text) > MAX_TOOL_RESULT_CHARS:
         return text[:MAX_TOOL_RESULT_CHARS] + f"\n... [truncated {len(text) - MAX_TOOL_RESULT_CHARS} chars]"
     return text
@@ -148,20 +240,18 @@ def _should_skip_event(obj: dict) -> bool:
     # Skip successful tool results (keep errors)
     if role == "toolResult":
         if not msg.get("isError", False):
-            # Keep tool results that are short (likely meaningful responses)
-            text = ""
-            if isinstance(content, str):
-                text = content
-            elif isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text += block.get("text", "")
-            # Skip large routine tool outputs (file reads, exec outputs)
-            if len(text) > 2000:
+            text = _extract_content_text(content)
+            text_len = len(text)
+            if text_len < MIN_TOOL_RESULT_CHARS_FOR_CAPTURE:
                 return True
-    
+            if SKIP_SUCCESSFUL_TOOL_RESULTS:
+                if not KEEP_LARGE_TOOL_RESULTS_ON_ERROR_ONLY:
+                    return True
+                if text_len > MAX_TOOL_RESULT_CHARS:
+                    return True
+
     # Skip routine Read tool calls from assistant
-    if role == "assistant" and isinstance(content, list):
+    if SKIP_READ_ONLY_TOOL_CALLS and role == "assistant" and isinstance(content, list):
         # If the only tool calls are Read, skip
         tool_calls = [b for b in content if isinstance(b, dict) and b.get("type") == "toolCall"]
         text_blocks = [b for b in content if isinstance(b, dict) and b.get("type") == "text"]
@@ -671,6 +761,7 @@ def main():
 
     include_subagents = args.include_subagents and not args.no_subagents
     token = _resolve_token(args.token)
+    _apply_openclaw_tailer_config(_load_openclaw_tailer_config())
 
     report_dir = Path(args.report_dir) if args.report_dir else DEFAULT_REPORT_DIR
     hook_events_file = Path(args.hook_events_file) if args.hook_events_file else DEFAULT_HOOK_EVENTS_FILE
@@ -783,6 +874,10 @@ def main():
                             if args.verbose:
                                 print(f"[openclaw_tailer] POST error: {post_err}", flush=True)
                             break
+                        sent += 1
+                        continue
+
+                    if _should_skip_event(obj):
                         sent += 1
                         continue
 

@@ -306,7 +306,7 @@
     "advice_feedback_min_s": 600,
     "pretool_budget_ms": 2500.0,
     "eidos_enforce_block": false,
-    "hook_payload_text_limit": 3000,
+    "hook_payload_text_limit": 6000,
     "outcome_checkin_enabled": false,
     "outcome_checkin_prompt": false
   },
@@ -567,6 +567,13 @@
     "suggest_threshold": 0.68,
     "max_capture_chars": 1200,
     "context_capture_chars": 520
+  },
+  "openclaw_tailer": {
+    "skip_successful_tool_results": true,
+    "skip_read_only_tool_calls": true,
+    "max_tool_result_chars": 4000,
+    "keep_large_tool_results_on_error_only": true,
+    "min_tool_result_chars_for_capture": 0
   },
   "request_tracker": {
     "max_pending": 50,

@@ -41,6 +41,15 @@ Key metrics:
 - `post_unknown_exit`: count of post events where exit code could not be inferred
 - `observe_success_ratio`: successful `observe.py` calls / total observe calls
 - `observe_latency_p95_ms`: p95 hook forwarding latency
+- `observe_forwarding_enabled`: `true` in observe mode, `false` in shadow mode
+
+Operational guardrails:
+- singleton lock prevents multiple bridge processes (`--lock-file`, default `~/.spark/adapters/codex_hook_bridge.lock`)
+- startup warning row is emitted when running long-lived shadow mode (`event=startup_warning`)
+
+Default payload capture limits (relaxed for context retention):
+- input/tool args: `6000` chars (`SPARK_CODEX_HOOK_INPUT_TEXT_LIMIT`)
+- tool output: `12000` chars (`SPARK_CODEX_HOOK_OUTPUT_TEXT_LIMIT`)
 
 ## Hypothesis Gates
 
